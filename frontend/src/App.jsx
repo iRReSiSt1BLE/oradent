@@ -8,7 +8,7 @@ function App() {
     const checkBackend = async () => {
         try {
             setError('');
-            const response = await fetch('http://localhost:3000/api/health');
+            const response = await fetch('/api/health');
             const data = await response.json();
             setHealthResult(data);
         } catch (err) {
@@ -20,7 +20,7 @@ function App() {
     const checkDatabase = async () => {
         try {
             setError('');
-            const response = await fetch('http://localhost:3000/api/db-test');
+            const response = await fetch('/api/db-test');
             const data = await response.json();
             setDbResult(data);
         } catch (err) {

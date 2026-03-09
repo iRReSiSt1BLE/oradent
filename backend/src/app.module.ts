@@ -1,19 +1,29 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
+
 import { HealthController } from './health/health.controller';
 import { DatabaseController } from './database/database.controller';
-import { User } from './database/entities/user.entity';
-import { UsersService } from './database/users.service';
 import { UsersController } from './database/users.controller';
+import { UsersService } from './database/users.service';
+import { User } from './database/entities/user.entity';
 
 @Module({
     imports: [
-        ConfigModule.forRoot(),
+        ConfigModule.forRoot({
+            isGlobal: true,
+        }),
+
+        ServeStaticModule.forRoot({
+            rootPath: join(__dirname, '../../frontend/dist'),
+            exclude: ['/api*'],
+        }),
 
         TypeOrmModule.forRootAsync({
-            inject: [ConfigService],
             imports: [ConfigModule],
+            inject: [ConfigService],
             useFactory: (configService: ConfigService) => ({
                 type: 'mysql',
                 host: configService.get<string>('DB_HOST'),
@@ -29,15 +39,7 @@ import { UsersController } from './database/users.controller';
 
         TypeOrmModule.forFeature([User]),
     ],
-
-    controllers: [
-        HealthController,
-        DatabaseController,
-        UsersController
-    ],
-
-    providers: [
-        UsersService
-    ],
+    controllers: [HealthController, DatabaseController, UsersController],
+    providers: [UsersService],
 })
 export class AppModule {}
