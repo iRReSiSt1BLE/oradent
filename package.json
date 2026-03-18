@@ -4,6 +4,6 @@
   "scripts": {
     "install:all": "npm --prefix frontend install && npm --prefix backend install",
     "build": "npm --prefix frontend run build && npm --prefix backend run build",
-    "start": "node backend/dist/main"
+    "start": "node backend/dist/main.js"
   }
 }
