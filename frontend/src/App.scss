@@ -182,3 +182,10 @@
     border-right-color: var(--border);
   }
 }
+.app-layout {
+  min-height: 100vh;
+
+  &__main {
+    min-height: calc(100vh - 88px);
+  }
+}

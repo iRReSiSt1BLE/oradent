@@ -22,27 +22,16 @@ export class User {
     @Column({ type: 'varchar', length: 255, nullable: true })
     passwordHash: string | null;
 
-    @Column({
-        type: 'enum',
-        enum: UserRole,
-        default: UserRole.PATIENT,
-    })
+    @Column({ type: 'enum', enum: UserRole, default: UserRole.PATIENT })
     role: UserRole;
 
-    @Column({
-        type: 'enum',
-        enum: AuthProvider,
-        default: AuthProvider.LOCAL,
-    })
+    @Column({ type: 'enum', enum: AuthProvider, default: AuthProvider.LOCAL })
     authProvider: AuthProvider;
 
     @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
     googleId: string | null;
 
-    @OneToOne(() => Patient, (patient) => patient.user, {
-        nullable: true,
-        cascade: false,
-    })
+    @OneToOne(() => Patient, { nullable: true, cascade: true })
     @JoinColumn()
     patient: Patient | null;
 

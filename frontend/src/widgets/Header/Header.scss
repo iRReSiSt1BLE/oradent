@@ -1,0 +1,71 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(18px);
+  background: rgba(15, 23, 42, 0.72);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+
+  &__container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 88px;
+  }
+
+  &__logo {
+    font-size: 24px;
+    font-weight: 800;
+    color: #f8fafc;
+    letter-spacing: 0.02em;
+  }
+
+  &__nav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  &__link {
+    padding: 10px 14px;
+    border-radius: 12px;
+    color: #cbd5e1;
+    transition: background 0.2s ease, color 0.2s ease;
+
+    &:hover {
+      background: rgba(30, 41, 59, 0.9);
+      color: #f8fafc;
+    }
+
+    &--active {
+      background: rgba(37, 99, 235, 0.18);
+      color: #dbeafe;
+    }
+  }
+
+  &__logout {
+    padding: 10px 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .header {
+    &__container {
+      align-items: flex-start;
+      flex-direction: column;
+      justify-content: center;
+      padding-top: 14px;
+      padding-bottom: 14px;
+    }
+
+    &__nav {
+      width: 100%;
+    }
+
+    &__logout {
+      width: 100%;
+    }
+  }
+}

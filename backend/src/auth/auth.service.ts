@@ -18,6 +18,7 @@ import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { PendingRegistrationService } from './pending-registration.service';
 import { MailService } from '../mail/mail.service';
 
+
 @Injectable()
 export class AuthService {
     constructor(
@@ -160,6 +161,47 @@ export class AuthService {
                 authProvider: user.authProvider,
                 patientId: user.patient?.id || null,
             },
+        };
+    }
+
+
+    async googleLogin(googleUser: {
+        googleId: string;
+        email: string | null;
+        firstName: string;
+        lastName: string;
+    }) {
+        if (!googleUser.email) {
+            throw new BadRequestException('Google не повернув email');
+        }
+
+        let user = await this.userService.findByGoogleId(googleUser.googleId);
+
+        if (!user) {
+            user = await this.userService.findByEmail(googleUser.email);
+
+            if (!user) {
+                throw new BadRequestException(
+                    'Акаунт із таким email не знайдено. Спочатку зареєструйтеся звичайним способом.',
+                );
+            }
+
+            user.googleId = googleUser.googleId;
+            user.authProvider = AuthProvider.GOOGLE;
+            await this.userService.save(user);
+        }
+
+        const payload = {
+            sub: user.id,
+            email: user.email,
+            role: user.role,
+        };
+
+        const accessToken = await this.jwtService.signAsync(payload);
+
+        return {
+            accessToken,
+            user,
         };
     }
 }

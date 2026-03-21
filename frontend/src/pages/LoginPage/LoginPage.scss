@@ -1,0 +1,29 @@
+@use '../RegisterPage/RegisterPage.scss';
+
+.login-page {
+  &__divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+
+    &::before,
+    &::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #334155;
+    }
+
+    span {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+  }
+
+  &__google {
+    display: inline-flex;
+    justify-content: center;
+    width: 100%;
+  }
+}

@@ -1,0 +1,88 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { login } from '../../shared/api/authApi';
+import { saveToken } from '../../shared/utils/authStorage';
+import './LoginPage.scss';
+
+export default function LoginPage() {
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const googleError = searchParams.get('googleError');
+
+        if (googleError) {
+            setError(googleError);
+        }
+    }, [searchParams]);
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        setMessage('');
+
+        try {
+            const result = await login({ email, password });
+            saveToken(result.accessToken);
+            setMessage(result.message);
+            navigate('/profile');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Помилка входу');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    return (
+        <div className="page-shell auth-page login-page">
+            <div className="container">
+                <div className="card auth-page__card">
+                    <h1>Вхід</h1>
+
+                    {message && <div className="status-box status-box--success">{message}</div>}
+                    {error && <div className="status-box status-box--error">{error}</div>}
+
+                    <form className="form-grid" onSubmit={handleSubmit}>
+                        <input
+                            className="input"
+                            type="email"
+                            placeholder="Email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                        />
+
+                        <input
+                            className="input"
+                            type="password"
+                            placeholder="Пароль"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
+
+                        <button className="button button--primary" disabled={loading} type="submit">
+                            {loading ? 'Вхід...' : 'Увійти'}
+                        </button>
+                    </form>
+
+                    <div className="login-page__divider">
+                        <span>або</span>
+                    </div>
+
+                    <a
+                        className="button button--secondary login-page__google"
+                        href="http://localhost:3000/auth/google"
+                    >
+                        Увійти через Google
+                    </a>
+                </div>
+            </div>
+        </div>
+    );
+}
