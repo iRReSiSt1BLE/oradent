@@ -1,34 +1,45 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+    Body,
+    Controller,
+    Get,
+    Param,
+    Post,
+    Req,
+    UseGuards,
+} from '@nestjs/common';
 import { AppointmentService } from './appointment.service';
-import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { CreateGuestAppointmentDto } from './dto/create-guest-appointment.dto';
+import { CreateAuthenticatedAppointmentDto } from './dto/create-authenticated-appointment.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('appointment')
 export class AppointmentController {
-  constructor(private readonly appointmentService: AppointmentService) {}
+    constructor(private readonly appointmentService: AppointmentService) {}
 
-  @Post()
-  create(@Body() createAppointmentDto: CreateAppointmentDto) {
-    return this.appointmentService.create(createAppointmentDto);
-  }
+    @Post('guest')
+    createGuestAppointment(@Body() dto: CreateGuestAppointmentDto) {
+        return this.appointmentService.createGuestAppointment(dto);
+    }
 
-  @Get()
-  findAll() {
-    return this.appointmentService.findAll();
-  }
+    @UseGuards(JwtAuthGuard)
+    @Post('authenticated')
+    createAuthenticatedAppointment(
+        @Req() req: { user: { id: string } },
+        @Body() dto: CreateAuthenticatedAppointmentDto,
+    ) {
+        return this.appointmentService.createAuthenticatedAppointment(
+            req.user.id,
+            dto,
+        );
+    }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.appointmentService.findOne(+id);
-  }
+    @Get()
+    getAllAppointments() {
+        return this.appointmentService.getAllAppointments();
+    }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateAppointmentDto: UpdateAppointmentDto) {
-    return this.appointmentService.update(+id, updateAppointmentDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.appointmentService.remove(+id);
-  }
+    @Get(':id')
+    findById(@Param('id') id: string) {
+        return this.appointmentService.findById(id);
+    }
 }

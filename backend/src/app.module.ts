@@ -1,15 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
-
-import { UserModule } from './user/user.module';
-import { PatientModule } from './patient/patient.module';
-import { AuthModule } from './auth/auth.module';
 import { AppointmentModule } from './appointment/appointment.module';
 import { VideoModule } from './video/video.module';
 
+
+import { AuthModule } from './auth/auth.module';
+import { UserModule } from './user/user.module';
+import { PatientModule } from './patient/patient.module';
+import { VerificationModule } from './verification/verification.module';
+
+import { PatientMedicalRecordModule } from './patient-medical-record/patient-medical-record.module';
+import { PhoneVerificationModule } from './phone-verification/phone-verification.module';
 
 
 @Module({
@@ -28,7 +30,6 @@ import { VideoModule } from './video/video.module';
                 username: configService.get<string>('DB_USER'),
                 password: configService.get<string>('DB_PASSWORD'),
                 database: configService.get<string>('DB_NAME'),
-                entities: [__dirname + '/**/*.entity{.ts,.js}'],
                 autoLoadEntities: true,
                 synchronize: true,
             }),
@@ -39,7 +40,9 @@ import { VideoModule } from './video/video.module';
         AuthModule,
         AppointmentModule,
         VideoModule,
-
+        VerificationModule,
+        PatientMedicalRecordModule,
+        PhoneVerificationModule
 
     ],
     controllers: [],

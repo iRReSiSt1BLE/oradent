@@ -1,24 +1,55 @@
-import {Column, Entity, OneToMany, PrimaryGeneratedColumn} from "typeorm";
-import {Appointment} from "../../appointment/entities/appointment.entity";
+import {
+    Column,
+    CreateDateColumn,
+    Entity,
+    OneToMany,
+    OneToOne,
+    PrimaryGeneratedColumn,
+    UpdateDateColumn,
+} from 'typeorm';
+import { User } from '../../user/entities/user.entity';
+import { Appointment } from '../../appointment/entities/appointment.entity';
+import { PatientMedicalRecord } from '../../patient-medical-record/entities/patient-medical-record.entity';
 
-@Entity()
+@Entity('patients')
 export class Patient {
-    @PrimaryGeneratedColumn({name: 'ID'})
-    id: number;
+    @PrimaryGeneratedColumn('uuid')
+    id: string;
 
-    @Column()
-    name: string;
-
-    @Column()
+    @Column({ type: 'varchar', length: 100 })
     lastName: string;
 
-    @Column()
-    middleName: string;
+    @Column({ type: 'varchar', length: 100 })
+    firstName: string;
 
-    @Column()
-    phoneNumber: string;
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    middleName: string | null;
 
-    @OneToMany(()=>Appointment, (appointment)=> appointment.patient,
-        {onDelete: 'CASCADE'})
+    @Column({ type: 'varchar', length: 30, nullable: true, unique: true })
+    phone: string | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    email: string | null;
+
+    @Column({ type: 'boolean', default: false })
+    phoneVerified: boolean;
+
+    @OneToOne(() => User, (user) => user.patient, { nullable: true })
+    user: User | null;
+
+    @OneToMany(() => Appointment, (appointment) => appointment.patient)
     appointments: Appointment[];
+
+    @OneToOne(
+        () => PatientMedicalRecord,
+        (medicalRecord) => medicalRecord.patient,
+        { nullable: true },
+    )
+    medicalRecord: PatientMedicalRecord | null;
+
+    @CreateDateColumn()
+    createdAt: Date;
+
+    @UpdateDateColumn()
+    updatedAt: Date;
 }
