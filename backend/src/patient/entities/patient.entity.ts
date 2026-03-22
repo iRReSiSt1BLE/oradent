@@ -47,9 +47,4 @@ export class Patient {
     )
     medicalRecord: PatientMedicalRecord | null;
 
-    @CreateDateColumn()
-    createdAt: Date;
-
-    @UpdateDateColumn()
-    updatedAt: Date;
 }

@@ -42,6 +42,6 @@ import { MailModule } from '../mail/mail.module';
         GoogleAuthGuard,
         PendingRegistrationService,
     ],
-    exports: [AuthService, JwtModule],
+    exports: [AuthService, JwtModule, PendingRegistrationService],
 })
 export class AuthModule {}

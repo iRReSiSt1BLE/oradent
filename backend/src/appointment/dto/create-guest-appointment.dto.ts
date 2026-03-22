@@ -33,7 +33,4 @@ export class CreateGuestAppointmentDto {
     @IsString()
     appointmentDate?: string;
 
-    @IsOptional()
-    @IsString()
-    reason?: string;
 }

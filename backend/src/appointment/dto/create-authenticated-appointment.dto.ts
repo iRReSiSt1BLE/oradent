@@ -17,7 +17,4 @@ export class CreateAuthenticatedAppointmentDto {
     @IsString()
     appointmentDate?: string;
 
-    @IsOptional()
-    @IsString()
-    reason?: string;
 }

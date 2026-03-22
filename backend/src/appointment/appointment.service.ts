@@ -49,7 +49,6 @@ export class AppointmentService {
             appointmentDate: dto.appointmentDate
                 ? new Date(dto.appointmentDate)
                 : null,
-            reason: dto.reason || null,
             status: 'BOOKED',
             source: 'GUEST',
         });
@@ -110,7 +109,6 @@ export class AppointmentService {
             appointmentDate: dto.appointmentDate
                 ? new Date(dto.appointmentDate)
                 : null,
-            reason: dto.reason || null,
             status: 'BOOKED',
             source: 'AUTHENTICATED',
         });

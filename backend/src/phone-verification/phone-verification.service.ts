@@ -1,7 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { LessThan, Repository } from 'typeorm';
 import { PhoneVerificationSession } from './entities/phone-verification-session.entity';
 import { PhoneVerificationStatus } from '../common/enums/phone-verification-status.enum';
 
@@ -9,21 +8,17 @@ import { PhoneVerificationStatus } from '../common/enums/phone-verification-stat
 export class PhoneVerificationService {
     constructor(
         @InjectRepository(PhoneVerificationSession)
-        private readonly sessionRepository: Repository<PhoneVerificationSession>,
+        private readonly phoneVerificationRepository: Repository<PhoneVerificationSession>,
     ) {}
 
-    normalizePhone(phone: string): string {
-        return phone.replace(/[^\d+]/g, '');
-    }
-
-    async createSession(phone: string) {
-        const normalizedPhone = this.normalizePhone(phone);
-        const token = randomUUID();
-
-        const session = this.sessionRepository.create({
-            token,
-            phone: normalizedPhone,
+    async createSession(
+        phone: string,
+        telegramBotUrl: string,
+    ): Promise<PhoneVerificationSession> {
+        const entity = this.phoneVerificationRepository.create({
+            phone,
             status: PhoneVerificationStatus.PENDING,
+            telegramBotUrl,
             expiresAt: new Date(Date.now() + 10 * 60 * 1000),
             telegramUserId: null,
             telegramChatId: null,
@@ -31,108 +26,114 @@ export class PhoneVerificationService {
             verifiedAt: null,
         });
 
-        const saved = await this.sessionRepository.save(session);
-
-        return saved;
+        return this.phoneVerificationRepository.save(entity);
     }
 
-    async findByToken(token: string) {
-        const session = await this.sessionRepository.findOne({
-            where: { token },
-        });
-
-        if (!session) {
-            throw new NotFoundException('Сесію верифікації не знайдено');
-        }
-
-        return session;
+    async save(session: PhoneVerificationSession): Promise<PhoneVerificationSession> {
+        return this.phoneVerificationRepository.save(session);
     }
 
-    async findById(id: string) {
-        const session = await this.sessionRepository.findOne({
+    async findById(id: string): Promise<PhoneVerificationSession | null> {
+        return this.phoneVerificationRepository.findOne({
             where: { id },
         });
-
-        if (!session) {
-            throw new NotFoundException('Сесію верифікації не знайдено');
-        }
-
-        return session;
     }
 
-    async attachTelegramUser(
-        token: string,
-        params: {
-            telegramUserId: string;
-            telegramChatId: string;
-            telegramUsername: string | null;
-        },
-    ) {
-        const session = await this.findByToken(token);
-
-        if (session.expiresAt.getTime() < Date.now()) {
-            session.status = PhoneVerificationStatus.EXPIRED;
-            await this.sessionRepository.save(session);
-            throw new BadRequestException('Сесія верифікації прострочена');
-        }
-
-        session.telegramUserId = params.telegramUserId;
-        session.telegramChatId = params.telegramChatId;
-        session.telegramUsername = params.telegramUsername;
-        session.status = PhoneVerificationStatus.TELEGRAM_CONNECTED;
-
-        return this.sessionRepository.save(session);
-    }
-
-    async findLatestPendingByTelegramChatId(chatId: string) {
-        return this.sessionRepository.findOne({
-            where: {
-                telegramChatId: chatId,
-            },
+    async findActiveByTelegramChatId(
+        telegramChatId: string,
+    ): Promise<PhoneVerificationSession | null> {
+        return this.phoneVerificationRepository.findOne({
+            where: [
+                {
+                    telegramChatId,
+                    status: PhoneVerificationStatus.TELEGRAM_CONNECTED,
+                },
+                {
+                    telegramChatId,
+                    status: PhoneVerificationStatus.PENDING,
+                },
+            ],
             order: {
                 createdAt: 'DESC',
             },
         });
     }
 
-    async verifyByTelegramContact(chatId: string, contactPhone: string) {
-        const session = await this.findLatestPendingByTelegramChatId(chatId);
+    async attachTelegramChat(
+        sessionId: string,
+        telegramData: {
+            telegramUserId?: string | null;
+            telegramChatId?: string | null;
+            telegramUsername?: string | null;
+        },
+    ): Promise<PhoneVerificationSession> {
+        const session = await this.findById(sessionId);
 
         if (!session) {
-            throw new NotFoundException('Активну Telegram-сесію не знайдено');
+            throw new BadRequestException('Сесію не знайдено');
         }
 
         if (session.expiresAt.getTime() < Date.now()) {
-            session.status = PhoneVerificationStatus.EXPIRED;
-            await this.sessionRepository.save(session);
-            throw new BadRequestException('Сесія верифікації прострочена');
+            await this.phoneVerificationRepository.delete(session.id);
+            throw new BadRequestException('Сесія підтвердження прострочена');
         }
 
-        const normalizedContactPhone = this.normalizePhone(contactPhone);
-        const normalizedSessionPhone = this.normalizePhone(session.phone);
+        session.telegramUserId = telegramData.telegramUserId ?? session.telegramUserId;
+        session.telegramChatId = telegramData.telegramChatId ?? session.telegramChatId;
+        session.telegramUsername = telegramData.telegramUsername ?? session.telegramUsername;
+        session.status = PhoneVerificationStatus.TELEGRAM_CONNECTED;
 
-        if (normalizedContactPhone !== normalizedSessionPhone) {
-            session.status = PhoneVerificationStatus.FAILED;
-            await this.sessionRepository.save(session);
-            throw new BadRequestException('Номер телефону не збігається');
+        return this.phoneVerificationRepository.save(session);
+    }
+
+    async markVerified(
+        id: string,
+        telegramData?: {
+            telegramUserId?: string | null;
+            telegramChatId?: string | null;
+            telegramUsername?: string | null;
+        },
+    ): Promise<void> {
+        const session = await this.findById(id);
+
+        if (!session) {
+            throw new BadRequestException('Сесію не знайдено');
         }
 
         session.status = PhoneVerificationStatus.VERIFIED;
         session.verifiedAt = new Date();
+        session.telegramUserId = telegramData?.telegramUserId ?? session.telegramUserId;
+        session.telegramChatId = telegramData?.telegramChatId ?? session.telegramChatId;
+        session.telegramUsername = telegramData?.telegramUsername ?? session.telegramUsername;
 
-        return this.sessionRepository.save(session);
+        await this.phoneVerificationRepository.save(session);
     }
 
-    async ensureVerified(sessionId: string, phone: string) {
-        const session = await this.findById(sessionId);
+    async ensureVerified(id: string, phone: string): Promise<void> {
+        const session = await this.findById(id);
 
+        if (!session) {
+            throw new BadRequestException('Сесію підтвердження не знайдено');
+        }
+
+        if (session.expiresAt.getTime() < Date.now()) {
+            await this.phoneVerificationRepository.delete(session.id);
+            throw new BadRequestException('Сесія підтвердження прострочена');
+        }
+
+        if (session.phone !== phone) {
+            throw new BadRequestException('Номер телефону не збігається');
+        }
         if (session.status !== PhoneVerificationStatus.VERIFIED) {
-            throw new BadRequestException('Телефон ще не підтверджено');
+            throw new BadRequestException('Номер телефону ще не підтверджено');
         }
 
-        if (this.normalizePhone(session.phone) !== this.normalizePhone(phone)) {
-            throw new BadRequestException('Сесія підтвердження не відповідає номеру');
-        }
-        return session;
+        await this.phoneVerificationRepository.delete(session.id);
+    }
+
+    async deleteExpired(): Promise<void> {
+        await this.phoneVerificationRepository.delete({
+            expiresAt: LessThan(new Date()),
+        });
     }
 }

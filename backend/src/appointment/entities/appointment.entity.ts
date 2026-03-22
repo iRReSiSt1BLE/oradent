@@ -28,9 +28,6 @@ export class Appointment {
     @Column({ type: 'datetime', nullable: true })
     appointmentDate: Date | null;
 
-    @Column({ type: 'text', nullable: true })
-    reason: string | null;
-
     @Column({ type: 'varchar', length: 50, default: 'BOOKED' })
     status: string;
 

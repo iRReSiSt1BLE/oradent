@@ -12,6 +12,8 @@ import { VerificationModule } from './verification/verification.module';
 
 import { PatientMedicalRecordModule } from './patient-medical-record/patient-medical-record.module';
 import { PhoneVerificationModule } from './phone-verification/phone-verification.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { CleanupModule } from './cleanup/cleanup.module';
 
 
 @Module({
@@ -34,6 +36,8 @@ import { PhoneVerificationModule } from './phone-verification/phone-verification
                 synchronize: true,
             }),
         }),
+        ScheduleModule.forRoot(),
+        CleanupModule,
 
         UserModule,
         PatientModule,

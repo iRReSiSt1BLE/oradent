@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     createAuthenticatedAppointment,
     createGuestAppointment,
@@ -7,8 +7,10 @@ import {
     getPhoneVerificationStatus,
     startPhoneVerification,
 } from '../../shared/api/phoneVerificationApi';
+import { getMyPatient, verifyAndLinkPhone } from '../../shared/api/patientApi';
 import { getToken } from '../../shared/utils/authStorage';
 import './AppointmentPage.scss';
+import AlertToast from "../../widgets/AlertToast/AlertToast.tsx";
 
 type Mode = 'guest' | 'authenticated';
 
@@ -16,6 +18,7 @@ export default function AppointmentPage() {
     const token = getToken();
 
     const [mode, setMode] = useState<Mode>(token ? 'authenticated' : 'guest');
+    const [patient, setPatient] = useState<any>(null);
 
     const [guestForm, setGuestForm] = useState({
         lastName: '',
@@ -25,143 +28,286 @@ export default function AppointmentPage() {
         doctorId: '',
         serviceId: '',
         appointmentDate: '',
-        reason: '',
     });
 
     const [authForm, setAuthForm] = useState({
+        phone: '',
         doctorId: '',
         serviceId: '',
         appointmentDate: '',
-        reason: '',
     });
 
-    const [phoneForVerification, setPhoneForVerification] = useState('');
-    const [sessionId, setSessionId] = useState('');
-    const [telegramBotUrl, setTelegramBotUrl] = useState('');
-    const [telegramStatus, setTelegramStatus] = useState('');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
-    async function handleStartVerification(phone: string) {
-        setError('');
-        setMessage('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
+    const [verificationLoadingText, setVerificationLoadingText] = useState('');
+    const [, setSessionId] = useState('');
+    const [telegramBotUrl, setTelegramBotUrl] = useState('');
+    const [, setVerificationMode] = useState<Mode | null>(null);
 
-        try {
-            const result = await startPhoneVerification(phone);
-            setSessionId(result.sessionId);
-            setTelegramBotUrl(result.telegramBotUrl);
-            setTelegramStatus(result.status);
-            setMessage('Верифікацію створено. Відкрий Telegram.');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Помилка старту верифікації');
+    const pendingGuestFormRef = useRef<typeof guestForm | null>(null);
+    const pendingAuthFormRef = useRef<typeof authForm | null>(null);
+    const pollingRef = useRef<number | null>(null);
+
+    const authNeedsPhone = useMemo(() => {
+        return !!token && patient && !patient.phoneVerified;
+    }, [token, patient]);
+
+    useEffect(() => {
+        async function loadPatient() {
+            if (!token) return;
+
+            try {
+                const result = await getMyPatient(token);
+                setPatient(result.patient);
+            } catch {
+                // ignore
+            }
         }
+
+        loadPatient();
+    }, [token]);
+
+    useEffect(() => {
+        return () => {
+            if (pollingRef.current) {
+                window.clearInterval(pollingRef.current);
+            }
+        };
+    }, []);
+
+    function resetVerificationState() {
+        if (pollingRef.current) {
+            window.clearInterval(pollingRef.current);
+            pollingRef.current = null;
+        }
+
+        setIsVerificationModalOpen(false);
+        setVerificationLoadingText('');
+        setSessionId('');
+        setTelegramBotUrl('');
+        setVerificationMode(null);
     }
 
-    async function handleCheckStatus() {
-        if (!sessionId) return;
-
-        try {
-            const result = await getPhoneVerificationStatus(sessionId);
-            setTelegramStatus(result.status);
-            setMessage(`Поточний статус: ${result.status}`);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Помилка перевірки статусу');
-        }
+    function clearGuestForm() {
+        setGuestForm({
+            lastName: '',
+            firstName: '',
+            middleName: '',
+            phone: '',
+            doctorId: '',
+            serviceId: '',
+            appointmentDate: '',
+        });
     }
 
-    async function handleGuestAppointment(e: React.FormEvent) {
+    function clearAuthForm() {
+        setAuthForm({
+            phone: '',
+            doctorId: '',
+            serviceId: '',
+            appointmentDate: '',
+        });
+    }
+
+    async function startAutomaticVerificationFlow(phone: string, currentMode: Mode) {
+        const verification = await startPhoneVerification(phone);
+
+        setSessionId(verification.sessionId);
+        setTelegramBotUrl(verification.telegramBotUrl);
+        setVerificationMode(currentMode);
+        setIsVerificationModalOpen(true);
+        setVerificationLoadingText('Очікуємо підтвердження номера телефону в Telegram...');
+
+        pollingRef.current = window.setInterval(async () => {
+            try {
+                const statusResult = await getPhoneVerificationStatus(verification.sessionId);
+
+                if (statusResult.status === 'VERIFIED') {
+                    if (pollingRef.current) {
+                        window.clearInterval(pollingRef.current);
+                        pollingRef.current = null;
+                    }
+
+                    setVerificationLoadingText('Номер підтверджено. Завершуємо запис...');
+
+                    if (currentMode === 'guest' && pendingGuestFormRef.current) {
+                        const form = pendingGuestFormRef.current;
+
+                        await createGuestAppointment({
+                            lastName: form.lastName,
+                            firstName: form.firstName,
+                            middleName: form.middleName || undefined,
+                            phone: form.phone,
+                            phoneVerificationSessionId: verification.sessionId,
+                            doctorId: form.doctorId || undefined,
+                            serviceId: form.serviceId || undefined,
+                            appointmentDate: form.appointmentDate || undefined,
+                        });
+
+                        clearGuestForm();
+                        pendingGuestFormRef.current = null;
+                        setMessage('Гостьовий запис успішно створено');
+                    }
+
+                    if (currentMode === 'authenticated' && pendingAuthFormRef.current && token) {
+                        const form = pendingAuthFormRef.current;
+
+                        await verifyAndLinkPhone(token, form.phone, verification.sessionId);
+
+                        const appointmentResult = await createAuthenticatedAppointment(token, {
+                            doctorId: form.doctorId || undefined,
+                            serviceId: form.serviceId || undefined,
+                            appointmentDate: form.appointmentDate || undefined,
+                        });
+
+                        const me = await getMyPatient(token);
+                        setPatient(me.patient);
+
+                        clearAuthForm();
+                        pendingAuthFormRef.current = null;
+                        setMessage((appointmentResult as any).message || 'Запис успішно створено');
+                    }
+
+                    resetVerificationState();
+                    setIsSubmitting(false);
+                }
+            } catch (err) {
+                if (pollingRef.current) {
+                    window.clearInterval(pollingRef.current);
+                    pollingRef.current = null;
+                }
+
+                resetVerificationState();
+                setIsSubmitting(false);
+                setError(err instanceof Error ? err.message : 'Помилка під час підтвердження');
+            }
+        }, 2000);
+    }
+
+    async function handleGuestSubmit(e: React.FormEvent) {
         e.preventDefault();
+        setMessage('');
+        setError('');
+        setIsSubmitting(true);
 
         try {
-            const result = await createGuestAppointment({
-                lastName: guestForm.lastName,
-                firstName: guestForm.firstName,
-                middleName: guestForm.middleName || undefined,
-                phone: guestForm.phone,
-                phoneVerificationSessionId: sessionId,
-                doctorId: guestForm.doctorId || undefined,
-                serviceId: guestForm.serviceId || undefined,
-                appointmentDate: guestForm.appointmentDate || undefined,
-                reason: guestForm.reason || undefined,
-            });
-
-            setMessage((result as any).message || 'Гостьовий запис створено');
+            pendingGuestFormRef.current = guestForm;
+            await startAutomaticVerificationFlow(guestForm.phone, 'guest');
         } catch (err) {
+            setIsSubmitting(false);
             setError(err instanceof Error ? err.message : 'Помилка створення запису');
         }
     }
 
-    async function handleAuthenticatedAppointment(e: React.FormEvent) {
+    async function handleAuthenticatedSubmit(e: React.FormEvent) {
         e.preventDefault();
-
-        if (!token) {
-            setError('Спочатку увійди в систему');
-            return;
-        }
+        setMessage('');
+        setError('');
+        setIsSubmitting(true);
 
         try {
-            const result = await createAuthenticatedAppointment(token, {
-                phoneVerificationSessionId: sessionId || undefined,
-                doctorId: authForm.doctorId || undefined,
-                serviceId: authForm.serviceId || undefined,
-                appointmentDate: authForm.appointmentDate || undefined,
-                reason: authForm.reason || undefined,
-            });
+            if (!token) {
+                throw new Error('Спочатку увійди в систему');
+            }
 
-            setMessage((result as any).message || 'Запис створено');
+            if (patient?.phoneVerified) {
+                const result = await createAuthenticatedAppointment(token, {
+                    doctorId: authForm.doctorId || undefined,
+                    serviceId: authForm.serviceId || undefined,
+                    appointmentDate: authForm.appointmentDate || undefined,
+                });
+
+                clearAuthForm();
+                setMessage((result as any).message || 'Запис успішно створено');
+                setIsSubmitting(false);
+                return;
+            }
+
+            pendingAuthFormRef.current = authForm;
+            await startAutomaticVerificationFlow(authForm.phone, 'authenticated');
         } catch (err) {
+            setIsSubmitting(false);
             setError(err instanceof Error ? err.message : 'Помилка створення запису');
         }
     }
 
     return (
-        <div className="page-shell appointment-page">
-            <div className="container">
-                <div className="card appointment-page__card">
-                    <div className="appointment-page__header">
-                        <div>
-                            <h1>Запис на прийом</h1>
-                            <p>
-                                Гість проходить Telegram-підтвердження щоразу. Авторизований користувач —
-                                лише під час першого підтвердження номера.
-                            </p>
-                        </div>
-                        <div className="appointment-page__modes">
+        <div className="page-shell appointment-retro">
+            <div className="container appointment-retro__container">
+                <div className="appointment-retro__card">
+                    <div className="appointment-retro__header">
+                        <h1 className="appointment-retro__title">ЗАПИС НА ПРИЙОМ</h1>
+
+                        <div className="appointment-retro__modes">
                             <button
-                                className={`button ${mode === 'guest' ? 'button--primary' : 'button--secondary'}`}
+                                className={`appointment-retro__mode ${
+                                    mode === 'guest' ? 'appointment-retro__mode--active' : ''
+                                }`}
                                 onClick={() => setMode('guest')}
                                 type="button"
                             >
-                                Гість
+                                ГІСТЬ
                             </button>
+
                             <button
-                                className={`button ${
-                                    mode === 'authenticated' ? 'button--primary' : 'button--secondary'
+                                className={`appointment-retro__mode ${
+                                    mode === 'authenticated' ? 'appointment-retro__mode--active' : ''
                                 }`}
                                 onClick={() => setMode('authenticated')}
                                 type="button"
                             >
-                                Авторизований
+                                АВТОРИЗОВАНИЙ
                             </button>
                         </div>
                     </div>
 
-                    {message && <div className="status-box status-box--success">{message}</div>}
-                    {error && <div className="status-box status-box--error">{error}</div>}
+                    <p className="appointment-retro__subtitle">
+                        Гість підтверджує номер кожного разу. Авторизований користувач — тільки під
+                        час першого запису.
+                    </p>
+
+                    {error && (
+                        <AlertToast
+                            message={error}
+                            variant="error"
+                            onClose={() => setError('')}
+                        />
+                    )}
+
+                    {message && (
+                        <AlertToast
+                            message={message}
+                            variant="success"
+                            onClose={() => setMessage('')}
+                        />
+                    )}
 
                     {mode === 'guest' ? (
-                        <form className="form-grid" onSubmit={handleGuestAppointment}>
-                            <div className="form-row">
+                        <form
+                            className="appointment-retro__form appointment-retro__form--guest"
+                            onSubmit={handleGuestSubmit}
+                        >
+                            <div className="appointment-retro__field">
+                                <label htmlFor="guest-lastName">ПРІЗВИЩЕ</label>
                                 <input
-                                    className="input"
+                                    id="guest-lastName"
+                                    className="appointment-retro__input"
                                     placeholder="Прізвище"
                                     value={guestForm.lastName}
                                     onChange={(e) =>
                                         setGuestForm((prev) => ({ ...prev, lastName: e.target.value }))
                                     }
                                 />
+                            </div>
+
+                            <div className="appointment-retro__field">
+                                <label htmlFor="guest-firstName">ІМ&apos;Я</label>
                                 <input
-                                    className="input"
+                                    id="guest-firstName"
+                                    className="appointment-retro__input"
                                     placeholder="Ім’я"
                                     value={guestForm.firstName}
                                     onChange={(e) =>
@@ -170,36 +316,50 @@ export default function AppointmentPage() {
                                 />
                             </div>
 
-                            <input
-                                className="input"
-                                placeholder="По батькові"
-                                value={guestForm.middleName}
-                                onChange={(e) =>
-                                    setGuestForm((prev) => ({ ...prev, middleName: e.target.value }))
-                                }
-                            />
-
-                            <input
-                                className="input"
-                                placeholder="+380..."
-                                value={guestForm.phone}
-                                onChange={(e) => {
-                                    setGuestForm((prev) => ({ ...prev, phone: e.target.value }));
-                                    setPhoneForVerification(e.target.value);
-                                }}
-                            />
-
-                            <div className="form-row">
+                            <div className="appointment-retro__field appointment-retro__field--full">
+                                <label htmlFor="guest-middleName">ПО БАТЬКОВІ</label>
                                 <input
-                                    className="input"
+                                    id="guest-middleName"
+                                    className="appointment-retro__input"
+                                    placeholder="По батькові"
+                                    value={guestForm.middleName}
+                                    onChange={(e) =>
+                                        setGuestForm((prev) => ({ ...prev, middleName: e.target.value }))
+                                    }
+                                />
+                            </div>
+
+                            <div className="appointment-retro__field appointment-retro__field--full">
+                                <label htmlFor="guest-phone">ТЕЛЕФОН</label>
+                                <input
+                                    id="guest-phone"
+                                    className="appointment-retro__input"
+                                    placeholder="+380..."
+                                    value={guestForm.phone}
+                                    onChange={(e) =>
+                                        setGuestForm((prev) => ({ ...prev, phone: e.target.value }))
+                                    }
+                                />
+                            </div>
+
+                            <div className="appointment-retro__field">
+                                <label htmlFor="guest-doctorId">DOCTOR ID</label>
+                                <input
+                                    id="guest-doctorId"
+                                    className="appointment-retro__input"
                                     placeholder="doctorId"
                                     value={guestForm.doctorId}
                                     onChange={(e) =>
                                         setGuestForm((prev) => ({ ...prev, doctorId: e.target.value }))
                                     }
                                 />
+                            </div>
+
+                            <div className="appointment-retro__field">
+                                <label htmlFor="guest-serviceId">SERVICE ID</label>
                                 <input
-                                    className="input"
+                                    id="guest-serviceId"
+                                    className="appointment-retro__input"
                                     placeholder="serviceId"
                                     value={guestForm.serviceId}
                                     onChange={(e) =>
@@ -208,79 +368,74 @@ export default function AppointmentPage() {
                                 />
                             </div>
 
-                            <input
-                                className="input"
-                                type="datetime-local"
-                                value={guestForm.appointmentDate}
-                                onChange={(e) =>
-                                    setGuestForm((prev) => ({ ...prev, appointmentDate: e.target.value }))
-                                }
-                            />
-
-                            <textarea
-                                className="textarea"
-                                placeholder="Причина звернення"
-                                value={guestForm.reason}
-                                onChange={(e) =>
-                                    setGuestForm((prev) => ({ ...prev, reason: e.target.value }))
-                                }
-                            />
-
-                            <div className="appointment-page__verification">
-                                <button
-                                    className="button button--secondary"
-                                    type="button"
-                                    onClick={() => handleStartVerification(phoneForVerification)}
-                                >
-                                    Старт Telegram verification
-                                </button>
-                                <button
-                                    className="button button--secondary"
-                                    type="button"
-                                    onClick={handleCheckStatus}
-                                >
-                                    Перевірити статус
-                                </button>
-
-                                {telegramBotUrl && (
-                                    <a
-                                        className="button button--primary"
-                                        href={telegramBotUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                    >
-                                        Відкрити Telegram
-                                    </a>
-                                )}
+                            <div className="appointment-retro__field appointment-retro__field--full">
+                                <label htmlFor="guest-date">ДАТА ТА ЧАС</label>
+                                <input
+                                    id="guest-date"
+                                    className="appointment-retro__input"
+                                    type="datetime-local"
+                                    value={guestForm.appointmentDate}
+                                    onChange={(e) =>
+                                        setGuestForm((prev) => ({
+                                            ...prev,
+                                            appointmentDate: e.target.value,
+                                        }))
+                                    }
+                                />
                             </div>
 
-                            <div className="appointment-page__session card">
-                                <p><b>Session ID:</b> {sessionId || '—'}</p>
-                                <p><b>Status:</b> {telegramStatus || '—'}</p>
-                            </div>
-
-                            <button className="button button--success" type="submit">
-                                Створити гостьовий запис
+                            <button
+                                className="appointment-retro__submit appointment-retro__submit--full"
+                                type="submit"
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? 'ОБРОБКА...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
                             </button>
                         </form>
                     ) : (
-                        <form className="form-grid" onSubmit={handleAuthenticatedAppointment}>
-                            <div className="status-box status-box--info">
-                                Якщо телефон у профілі ще не підтверджений, спочатку пройди Telegram verification
-                                і тільки потім створи запис.
-                            </div>
+                        <form
+                            className="appointment-retro__form appointment-retro__form--auth"
+                            onSubmit={handleAuthenticatedSubmit}
+                        >
+                            {!token && (
+                                <div className="status-box status-box--error appointment-retro__full-row">
+                                    Для авторизованого запису потрібно спочатку увійти в систему.
+                                </div>
+                            )}
 
-                            <div className="form-row">
+                            {!!token && authNeedsPhone && (
+                                <div className="appointment-retro__field appointment-retro__field--full">
+                                    <label htmlFor="auth-phone">ТЕЛЕФОН</label>
+                                    <input
+                                        id="auth-phone"
+                                        className="appointment-retro__input"
+                                        placeholder="Номер телефону"
+                                        value={authForm.phone}
+                                        onChange={(e) =>
+                                            setAuthForm((prev) => ({ ...prev, phone: e.target.value }))
+                                        }
+                                    />
+                                </div>
+                            )}
+
+                            <div className="appointment-retro__field">
+                                <label htmlFor="auth-doctorId">DOCTOR ID</label>
                                 <input
-                                    className="input"
+                                    id="auth-doctorId"
+                                    className="appointment-retro__input"
                                     placeholder="doctorId"
                                     value={authForm.doctorId}
                                     onChange={(e) =>
                                         setAuthForm((prev) => ({ ...prev, doctorId: e.target.value }))
                                     }
                                 />
+                            </div>
+
+                            <div className="appointment-retro__field">
+                                <label htmlFor="auth-serviceId">SERVICE ID</label>
                                 <input
-                                    className="input"
+                                    id="auth-serviceId"
+                                    className="appointment-retro__input"
                                     placeholder="serviceId"
                                     value={authForm.serviceId}
                                     onChange={(e) =>
@@ -289,71 +444,62 @@ export default function AppointmentPage() {
                                 />
                             </div>
 
-                            <input
-                                className="input"
-                                type="datetime-local"
-                                value={authForm.appointmentDate}
-                                onChange={(e) =>
-                                    setAuthForm((prev) => ({ ...prev, appointmentDate: e.target.value }))
-                                }
-                            />
-
-                            <textarea
-                                className="textarea"
-                                placeholder="Причина звернення"
-                                value={authForm.reason}
-                                onChange={(e) =>
-                                    setAuthForm((prev) => ({ ...prev, reason: e.target.value }))
-                                }
-                            />
-
-                            <div className="appointment-page__verification">
+                            <div className="appointment-retro__field appointment-retro__field--full">
+                                <label htmlFor="auth-date">ДАТА ТА ЧАС</label>
                                 <input
-                                    className="input"
-                                    placeholder="Номер для Telegram verification"
-                                    value={phoneForVerification}
-                                    onChange={(e) => setPhoneForVerification(e.target.value)}
+                                    id="auth-date"
+                                    className="appointment-retro__input"
+                                    type="datetime-local"
+                                    value={authForm.appointmentDate}
+                                    onChange={(e) =>
+                                        setAuthForm((prev) => ({
+                                            ...prev,
+                                            appointmentDate: e.target.value,
+                                        }))
+                                    }
                                 />
-
-                                <button
-                                    className="button button--secondary"
-                                    type="button"
-                                    onClick={() => handleStartVerification(phoneForVerification)}
-                                >
-                                    Старт Telegram verification
-                                </button>
-
-                                <button
-                                    className="button button--secondary"
-                                    type="button"
-                                    onClick={handleCheckStatus}
-                                >
-                                    Перевірити статус
-                                </button>
-
-                                {telegramBotUrl && (
-                                    <a
-                                        className="button button--primary"
-                                        href={telegramBotUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                    >
-                                        Відкрити Telegram
-                                    </a>
-                                )}
                             </div>
 
-                            <div className="appointment-page__session card">
-                                <p><b>Session ID:</b> {sessionId || '—'}</p>
-                                <p><b>Status:</b> {telegramStatus || '—'}</p>
-                            </div>
-                            <button className="button button--success" type="submit">
-                                Створити авторизований запис
+                            <button
+                                className="appointment-retro__submit appointment-retro__submit--full"
+                                type="submit"
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? 'ОБРОБКА...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
                             </button>
                         </form>
                     )}
                 </div>
             </div>
+
+            {isVerificationModalOpen && (
+                <div className="appointment-retro__modal-backdrop">
+                    <div className="appointment-retro__modal">
+                        <h2 className="appointment-retro__modal-title">ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ</h2>
+
+                        <p className="appointment-retro__modal-text">
+                            Потрібно один раз підтвердити номер у Telegram. Після цього запис на
+                            прийом завершиться автоматично.
+                        </p>
+
+                        {telegramBotUrl && (
+                            <a
+                                className="appointment-retro__telegram-button"
+                                href={telegramBotUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                ВІДКРИТИ TELEGRAM
+                            </a>
+                        )}
+
+                        <div className="appointment-retro__loader-block">
+                            <div className="appointment-retro__spinner" />
+                            <span>{verificationLoadingText}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

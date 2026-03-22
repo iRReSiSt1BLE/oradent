@@ -12,9 +12,6 @@ export class PhoneVerificationSession {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ type: 'varchar', length: 100, unique: true })
-    token: string;
-
     @Column({ type: 'varchar', length: 30 })
     phone: string;
 
@@ -24,6 +21,9 @@ export class PhoneVerificationSession {
         default: PhoneVerificationStatus.PENDING,
     })
     status: PhoneVerificationStatus;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    telegramBotUrl: string | null;
 
     @Column({ type: 'bigint', nullable: true })
     telegramUserId: string | null;

@@ -1,40 +1,38 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 import { VerificationCode } from './entities/verification-code.entity';
 import { VerificationType } from '../common/enums/verification-type.enum';
-import { MockSmsProvider } from './providers/mock-sms.provider';
 
 @Injectable()
 export class VerificationService {
     constructor(
         @InjectRepository(VerificationCode)
-        private readonly verificationRepository: Repository<VerificationCode>,
-        private readonly mockSmsProvider: MockSmsProvider,
+        private readonly verificationCodeRepository: Repository<VerificationCode>,
     ) {}
 
-    private generateCode(): string {
-        return String(Math.floor(100000 + Math.random() * 900000));
+    generateCode(): string {
+        return Math.floor(100000 + Math.random() * 900000).toString();
     }
 
     async createCode(target: string, type: VerificationType): Promise<string> {
+        await this.verificationCodeRepository.delete({
+            target,
+            type,
+        });
+
         const code = this.generateCode();
 
-        const entity = this.verificationRepository.create({
+        const entity = this.verificationCodeRepository.create({
             target,
             type,
             code,
-            isUsed: false,
             expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         });
 
-        await this.verificationRepository.save(entity);
-        return code;
-    }
+        await this.verificationCodeRepository.save(entity);
 
-    async sendPhoneCode(phone: string): Promise<void> {
-        const code = await this.createCode(phone, VerificationType.PHONE_VERIFY);
-        await this.mockSmsProvider.sendVerificationSms(phone, code);
+        return code;
     }
 
     async verifyCode(
@@ -42,25 +40,29 @@ export class VerificationService {
         type: VerificationType,
         code: string,
     ): Promise<void> {
-        const record = await this.verificationRepository.findOne({
+        const entity = await this.verificationCodeRepository.findOne({
             where: {
                 target,
                 type,
                 code,
-                isUsed: false,
             },
-            order: { createdAt: 'DESC' },
         });
 
-        if (!record) {
+        if (!entity) {
             throw new BadRequestException('Невірний код');
         }
 
-        if (record.expiresAt.getTime() < Date.now()) {
-            throw new BadRequestException('Код прострочений');
+        if (entity.expiresAt.getTime() < Date.now()) {
+            await this.verificationCodeRepository.delete(entity.id);
+            throw new BadRequestException('Термін дії коду минув');
         }
 
-        record.isUsed = true;
-        await this.verificationRepository.save(record);
+        await this.verificationCodeRepository.delete(entity.id);
+    }
+
+    async deleteExpired(): Promise<void> {
+        await this.verificationCodeRepository.delete({
+            expiresAt: LessThan(new Date()),
+        });
     }
 }

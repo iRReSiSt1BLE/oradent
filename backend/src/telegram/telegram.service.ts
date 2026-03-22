@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
+import { normalizePhone } from '../common/utils/normalize-phone.util';
 
 @Injectable()
 export class TelegramService {
@@ -13,9 +14,7 @@ export class TelegramService {
         const username = this.configService.get<string>('TELEGRAM_BOT_USERNAME');
 
         if (!username) {
-            throw new InternalServerErrorException(
-                'Не задано TELEGRAM_BOT_USERNAME',
-            );
+            throw new InternalServerErrorException('Не задано TELEGRAM_BOT_USERNAME');
         }
 
         return username;
@@ -25,97 +24,135 @@ export class TelegramService {
         const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
 
         if (!token) {
-            throw new InternalServerErrorException(
-                'Не задано TELEGRAM_BOT_TOKEN',
-            );
+            throw new InternalServerErrorException('Не задано TELEGRAM_BOT_TOKEN');
         }
 
         return token;
     }
 
-    buildStartLink(token: string): string {
-        return `https://t.me/${this.getBotUsername()}?start=verify_${token}`;
+    buildStartLink(sessionId: string): string {
+        return `https://t.me/${this.getBotUsername()}?start=${sessionId}`;
     }
 
-    async handleUpdate(update: any) {
-        const message = update?.message;
-        if (!message) return;
-
-        const chatId = String(message.chat?.id);
-        const from = message.from;
-
-        if (message.text && message.text.startsWith('/start verify_')) {
-            const token = message.text.replace('/start verify_', '').trim();
-
-            await this.phoneVerificationService.attachTelegramUser(token, {
-                telegramUserId: String(from?.id),
-                telegramChatId: chatId,
-                telegramUsername: from?.username || null,
-            });
-
-            await this.sendRequestContactMessage(chatId);
+    async handleUpdate(update: any): Promise<void> {
+        if (update?.message?.text?.startsWith('/start')) {
+            await this.handleStartCommand(update.message);
             return;
         }
 
-        if (message.contact) {
-            await this.phoneVerificationService.verifyByTelegramContact(
-                chatId,
-                message.contact.phone_number,
-            );
+        if (update?.message?.contact) {
+            await this.handleContact(update.message);
+        }
+    }
 
+    private async handleStartCommand(message: any): Promise<void> {
+        const text: string = message.text || '';
+        const parts = text.split(' ');
+        const sessionId = parts[1];
+
+        if (!sessionId) {
             await this.sendMessage(
-                chatId,
-                'Номер телефону успішно підтверджено. Можна повертатися на сайт.',
+                message.chat.id,
+                'Сесію підтвердження не передано. Повернись на сайт і відкрий Telegram ще раз.',
+            );
+            return;
+        }
+
+        try {
+            await this.phoneVerificationService.attachTelegramChat(sessionId, {
+                telegramUserId: message.from?.id ? String(message.from.id) : null,
+                telegramChatId: message.chat?.id ? String(message.chat.id) : null,
+                telegramUsername: message.from?.username || null,
+            });
+
+            await this.sendReplyKeyboard(
+                message.chat.id,
+                'Натисни кнопку нижче, щоб поділитися своїм номером телефону.',
+            );
+        } catch (error) {
+            await this.sendMessage(
+                message.chat.id,
+                error instanceof Error ? error.message : 'Не вдалося ініціалізувати підтвердження.',
             );
         }
     }
 
-    async sendRequestContactMessage(chatId: string) {
-        return this.callTelegram('sendMessage', {
-            chat_id: chatId,
-            text: 'Щоб підтвердити номер, натисніть кнопку нижче та поділіться своїм контактом.',
-            reply_markup: {
-                keyboard: [
-                    [
-                        {
-                            text: 'Поділитися контактом',
-                            request_contact: true,
-                        },
-                    ],
-                ],
-                resize_keyboard: true,
-                one_time_keyboard: true,
+    private async handleContact(message: any): Promise<void> {
+        const contact = message.contact;
+
+        const chatId = message.chat?.id ? String(message.chat.id) : null;
+        if (!chatId) {
+            return;
+        }
+
+        const session = await this.phoneVerificationService.findActiveByTelegramChatId(chatId);
+
+        if (!session) {
+            await this.sendMessage(
+                message.chat.id,
+                'Активну сесію підтвердження не знайдено. Повернись на сайт і почни ще раз.',
+            );
+            return;
+        }
+
+        const normalizedTelegramPhone = normalizePhone(contact.phone_number);
+        const normalizedSessionPhone = normalizePhone(session.phone);
+
+        if (normalizedTelegramPhone !== normalizedSessionPhone) {
+            await this.sendMessage(
+                message.chat.id,
+                'Номер телефону не збігається з номером, вказаним у формі.',
+            );
+            return;
+        }
+
+        await this.phoneVerificationService.markVerified(session.id, {
+            telegramUserId: message.from?.id ? String(message.from.id) : null,
+            telegramChatId: chatId,
+            telegramUsername: message.from?.username || null,
+        });
+
+        await this.sendMessage(
+            message.chat.id,
+            'Номер телефону успішно підтверджено. Можна повертатися на сайт.',
+        );
+    }
+
+    private async sendReplyKeyboard(chatId: string | number, text: string): Promise<void> {
+        await fetch(`https://api.telegram.org/bot${this.getBotToken()}/sendMessage`, {
+        method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
             },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text,
+                reply_markup: {
+                    keyboard: [
+                        [
+                            {
+                                text: 'Поділитися контактом',
+                                request_contact: true,
+                            },
+                        ],
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true,
+                },
+            }),
         });
     }
 
-    async sendMessage(chatId: string, text: string) {
-        return this.callTelegram('sendMessage', {
+    private async sendMessage(chatId: string | number, text: string): Promise<void> {
+        await fetch(`https://api.telegram.org/bot${this.getBotToken()}/sendMessage`, {
+        method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
             chat_id: chatId,
             text,
-        });
-    }
-
-    private async callTelegram(method: string, body: any) {
-        const botToken = this.getBotToken();
-        const url = `https://api.telegram.org/bot${botToken}/${method}`;
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.ok) {
-            throw new InternalServerErrorException(
-                `Telegram API error: ${JSON.stringify(data)}`,
-        );
-        }
-
-        return data;
-    }
+        }),
+    });
+}
 }

@@ -35,9 +35,4 @@ export class User {
     @JoinColumn()
     patient: Patient | null;
 
-    @CreateDateColumn()
-    createdAt: Date;
-
-    @UpdateDateColumn()
-    updatedAt: Date;
 }

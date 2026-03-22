@@ -18,24 +18,9 @@ export async function getMyPatient(token: string) {
     });
 }
 
-export async function setPatientPhone(token: string, phone: string) {
-    return http<{
-        ok: boolean;
-        message: string;
-        patient: {
-            id: string;
-            phone: string | null;
-            phoneVerified: boolean;
-        };
-    }>('/patient/phone', {
-        method: 'POST',
-        token,
-        body: JSON.stringify({ phone }),
-    });
-}
-
-export async function confirmPatientPhone(
+export async function verifyAndLinkPhone(
     token: string,
+    phone: string,
     phoneVerificationSessionId: string,
 ) {
     return http<{
@@ -46,9 +31,9 @@ export async function confirmPatientPhone(
             phone: string | null;
             phoneVerified: boolean;
         };
-    }>('/patient/phone/confirm', {
+    }>('/patient/phone/verify-and-link', {
         method: 'POST',
         token,
-        body: JSON.stringify({ phoneVerificationSessionId }),
+        body: JSON.stringify({ phone, phoneVerificationSessionId }),
     });
 }

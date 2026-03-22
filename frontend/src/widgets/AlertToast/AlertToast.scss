@@ -1,0 +1,151 @@
+.alert-toast {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+          0 8px 24px rgba(15, 23, 42, 0.08),
+          0 2px 8px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5e7eb;
+  margin-bottom: 14px;
+
+  &__content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px 18px;
+  }
+
+  &__accent {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 6px;
+    border-radius: 14px 0 0 14px;
+  }
+
+  &__icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  &__message {
+    flex: 1;
+    color: #1f2937;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  &__close {
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: #111827;
+    }
+  }
+
+  &__timer {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 4px;
+    width: 100%;
+    transform-origin: left;
+    animation-name: alert-toast-timer;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
+
+  &--success {
+    .alert-toast__accent {
+      background: #10b981;
+    }
+
+    .alert-toast__icon {
+      background: rgba(16, 185, 129, 0.12);
+      color: #059669;
+    }
+
+    .alert-toast__timer {
+      background: #10b981;
+    }
+  }
+
+  &--error {
+    .alert-toast__accent {
+      background: #ef4444;
+    }
+
+    .alert-toast__icon {
+      background: rgba(239, 68, 68, 0.12);
+      color: #dc2626;
+    }
+
+    .alert-toast__timer {
+      background: #ef4444;
+    }
+  }
+
+  &--info {
+    .alert-toast__accent {
+      background: #6366f1;
+    }
+
+    .alert-toast__icon {
+      background: rgba(99, 102, 241, 0.12);
+      color: #4f46e5;
+    }
+
+    .alert-toast__timer {
+      background: #6366f1;
+      box-shadow: 0 0 10px rgba(99, 102, 241, 0.45);
+    }
+  }
+}
+
+@keyframes alert-toast-timer {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .alert-toast {
+    border-radius: 12px;
+
+    &__content {
+      padding: 14px 14px 16px;
+      gap: 10px;
+    }
+
+    &__icon {
+      width: 30px;
+      height: 30px;
+      font-size: 14px;
+    }
+
+    &__message {
+      font-size: 14px;
+    }
+  }
+}
