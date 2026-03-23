@@ -79,6 +79,7 @@ export class AppointmentService {
             throw new BadRequestException('Пацієнта не знайдено');
         }
 
+
         const patient = user.patient;
 
         if (!patient.phoneVerified) {
@@ -100,6 +101,10 @@ export class AppointmentService {
 
             patient.phoneVerified = true;
             await this.patientService.save(patient);
+        }
+
+        if (!dto.doctorId || !dto.serviceId || !dto.appointmentDate) {
+            throw new BadRequestException('Потрібно заповнити лікаря, послугу і дату запису');
         }
 
         const appointment = this.appointmentRepository.create({

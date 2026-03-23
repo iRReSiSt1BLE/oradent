@@ -14,6 +14,7 @@ import { PatientMedicalRecordModule } from './patient-medical-record/patient-med
 import { PhoneVerificationModule } from './phone-verification/phone-verification.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CleanupModule } from './cleanup/cleanup.module';
+import {ProfileModule} from "./profile/profile.module";
 
 
 @Module({
@@ -46,7 +47,8 @@ import { CleanupModule } from './cleanup/cleanup.module';
         VideoModule,
         VerificationModule,
         PatientMedicalRecordModule,
-        PhoneVerificationModule
+        PhoneVerificationModule,
+        ProfileModule
 
     ],
     controllers: [],

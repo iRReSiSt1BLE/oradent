@@ -170,25 +170,34 @@ export class AuthService {
         email: string | null;
         firstName: string;
         lastName: string;
-    }) {
+    }): Promise<{ accessToken: string; user: User }> {
         if (!googleUser.email) {
             throw new BadRequestException('Google не повернув email');
         }
 
-        let user = await this.userService.findByGoogleId(googleUser.googleId);
+        const normalizedGoogleEmail = googleUser.email.trim().toLowerCase();
+
+        let user: User | null = await this.userService.findByGoogleId(googleUser.googleId);
 
         if (!user) {
-            user = await this.userService.findByEmail(googleUser.email);
+            const existingByEmail = await this.userService.findByEmail(normalizedGoogleEmail);
 
-            if (!user) {
+            if (!existingByEmail) {
                 throw new BadRequestException(
-                    'Акаунт із таким email не знайдено. Спочатку зареєструйтеся звичайним способом.',
+                    'Акаунт із таким email не знайдено. Спочатку зареєструйся звичайним способом.',
                 );
             }
 
-            user.googleId = googleUser.googleId;
-            user.authProvider = AuthProvider.GOOGLE;
-            await this.userService.save(user);
+            if (existingByEmail.googleId && existingByEmail.googleId !== googleUser.googleId) {
+                throw new BadRequestException(
+                    'Цей акаунт уже прив’язаний до іншого Google-профілю.',
+                );
+            }
+
+            existingByEmail.googleId = googleUser.googleId;
+            existingByEmail.authProvider = AuthProvider.GOOGLE;
+
+            user = await this.userService.save(existingByEmail);
         }
 
         const payload = {
@@ -197,7 +206,7 @@ export class AuthService {
             role: user.role,
         };
 
-        const accessToken = await this.jwtService.signAsync(payload);
+        const accessToken: string = await this.jwtService.signAsync(payload);
 
         return {
             accessToken,

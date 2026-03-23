@@ -2,4 +2,5 @@ export enum VerificationType {
     EMAIL_VERIFY = 'EMAIL_VERIFY',
     PHONE_VERIFY = 'PHONE_VERIFY',
     PASSWORD_RESET = 'PASSWORD_RESET',
+    EMAIL_CHANGE = 'EMAIL_CHANGE',
 }
