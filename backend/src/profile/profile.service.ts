@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ForbiddenException,
     Injectable,
     UnauthorizedException,
 } from '@nestjs/common';
@@ -16,7 +17,9 @@ import { RequestEmailChangeDto } from './dto/request-email-change.dto';
 import { ConfirmEmailChangeDto } from './dto/confirm-email-change.dto';
 import { StartPhoneChangeDto } from './dto/start-phone-change.dto';
 import { ConfirmPhoneChangeDto } from './dto/confirm-phone-change.dto';
-import {AuthProvider} from "../common/enums/auth-provider.enum";
+import { AuthProvider } from '../common/enums/auth-provider.enum';
+import { AdminService } from '../admin/admin.service';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @Injectable()
 export class ProfileService {
@@ -27,6 +30,7 @@ export class ProfileService {
         private readonly mailService: MailService,
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly telegramService: TelegramService,
+        private readonly adminService: AdminService,
     ) {}
 
     private async requireLocalPassword(userId: string, password: string) {
@@ -51,44 +55,109 @@ export class ProfileService {
         return user;
     }
 
-    async getMyProfile(userId: string) {
+    private async resolveProfileOwner(userId: string) {
         const user = await this.userService.findById(userId);
 
-        if (!user || !user.patient) {
+        if (!user) {
             throw new BadRequestException('Профіль не знайдено');
+        }
+
+        if (user.patient) {
+            return {
+                mode: 'patient' as const,
+                user,
+                patient: user.patient,
+                admin: null,
+            };
+        }
+
+        if (user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) {
+            const admin = await this.adminService.findByUserId(user.id);
+
+            if (!admin) {
+                throw new BadRequestException('Профіль адміністратора не знайдено');
+            }
+
+            return {
+                mode: 'admin' as const,
+                user,
+                patient: null,
+                admin,
+            };
+        }
+
+        throw new BadRequestException('Профіль не знайдено');
+    }
+
+    async getMyProfile(userId: string) {
+        const owner = await this.resolveProfileOwner(userId);
+
+        if (owner.mode === 'patient') {
+            return {
+                ok: true,
+                profile: {
+                    userId: owner.user.id,
+                    email: owner.user.email,
+                    authProvider: owner.user.authProvider,
+                    role: owner.user.role,
+                    patientId: owner.patient.id,
+                    lastName: owner.patient.lastName,
+                    firstName: owner.patient.firstName,
+                    middleName: owner.patient.middleName,
+                    phone: owner.patient.phone,
+                    phoneVerified: owner.patient.phoneVerified,
+                },
+            };
         }
 
         return {
             ok: true,
             profile: {
-                userId: user.id,
-                email: user.email,
-                authProvider: user.authProvider,
-                role: user.role,
-                patientId: user.patient.id,
-                lastName: user.patient.lastName,
-                firstName: user.patient.firstName,
-                middleName: user.patient.middleName,
-                phone: user.patient.phone,
-                phoneVerified: user.patient.phoneVerified,
+                userId: owner.user.id,
+                email: owner.user.email,
+                authProvider: owner.user.authProvider,
+                role: owner.user.role,
+                patientId: null,
+                lastName: owner.admin.lastName,
+                firstName: owner.admin.firstName,
+                middleName: owner.admin.middleName,
+                phone: owner.admin.phone,
+                phoneVerified: owner.admin.phoneVerified,
             },
         };
     }
 
     async updateProfile(userId: string, dto: UpdateProfileDto) {
         await this.requireLocalPassword(userId, dto.password);
+        const owner = await this.resolveProfileOwner(userId);
 
-        const user = await this.userService.findById(userId);
+        if (owner.mode === 'admin') {
+            if (owner.user.role === UserRole.ADMIN) {
+                throw new ForbiddenException('Адміністратор не може змінювати ПІБ');
+            }
 
-        if (!user || !user.patient) {
-            throw new BadRequestException('Профіль не знайдено');
+            owner.admin.lastName = dto.lastName;
+            owner.admin.firstName = dto.firstName;
+            owner.admin.middleName = dto.middleName || null;
+
+            const savedAdmin = await this.adminService['adminRepository'].save(owner.admin);
+
+            return {
+                ok: true,
+                message: 'Профіль оновлено',
+                profile: {
+                    lastName: savedAdmin.lastName,
+                    firstName: savedAdmin.firstName,
+                    middleName: savedAdmin.middleName,
+                },
+            };
         }
 
-        user.patient.lastName = dto.lastName;
-        user.patient.firstName = dto.firstName;
-        user.patient.middleName = dto.middleName || null;
+        owner.patient.lastName = dto.lastName;
+        owner.patient.firstName = dto.firstName;
+        owner.patient.middleName = dto.middleName || null;
 
-        const savedPatient = await this.patientService.save(user.patient);
+        const savedPatient = await this.patientService.save(owner.patient);
 
         return {
             ok: true,
@@ -121,6 +190,7 @@ export class ProfileService {
         );
 
         await this.mailService.sendEmailChangeCode(normalizedNewEmail, code);
+
         return {
             ok: true,
             message: 'Код підтвердження відправлено на нову пошту',
@@ -128,16 +198,12 @@ export class ProfileService {
     }
 
     async confirmEmailChange(userId: string, dto: ConfirmEmailChangeDto) {
-        const user = await this.userService.findById(userId);
-
-        if (!user || !user.patient) {
-            throw new BadRequestException('Профіль не знайдено');
-        }
+        const owner = await this.resolveProfileOwner(userId);
 
         const normalizedNewEmail = dto.newEmail.trim().toLowerCase();
 
         const existingUser = await this.userService.findByEmail(normalizedNewEmail);
-        if (existingUser && existingUser.id !== user.id) {
+        if (existingUser && existingUser.id !== owner.user.id) {
             throw new BadRequestException('Користувач з такою поштою вже існує');
         }
 
@@ -147,29 +213,27 @@ export class ProfileService {
             dto.code,
         );
 
-        user.email = normalizedNewEmail;
-        user.googleId = null;
-        user.authProvider = AuthProvider.LOCAL;
+        owner.user.email = normalizedNewEmail;
+        owner.user.googleId = null;
+        owner.user.authProvider = AuthProvider.LOCAL;
 
-        user.patient.email = normalizedNewEmail;
+        if (owner.mode === 'patient') {
+            owner.patient.email = normalizedNewEmail;
+            await this.patientService.save(owner.patient);
+        }
 
-        await this.patientService.save(user.patient);
-        await this.userService.save(user);
+        await this.userService.save(owner.user);
 
         return {
             ok: true,
             message: 'Пошту оновлено',
-            email: user.email,
+            email: owner.user.email,
         };
     }
+
     async startPhoneChange(userId: string, dto: StartPhoneChangeDto) {
         await this.requireLocalPassword(userId, dto.password);
-
-        const user = await this.userService.findById(userId);
-
-        if (!user || !user.patient) {
-            throw new BadRequestException('Профіль не знайдено');
-        }
+        await this.resolveProfileOwner(userId);
 
         const session = await this.phoneVerificationService.createSession(dto.phone, '');
 
@@ -187,27 +251,35 @@ export class ProfileService {
     }
 
     async confirmPhoneChange(userId: string, dto: ConfirmPhoneChangeDto) {
-        const user = await this.userService.findById(userId);
-
-        if (!user || !user.patient) {
-            throw new BadRequestException('Профіль не знайдено');
-        }
+        const owner = await this.resolveProfileOwner(userId);
 
         await this.phoneVerificationService.ensureVerified(
             dto.phoneVerificationSessionId,
             dto.phone,
         );
 
-        user.patient.phone = dto.phone;
-        user.patient.phoneVerified = true;
+        if (owner.mode === 'patient') {
+            owner.patient.phone = dto.phone;
+            owner.patient.phoneVerified = true;
+            await this.patientService.save(owner.patient);
 
-        await this.patientService.save(user.patient);
+            return {
+                ok: true,
+                message: 'Телефон оновлено',
+                phone: owner.patient.phone,
+                phoneVerified: owner.patient.phoneVerified,
+            };
+        }
+
+        owner.admin.phone = dto.phone;
+        owner.admin.phoneVerified = true;
+        await this.adminService['adminRepository'].save(owner.admin);
 
         return {
             ok: true,
             message: 'Телефон оновлено',
-            phone: user.patient.phone,
-            phoneVerified: user.patient.phoneVerified,
+            phone: owner.admin.phone,
+            phoneVerified: owner.admin.phoneVerified,
         };
     }
 }

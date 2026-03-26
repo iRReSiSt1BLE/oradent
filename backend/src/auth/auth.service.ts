@@ -1,5 +1,5 @@
 import {
-    BadRequestException,
+    BadRequestException, ForbiddenException,
     Injectable,
     UnauthorizedException,
 } from '@nestjs/common';
@@ -17,6 +17,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { PendingRegistrationService } from './pending-registration.service';
 import { MailService } from '../mail/mail.service';
+import {AdminService} from "../admin/admin.service";
 
 
 @Injectable()
@@ -28,6 +29,7 @@ export class AuthService {
         private readonly jwtService: JwtService,
         private readonly pendingRegistrationService: PendingRegistrationService,
         private readonly mailService: MailService,
+        private readonly adminService: AdminService,
     ) {}
 
     async register(dto: RegisterDto) {
@@ -119,6 +121,14 @@ export class AuthService {
             throw new UnauthorizedException('Невірна пошта або пароль');
         }
 
+        if (user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) {
+            const admin = await this.adminService.findByUserId(user.id);
+
+            if (!admin || !admin.isActive) {
+                throw new ForbiddenException('Адміністратор деактивований');
+            }
+        }
+
         const isValid = await argon2.verify(user.passwordHash, dto.password);
 
         if (!isValid) {
@@ -179,6 +189,7 @@ export class AuthService {
 
         let user: User | null = await this.userService.findByGoogleId(googleUser.googleId);
 
+
         if (!user) {
             const existingByEmail = await this.userService.findByEmail(normalizedGoogleEmail);
 
@@ -198,6 +209,14 @@ export class AuthService {
             existingByEmail.authProvider = AuthProvider.GOOGLE;
 
             user = await this.userService.save(existingByEmail);
+        }
+
+        if (user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) {
+            const admin = await this.adminService.findByUserId(user.id);
+
+            if (!admin || !admin.isActive) {
+                throw new ForbiddenException('Адміністратор деактивований');
+            }
         }
 
         const payload = {

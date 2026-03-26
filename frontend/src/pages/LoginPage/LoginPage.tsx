@@ -32,7 +32,12 @@ export default function LoginPage() {
             const result = await login({ email, password });
             saveToken(result.accessToken);
             setMessage(result.message);
-            navigate('/profile');
+
+            navigate(
+                result.user.role === 'ADMIN' || result.user.role === 'SUPER_ADMIN'
+                    ? '/'
+                    : '/profile',
+            );
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Помилка входу');
         } finally {
@@ -89,7 +94,7 @@ export default function LoginPage() {
                     </a>
 
                     <p className="auth-retro__footer">
-                        Ще немає аккаунту? <Link to="/register">Зареєструватися</Link>
+                        Ще немає акаунту? <Link to="/register">Зареєструватися</Link>
                     </p>
                 </div>
             </div>

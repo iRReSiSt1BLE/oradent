@@ -17,7 +17,7 @@ type Profile = {
     email: string;
     authProvider: string;
     role: string;
-    patientId: string;
+    patientId: string | null;
     lastName: string;
     firstName: string;
     middleName: string | null;
@@ -68,6 +68,9 @@ export default function ProfilePage() {
 
     const pollingRef = useRef<number | null>(null);
 
+    const isAdminProfile = profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN';
+    const canEditSelf = profile?.role !== 'ADMIN';
+
     useEffect(() => {
         void loadProfile();
 
@@ -108,6 +111,8 @@ export default function ProfilePage() {
     }
 
     function openModal(type: ModalType) {
+        if (!canEditSelf) return;
+
         clearModalState();
         setModalType(type);
 
@@ -154,7 +159,7 @@ export default function ProfilePage() {
     async function handleSaveName(e: React.FormEvent) {
         e.preventDefault();
 
-        if (!token) return;
+        if (!token || !canEditSelf) return;
 
         setNameLoading(true);
         clearModalState();
@@ -187,7 +192,7 @@ export default function ProfilePage() {
     }
 
     async function handleRequestEmailChange() {
-        if (!token) return;
+        if (!token || !canEditSelf) return;
 
         setEmailLoading(true);
         clearModalState();
@@ -208,7 +213,7 @@ export default function ProfilePage() {
     }
 
     async function handleConfirmEmailChange() {
-        if (!token) return;
+        if (!token || !canEditSelf) return;
 
         setEmailLoading(true);
         clearModalState();
@@ -238,7 +243,7 @@ export default function ProfilePage() {
     }
 
     async function handleStartPhoneChange() {
-        if (!token) return;
+        if (!token || !canEditSelf) return;
 
         setPhoneLoading(true);
         clearModalState();
@@ -281,13 +286,9 @@ export default function ProfilePage() {
 
                         setPageMessage(confirmResult.message);
                         closeModal();
-                        return;
                     }
 
-                    if (
-                        status.status === 'FAILED' ||
-                        status.status === 'EXPIRED'
-                    ) {
+                    if (status.status === 'FAILED' || status.status === 'EXPIRED') {
                         if (pollingRef.current) {
                             window.clearInterval(pollingRef.current);
                             pollingRef.current = null;
@@ -295,24 +296,6 @@ export default function ProfilePage() {
 
                         closeModal();
                         setPageError('Номер телефону не підтверджено або час сесії минув');
-
-                        const confirmResult = await confirmPhoneChange(token, {
-                            phoneVerificationSessionId: result.sessionId,
-                            phone: phoneForm.phone,
-                        });
-
-                        setProfile((prev) =>
-                            prev
-                                ? {
-                                    ...prev,
-                                    phone: confirmResult.phone,
-                                    phoneVerified: confirmResult.phoneVerified,
-                                }
-                                : prev,
-                        );
-
-                        setPageMessage(confirmResult.message);
-                        closeModal();
                     }
                 } catch (pollErr) {
                     if (pollingRef.current) {
@@ -320,13 +303,13 @@ export default function ProfilePage() {
                         pollingRef.current = null;
                     }
 
-                    const message =
+                    const msg =
                         pollErr instanceof Error
                             ? pollErr.message
                             : 'Помилка під час підтвердження телефону';
 
                     closeModal();
-                    setPageError(message);
+                    setPageError(msg);
                 }
             }, 2000);
         } catch (err) {
@@ -340,44 +323,37 @@ export default function ProfilePage() {
         removeToken();
         window.location.href = '/login';
     }
+
     return (
         <div className="page-shell profile-retro">
             <div className="container profile-retro__container">
                 <div className="profile-retro__content">
                     {pageError && (
                         <div className="profile-retro__top-alert">
-                            <AlertToast
-                                message={pageError}
-                                variant="error"
-                                onClose={() => setPageError('')}
-                            />
+                            <AlertToast message={pageError} variant="error" onClose={() => setPageError('')} />
                         </div>
                     )}
 
                     {pageMessage && (
                         <div className="profile-retro__top-alert">
-                            <AlertToast
-                                message={pageMessage}
-                                variant="success"
-                                onClose={() => setPageMessage('')}
-                            />
+                            <AlertToast message={pageMessage} variant="success" onClose={() => setPageMessage('')} />
                         </div>
                     )}
 
                     <div className="profile-retro__card">
                         <div className="profile-retro__header">
                             <div>
-                                <h1 className="profile-retro__title">ПРОФІЛЬ ПАЦІЄНТА</h1>
+                                <h1 className="profile-retro__title">
+                                    {isAdminProfile ? 'ПРОФІЛЬ АДМІНА' : 'ПРОФІЛЬ ПАЦІЄНТА'}
+                                </h1>
                                 <p className="profile-retro__subtitle">
-                                    Тут можна змінити ПІБ, пошту та номер телефону.
+                                    {canEditSelf
+                                        ? 'Тут можна змінити ПІБ, пошту та номер телефону.'
+                                        : 'Редагування профілю доступне лише для SUPER_ADMIN.'}
                                 </p>
                             </div>
 
-                            <button
-                                className="profile-retro__danger"
-                                type="button"
-                                onClick={handleLogout}
-                            >
+                            <button className="profile-retro__danger" type="button" onClick={handleLogout}>
                                 ВИЙТИ
                             </button>
                         </div>
@@ -391,7 +367,7 @@ export default function ProfilePage() {
                             <>
                                 <div className="profile-retro__stack">
                                     <div className="profile-retro__info-card">
-                                        <span>ПАЦІЄНТ</span>
+                                        <span>{isAdminProfile ? 'АДМІН' : 'ПАЦІЄНТ'}</span>
                                         <strong>
                                             {profile.lastName} {profile.firstName} {profile.middleName || ''}
                                         </strong>
@@ -408,62 +384,41 @@ export default function ProfilePage() {
                                     </div>
                                 </div>
 
-                                <div className="profile-retro__actions">
-                                    <button
-                                        className="profile-retro__secondary"
-                                        type="button"
-                                        onClick={() => openModal('name')}
-                                    >
-                                        ЗМІНИТИ ІМ’Я
-                                    </button>
+                                {canEditSelf && (
+                                    <div className="profile-retro__actions">
+                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('name')}>
+                                            ЗМІНИТИ ІМ’Я
+                                        </button>
 
-                                    <button
-                                        className="profile-retro__secondary"
-                                        type="button"
-                                        onClick={() => openModal('email')}
-                                    >
-                                        ЗМІНИТИ ПОШТУ
-                                    </button>
+                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('email')}>
+                                            ЗМІНИТИ ПОШТУ
+                                        </button>
 
-                                    <button
-                                        className="profile-retro__secondary"
-                                        type="button"
-                                        onClick={() => openModal('phone')}
-                                    >
-                                        ЗМІНИТИ ТЕЛЕФОН
-                                    </button>
-                                </div>
+                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('phone')}>
+                                            ЗМІНИТИ ТЕЛЕФОН
+                                        </button>
+                                    </div>
+                                )}
                             </>
                         ) : null}
                     </div>
                 </div>
             </div>
 
-            {modalType !== 'none' && (
+            {modalType !== 'none' && canEditSelf && (
                 <div className="profile-retro__modal-backdrop">
                     <div className="profile-retro__modal">
-
                         {modalError && (
                             <div className="profile-retro__modal-toast">
-                                <AlertToast
-                                    message={modalError}
-                                    variant="error"
-                                    onClose={() => setModalError('')}
-                                />
+                                <AlertToast message={modalError} variant="error" onClose={() => setModalError('')} />
                             </div>
                         )}
 
                         {modalMessage && (
                             <div className="profile-retro__modal-toast">
-                                <AlertToast
-                                    message={modalMessage}
-                                    variant="success"
-                                    onClose={() => setModalMessage('')}
-                                />
+                                <AlertToast message={modalMessage} variant="success" onClose={() => setModalMessage('')} />
                             </div>
                         )}
-
-
 
                         {modalType === 'name' && (
                             <>
@@ -476,9 +431,7 @@ export default function ProfilePage() {
                                             id="profile-lastName"
                                             className="profile-retro__input"
                                             value={nameForm.lastName}
-                                            onChange={(e) =>
-                                                setNameForm((prev) => ({ ...prev, lastName: e.target.value }))
-                                            }
+                                            onChange={(e) => setNameForm((prev) => ({ ...prev, lastName: e.target.value }))}
                                         />
                                     </div>
 
@@ -488,9 +441,7 @@ export default function ProfilePage() {
                                             id="profile-firstName"
                                             className="profile-retro__input"
                                             value={nameForm.firstName}
-                                            onChange={(e) =>
-                                                setNameForm((prev) => ({ ...prev, firstName: e.target.value }))
-                                            }
+                                            onChange={(e) => setNameForm((prev) => ({ ...prev, firstName: e.target.value }))}
                                         />
                                     </div>
 
@@ -500,9 +451,7 @@ export default function ProfilePage() {
                                             id="profile-middleName"
                                             className="profile-retro__input"
                                             value={nameForm.middleName}
-                                            onChange={(e) =>
-                                                setNameForm((prev) => ({ ...prev, middleName: e.target.value }))
-                                            }
+                                            onChange={(e) => setNameForm((prev) => ({ ...prev, middleName: e.target.value }))}
                                         />
                                     </div>
 
@@ -514,26 +463,16 @@ export default function ProfilePage() {
                                             type="password"
                                             placeholder="Поточний пароль"
                                             value={nameForm.password}
-                                            onChange={(e) =>
-                                                setNameForm((prev) => ({ ...prev, password: e.target.value }))
-                                            }
+                                            onChange={(e) => setNameForm((prev) => ({ ...prev, password: e.target.value }))}
                                         />
                                     </div>
 
                                     <div className="profile-retro__modal-actions">
-                                        <button
-                                            className="profile-retro__secondary"
-                                            type="button"
-                                            onClick={closeModal}
-                                        >
+                                        <button className="profile-retro__secondary" type="button" onClick={closeModal}>
                                             СКАСУВАТИ
                                         </button>
 
-                                        <button
-                                            className="profile-retro__submit"
-                                            type="submit"
-                                            disabled={nameLoading}
-                                        >
+                                        <button className="profile-retro__submit" type="submit" disabled={nameLoading}>
                                             {nameLoading ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ'}
                                         </button>
                                     </div>
@@ -555,9 +494,7 @@ export default function ProfilePage() {
                                                 type="email"
                                                 placeholder="new@email.com"
                                                 value={emailForm.newEmail}
-                                                onChange={(e) =>
-                                                    setEmailForm((prev) => ({ ...prev, newEmail: e.target.value }))
-                                                }
+                                                onChange={(e) => setEmailForm((prev) => ({ ...prev, newEmail: e.target.value }))}
                                             />
                                         </div>
                                         <div className="profile-retro__field">
@@ -568,18 +505,12 @@ export default function ProfilePage() {
                                                 type="password"
                                                 placeholder="Поточний пароль"
                                                 value={emailForm.password}
-                                                onChange={(e) =>
-                                                    setEmailForm((prev) => ({ ...prev, password: e.target.value }))
-                                                }
+                                                onChange={(e) => setEmailForm((prev) => ({ ...prev, password: e.target.value }))}
                                             />
                                         </div>
 
                                         <div className="profile-retro__modal-actions">
-                                            <button
-                                                className="profile-retro__secondary"
-                                                type="button"
-                                                onClick={closeModal}
-                                            >
+                                            <button className="profile-retro__secondary" type="button" onClick={closeModal}>
                                                 СКАСУВАТИ
                                             </button>
 
@@ -606,18 +537,12 @@ export default function ProfilePage() {
                                                 className="profile-retro__input"
                                                 placeholder="Введи код"
                                                 value={emailForm.code}
-                                                onChange={(e) =>
-                                                    setEmailForm((prev) => ({ ...prev, code: e.target.value }))
-                                                }
+                                                onChange={(e) => setEmailForm((prev) => ({ ...prev, code: e.target.value }))}
                                             />
                                         </div>
 
                                         <div className="profile-retro__modal-actions">
-                                            <button
-                                                className="profile-retro__secondary"
-                                                type="button"
-                                                onClick={closeModal}
-                                            >
+                                            <button className="profile-retro__secondary" type="button" onClick={closeModal}>
                                                 СКАСУВАТИ
                                             </button>
 
@@ -648,9 +573,7 @@ export default function ProfilePage() {
                                                 className="profile-retro__input"
                                                 placeholder="+380..."
                                                 value={phoneForm.phone}
-                                                onChange={(e) =>
-                                                    setPhoneForm((prev) => ({ ...prev, phone: e.target.value }))
-                                                }
+                                                onChange={(e) => setPhoneForm((prev) => ({ ...prev, phone: e.target.value }))}
                                             />
                                         </div>
 
@@ -662,18 +585,12 @@ export default function ProfilePage() {
                                                 type="password"
                                                 placeholder="Поточний пароль"
                                                 value={phoneForm.password}
-                                                onChange={(e) =>
-                                                    setPhoneForm((prev) => ({ ...prev, password: e.target.value }))
-                                                }
+                                                onChange={(e) => setPhoneForm((prev) => ({ ...prev, password: e.target.value }))}
                                             />
                                         </div>
 
                                         <div className="profile-retro__modal-actions">
-                                            <button
-                                                className="profile-retro__secondary"
-                                                type="button"
-                                                onClick={closeModal}
-                                            >
+                                            <button className="profile-retro__secondary" type="button" onClick={closeModal}>
                                                 СКАСУВАТИ
                                             </button>
 
@@ -710,11 +627,7 @@ export default function ProfilePage() {
                                         </div>
 
                                         <div className="profile-retro__modal-actions">
-                                            <button
-                                                className="profile-retro__secondary"
-                                                type="button"
-                                                onClick={closeModal}
-                                            >
+                                            <button className="profile-retro__secondary" type="button" onClick={closeModal}>
                                                 ЗАКРИТИ
                                             </button>
                                         </div>
@@ -728,3 +641,4 @@ export default function ProfilePage() {
         </div>
     );
 }
+

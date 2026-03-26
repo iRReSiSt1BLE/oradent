@@ -8,7 +8,7 @@ export async function getMyProfile(token: string) {
             email: string;
             authProvider: string;
             role: string;
-            patientId: string;
+            patientId: string | null;
             lastName: string;
             firstName: string;
             middleName: string | null;

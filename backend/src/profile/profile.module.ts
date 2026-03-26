@@ -7,6 +7,7 @@ import { VerificationModule } from '../verification/verification.module';
 import { MailModule } from '../mail/mail.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
     imports: [
@@ -16,6 +17,7 @@ import { TelegramModule } from '../telegram/telegram.module';
         MailModule,
         PhoneVerificationModule,
         TelegramModule,
+        AdminModule,
     ],
     controllers: [ProfileController],
     providers: [ProfileService],

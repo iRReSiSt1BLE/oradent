@@ -55,6 +55,20 @@
     color: #374151;
   }
 
+  &__readonly-note {
+    margin-top: 12px;
+    display: inline-block;
+    border: 2px solid #111111;
+    background: #ffffff;
+    color: #111111;
+    padding: 8px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
   &__stack {
     display: grid;
     gap: 14px;
@@ -117,7 +131,7 @@
       outline: none;
     }
 
-    &:active {
+    &:active:not(:disabled) {
       transform: translate(1px, 1px);
       box-shadow: 2px 2px 0 #111111;
     }
@@ -145,7 +159,7 @@
     width: 100%;
     padding: 0 18px;
     background: #84d8ce;
-    color: #ffffff;
+    color: #111111;
   }
 
   &__telegram-button {
@@ -220,6 +234,7 @@
     display: grid;
     gap: 14px;
   }
+
   &__field {
     display: grid;
     gap: 6px;
@@ -280,7 +295,14 @@
     }
   }
 
+  &__modal-toast {
+    margin-bottom: 8px;
 
+    .alert-toast {
+      width: 100%;
+      max-width: none;
+    }
+  }
 }
 
 @keyframes profile-retro-spin {
@@ -320,17 +342,6 @@
 
     &__modal-actions {
       flex-direction: column;
-    }
-  }
-}
-
-.profile-retro {
-  &__modal-toast {
-    margin-bottom: 8px;
-
-    .alert-toast {
-      width: 100%;
-      max-width: none;
     }
   }
 }

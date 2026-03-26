@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { saveToken } from '../../shared/utils/authStorage';
+import { getUserRole, saveToken } from '../../shared/utils/authStorage';
 
 export default function LoginSuccessPage() {
     const [params] = useSearchParams();
@@ -11,11 +11,16 @@ export default function LoginSuccessPage() {
 
         if (token) {
             saveToken(token);
-            navigate('/profile');
+            const role = getUserRole();
+            navigate(role === 'ADMIN' || role === 'SUPER_ADMIN' ? '/' : '/profile');
         } else {
             navigate('/login');
         }
     }, [params, navigate]);
 
-    return <div className="page-shell"><div className="container">Вхід через Google...</div></div>;
+    return (
+        <div className="page-shell">
+            <div className="container">Вхід через Google...</div>
+        </div>
+    );
 }
