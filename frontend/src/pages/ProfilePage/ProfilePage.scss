@@ -1,4 +1,4 @@
-.profile-retro {
+﻿.profile-retro {
   &__container {
     display: flex;
     justify-content: center;
@@ -55,20 +55,6 @@
     color: #374151;
   }
 
-  &__readonly-note {
-    margin-top: 12px;
-    display: inline-block;
-    border: 2px solid #111111;
-    background: #ffffff;
-    color: #111111;
-    padding: 8px 10px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-
   &__stack {
     display: grid;
     gap: 14px;
@@ -107,8 +93,7 @@
 
   &__danger,
   &__secondary,
-  &__submit,
-  &__telegram-button {
+  &__submit {
     min-height: 46px;
     border: 2px solid #111111;
     border-radius: 0;
@@ -158,12 +143,6 @@
   &__submit {
     width: 100%;
     padding: 0 18px;
-    background: #84d8ce;
-    color: #111111;
-  }
-
-  &__telegram-button {
-    width: 100%;
     background: #84d8ce;
     color: #111111;
   }
@@ -303,6 +282,10 @@
       max-width: none;
     }
   }
+}
+
+.profile-retro__modal .telegram-qr-card {
+  margin-top: 4px;
 }
 
 @keyframes profile-retro-spin {

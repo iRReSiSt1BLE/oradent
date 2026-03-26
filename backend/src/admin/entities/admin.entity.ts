@@ -25,7 +25,7 @@ export class Admin {
     @Column({ type: 'varchar', length: 100, nullable: true })
     middleName: string | null;
 
-    @Column({ type: 'varchar', length: 20 })
+    @Column({ type: 'varchar', length: 20, unique: true })
     phone: string;
 
     @Column({ type: 'boolean', default: false })

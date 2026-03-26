@@ -1,4 +1,11 @@
-import { IsEmail, IsOptional, IsString, Length, Matches } from 'class-validator';
+import {
+    IsEmail,
+    IsNotEmpty,
+    IsOptional,
+    IsString,
+    Length,
+    Matches,
+} from 'class-validator';
 
 export class UpdateAdminDto {
     @IsOptional()
@@ -24,4 +31,19 @@ export class UpdateAdminDto {
     @IsOptional()
     @IsEmail()
     email?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(4, 12)
+    emailCode?: string;
+
+    @IsOptional()
+    @IsString()
+    @IsNotEmpty()
+    phoneVerificationSessionId?: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @Length(8, 100)
+    superAdminPassword: string;
 }

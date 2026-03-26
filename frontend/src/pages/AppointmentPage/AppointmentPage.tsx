@@ -9,8 +9,9 @@ import {
 } from '../../shared/api/phoneVerificationApi';
 import { getMyPatient, verifyAndLinkPhone } from '../../shared/api/patientApi';
 import { getToken } from '../../shared/utils/authStorage';
+import AlertToast from '../../widgets/AlertToast/AlertToast';
+import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import './AppointmentPage.scss';
-import AlertToast from "../../widgets/AlertToast/AlertToast.tsx";
 
 type Mode = 'guest' | 'authenticated';
 
@@ -50,6 +51,7 @@ export default function AppointmentPage() {
     const pendingGuestFormRef = useRef<typeof guestForm | null>(null);
     const pendingAuthFormRef = useRef<typeof authForm | null>(null);
     const pollingRef = useRef<number | null>(null);
+    const completeRef = useRef(false);
 
     const authNeedsPhone = useMemo(() => {
         return !!token && patient && !patient.phoneVerified;
@@ -67,7 +69,7 @@ export default function AppointmentPage() {
             }
         }
 
-        loadPatient();
+        void loadPatient();
     }, [token]);
 
     useEffect(() => {
@@ -113,6 +115,8 @@ export default function AppointmentPage() {
     }
 
     async function startAutomaticVerificationFlow(phone: string, currentMode: Mode) {
+        completeRef.current = false;
+
         const verification = await startPhoneVerification(phone);
 
         setSessionId(verification.sessionId);
@@ -120,6 +124,10 @@ export default function AppointmentPage() {
         setVerificationMode(currentMode);
         setIsVerificationModalOpen(true);
         setVerificationLoadingText('Очікуємо підтвердження номера телефону в Telegram...');
+
+        if (pollingRef.current) {
+            window.clearInterval(pollingRef.current);
+        }
 
         pollingRef.current = window.setInterval(async () => {
             try {
@@ -171,10 +179,25 @@ export default function AppointmentPage() {
                         setMessage((appointmentResult as any).message || 'Запис успішно створено');
                     }
 
+                    completeRef.current = true;
                     resetVerificationState();
                     setIsSubmitting(false);
+                    return;
+                }
+
+                if (statusResult.status === 'FAILED' || statusResult.status === 'EXPIRED') {
+                    if (pollingRef.current) {
+                        window.clearInterval(pollingRef.current);
+                        pollingRef.current = null;
+                    }
+
+                    resetVerificationState();
+                    setIsSubmitting(false);
+                    setError('Підтвердження телефону не завершено');
                 }
             } catch (err) {
+                if (completeRef.current) return;
+
                 if (pollingRef.current) {
                     window.clearInterval(pollingRef.current);
                     pollingRef.current = null;
@@ -265,8 +288,7 @@ export default function AppointmentPage() {
                     </div>
 
                     <p className="appointment-retro__subtitle">
-                        Гість підтверджує номер кожного разу. Авторизований користувач — тільки під
-                        час першого запису.
+                        Гість підтверджує номер кожного разу. Авторизований користувач — тільки під час першого запису.
                     </p>
 
                     {error && (
@@ -308,7 +330,7 @@ export default function AppointmentPage() {
                                 <input
                                     id="guest-firstName"
                                     className="appointment-retro__input"
-                                    placeholder="Ім’я"
+                                    placeholder="Ім&apos;я"
                                     value={guestForm.firstName}
                                     onChange={(e) =>
                                         setGuestForm((prev) => ({ ...prev, firstName: e.target.value }))
@@ -478,19 +500,15 @@ export default function AppointmentPage() {
                         <h2 className="appointment-retro__modal-title">ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ</h2>
 
                         <p className="appointment-retro__modal-text">
-                            Потрібно один раз підтвердити номер у Telegram. Після цього запис на
-                            прийом завершиться автоматично.
+                            Потрібно один раз підтвердити номер у Telegram. Після цього запис на прийом завершиться автоматично.
                         </p>
 
                         {telegramBotUrl && (
-                            <a
-                                className="appointment-retro__telegram-button"
-                                href={telegramBotUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                ВІДКРИТИ TELEGRAM
-                            </a>
+                            <TelegramQrCard
+                                telegramBotUrl={telegramBotUrl}
+                                title="QR ДЛЯ ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ"
+                                subtitle="Скануй QR через Telegram або натисни кнопку для переходу в Telegram."
+                            />
                         )}
 
                         <div className="appointment-retro__loader-block">

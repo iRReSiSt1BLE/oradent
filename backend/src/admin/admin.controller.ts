@@ -5,7 +5,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequestAdminEmailVerificationDto } from './dto/request-admin-email-verification.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 
-
 @UseGuards(JwtAuthGuard)
 @Controller('admins')
 export class AdminController {
@@ -42,5 +41,4 @@ export class AdminController {
     ) {
         return this.adminService.updateAdmin(req.user.id, id, dto);
     }
-
 }

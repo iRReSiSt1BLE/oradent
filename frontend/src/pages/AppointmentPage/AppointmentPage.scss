@@ -230,40 +230,6 @@
     color: #111111;
   }
 
-  &__telegram-button {
-    width: 100%;
-    min-height: 42px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2px solid #111111;
-    background: #84d8ce;
-    color: black;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    box-shadow: none;
-    transition: box-shadow 0.12s ease, transform 0.12s ease, background 0.12s ease;
-    outline: none;
-    margin-bottom: 14px;
-
-    &:hover,
-    &:focus,
-    &:focus-visible {
-      background: #79cfc5;
-      color: black;
-      box-shadow: 4px 4px 0 #111111;
-      outline: none;
-    }
-
-    &:active {
-      transform: translate(1px, 1px);
-      box-shadow: 2px 2px 0 #111111;
-    }
-  }
-
   &__loader-block {
     display: flex;
     align-items: center;
@@ -278,7 +244,7 @@
     width: 16px;
     height: 16px;
     border: 2px solid #cfd4da;
-    border-top-color: black;
+    border-top-color: #111111;
     border-radius: 50%;
     flex-shrink: 0;
     animation: appointment-retro-spin 0.8s linear infinite;
@@ -290,6 +256,10 @@
     font-family: 'IBM Plex Mono', monospace;
     border-width: 2px;
   }
+}
+
+.appointment-retro__modal .telegram-qr-card {
+  margin-bottom: 14px;
 }
 
 @keyframes appointment-retro-spin {
@@ -338,7 +308,6 @@
 
     &__input,
     &__submit,
-    &__telegram-button,
     &__mode {
       min-height: 40px;
       font-size: 12px;

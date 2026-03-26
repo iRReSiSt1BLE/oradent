@@ -20,6 +20,7 @@ import { ConfirmPhoneChangeDto } from './dto/confirm-phone-change.dto';
 import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { AdminService } from '../admin/admin.service';
 import { UserRole } from '../common/enums/user-role.enum';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class ProfileService {
@@ -32,6 +33,10 @@ export class ProfileService {
         private readonly telegramService: TelegramService,
         private readonly adminService: AdminService,
     ) {}
+
+    private normalizePhone(phone: string) {
+        return phone.trim();
+    }
 
     private async requireLocalPassword(userId: string, password: string) {
         const user = await this.userService.findById(userId);
@@ -89,6 +94,31 @@ export class ProfileService {
         throw new BadRequestException('Профіль не знайдено');
     }
 
+    private async ensurePhoneAvailableForOwner(
+        phone: string,
+        owner: Awaited<ReturnType<ProfileService['resolveProfileOwner']>>,
+    ) {
+        const normalizedPhone = this.normalizePhone(phone);
+
+        const patientWithPhone = await this.patientService.findByPhone(normalizedPhone);
+        if (
+            patientWithPhone &&
+            !(owner.mode === 'patient' && patientWithPhone.id === owner.patient.id)
+        ) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+        }
+
+        const adminWithPhone = await this.adminService.findByPhone(normalizedPhone);
+        if (
+            adminWithPhone &&
+            !(owner.mode === 'admin' && adminWithPhone.id === owner.admin.id)
+        ) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+        }
+
+        return normalizedPhone;
+    }
+
     async getMyProfile(userId: string) {
         const owner = await this.resolveProfileOwner(userId);
 
@@ -140,7 +170,7 @@ export class ProfileService {
             owner.admin.firstName = dto.firstName;
             owner.admin.middleName = dto.middleName || null;
 
-            const savedAdmin = await this.adminService['adminRepository'].save(owner.admin);
+            const savedAdmin = await this.adminService.saveAdmin(owner.admin);
 
             return {
                 ok: true,
@@ -167,6 +197,25 @@ export class ProfileService {
                 firstName: savedPatient.firstName,
                 middleName: savedPatient.middleName,
             },
+        };
+    }
+
+    async changePassword(userId: string, dto: ChangePasswordDto) {
+        const user = await this.requireLocalPassword(userId, dto.currentPassword);
+
+        if (dto.currentPassword === dto.newPassword) {
+            throw new BadRequestException('Новий пароль має відрізнятися від поточного');
+        }
+
+        user.passwordHash = await argon2.hash(dto.newPassword, {
+            type: argon2.argon2id,
+        });
+
+        await this.userService.save(user);
+
+        return {
+            ok: true,
+            message: 'Пароль успішно змінено',
         };
     }
 
@@ -233,9 +282,11 @@ export class ProfileService {
 
     async startPhoneChange(userId: string, dto: StartPhoneChangeDto) {
         await this.requireLocalPassword(userId, dto.password);
-        await this.resolveProfileOwner(userId);
+        const owner = await this.resolveProfileOwner(userId);
 
-        const session = await this.phoneVerificationService.createSession(dto.phone, '');
+        const normalizedPhone = await this.ensurePhoneAvailableForOwner(dto.phone, owner);
+
+        const session = await this.phoneVerificationService.createSession(normalizedPhone, '');
 
         const realTelegramBotUrl = this.telegramService.buildStartLink(session.id);
         session.telegramBotUrl = realTelegramBotUrl;
@@ -252,14 +303,17 @@ export class ProfileService {
 
     async confirmPhoneChange(userId: string, dto: ConfirmPhoneChangeDto) {
         const owner = await this.resolveProfileOwner(userId);
+        const normalizedPhone = this.normalizePhone(dto.phone);
 
         await this.phoneVerificationService.ensureVerified(
             dto.phoneVerificationSessionId,
-            dto.phone,
+            normalizedPhone,
         );
 
+        await this.ensurePhoneAvailableForOwner(normalizedPhone, owner);
+
         if (owner.mode === 'patient') {
-            owner.patient.phone = dto.phone;
+            owner.patient.phone = normalizedPhone;
             owner.patient.phoneVerified = true;
             await this.patientService.save(owner.patient);
 
@@ -271,9 +325,9 @@ export class ProfileService {
             };
         }
 
-        owner.admin.phone = dto.phone;
+        owner.admin.phone = normalizedPhone;
         owner.admin.phoneVerified = true;
-        await this.adminService['adminRepository'].save(owner.admin);
+        await this.adminService.saveAdmin(owner.admin);
 
         return {
             ok: true,

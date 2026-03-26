@@ -66,14 +66,11 @@ export async function confirmEmailChange(
         code: string;
     },
 ) {
-    return http<{ ok: boolean; message: string; email: string }>(
-        '/profile/change-email/confirm',
-        {
-            method: 'POST',
-            token,
-            body: JSON.stringify(payload),
-        },
-    );
+    return http<{ ok: boolean; message: string; email: string }>('/profile/change-email/confirm', {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function startPhoneChange(
@@ -109,6 +106,20 @@ export async function confirmPhoneChange(
         phone: string;
         phoneVerified: boolean;
     }>('/profile/change-phone/confirm', {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function changeMyPassword(
+    token: string,
+    payload: {
+        currentPassword: string;
+        newPassword: string;
+    },
+) {
+    return http<{ ok: boolean; message: string }>('/profile/change-password', {
         method: 'POST',
         token,
         body: JSON.stringify(payload),

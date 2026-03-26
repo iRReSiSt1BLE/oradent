@@ -1,16 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
-import {
-    getAllAdmins,
-    requestAdminEmailVerification,
-    toggleAdminActive,
-    updateAdmin,
-} from '../../shared/api/adminApi';
-import {
-    getPhoneVerificationStatus,
-    startPhoneVerification,
-} from '../../shared/api/phoneVerificationApi';
+import { getAllAdmins, requestAdminEmailVerification, toggleAdminActive, updateAdmin } from '../../shared/api/adminApi';
+import { getPhoneVerificationStatus, startPhoneVerification } from '../../shared/api/phoneVerificationApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
+import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import './AdminListPage.scss';
 
 type AdminItem = {
@@ -24,6 +17,24 @@ type AdminItem = {
     isActive: boolean;
     role: string;
 };
+
+const EMAIL_COOLDOWN_MS = 3 * 60 * 1000;
+const EMAIL_COOLDOWN_KEY = 'adminEdit.emailCooldown.v1';
+
+function normalizeEmail(value: string) {
+    return value.trim().toLowerCase();
+}
+
+function normalizePhone(value: string) {
+    return value.trim();
+}
+
+function formatCooldown(ms: number) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 export default function AdminListPage() {
     const token = getToken();
@@ -56,13 +67,30 @@ export default function AdminListPage() {
     });
 
     const [emailCodeRequested, setEmailCodeRequested] = useState(false);
+    const [emailCodeForEmail, setEmailCodeForEmail] = useState('');
+    const [emailCooldownUntil, setEmailCooldownUntil] = useState(0);
+    const [nowTs, setNowTs] = useState(Date.now());
+
     const [phoneVerificationSessionId, setPhoneVerificationSessionId] = useState('');
     const [phoneVerified, setPhoneVerified] = useState(false);
+    const [phoneVerifiedForPhone, setPhoneVerifiedForPhone] = useState('');
     const [telegramBotUrl, setTelegramBotUrl] = useState('');
+    const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
 
     const phonePollingRef = useRef<number | null>(null);
 
     const isAllowed = role === 'SUPER_ADMIN';
+
+    const normalizedEditEmail = useMemo(() => normalizeEmail(editForm.email), [editForm.email]);
+    const normalizedEditPhone = useMemo(() => normalizePhone(editForm.phone), [editForm.phone]);
+
+    const cooldownLeftMs = Math.max(0, emailCooldownUntil - nowTs);
+    const cooldownActive = cooldownLeftMs > 0;
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         void loadAdmins();
@@ -73,6 +101,28 @@ export default function AdminListPage() {
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (!editingAdmin) return;
+        if (!emailCodeForEmail) return;
+        if (normalizedEditEmail !== emailCodeForEmail) {
+            setEmailCodeRequested(false);
+            setEditForm((prev) => ({ ...prev, emailCode: '' }));
+            setEmailCooldownUntil(0);
+        }
+    }, [editingAdmin, normalizedEditEmail, emailCodeForEmail]);
+
+    useEffect(() => {
+        if (!editingAdmin) return;
+        if (!phoneVerifiedForPhone) return;
+
+        if (normalizedEditPhone !== phoneVerifiedForPhone) {
+            setPhoneVerified(false);
+            setPhoneVerificationSessionId('');
+            setTelegramBotUrl('');
+            setIsPhoneModalOpen(false);
+        }
+    }, [editingAdmin, normalizedEditPhone, phoneVerifiedForPhone]);
 
     async function loadAdmins() {
         if (!token) {
@@ -131,6 +181,20 @@ export default function AdminListPage() {
     }
 
     function openEditModal(admin: AdminItem) {
+        const key = `${EMAIL_COOLDOWN_KEY}:${admin.id}`;
+        let until = 0;
+        let storedEmail = '';
+        try {
+            const raw = window.localStorage.getItem(key);
+            if (raw) {
+                const parsed = JSON.parse(raw) as { email: string; until: number };
+                until = parsed?.until || 0;
+                storedEmail = normalizeEmail(parsed?.email || '');
+            }
+        } catch {}
+
+        const currentEmail = normalizeEmail(admin.email);
+
         setEditingAdmin(admin);
         setEditForm({
             lastName: admin.lastName,
@@ -141,10 +205,17 @@ export default function AdminListPage() {
             emailCode: '',
             superAdminPassword: '',
         });
-        setEmailCodeRequested(false);
+
+        setEmailCodeRequested(storedEmail === currentEmail && until > Date.now());
+        setEmailCodeForEmail(storedEmail === currentEmail ? currentEmail : '');
+        setEmailCooldownUntil(storedEmail === currentEmail ? until : 0);
+
         setPhoneVerificationSessionId('');
         setPhoneVerified(false);
+        setPhoneVerifiedForPhone('');
         setTelegramBotUrl('');
+        setIsPhoneModalOpen(false);
+
         setModalError('');
         setModalMessage('');
     }
@@ -160,9 +231,10 @@ export default function AdminListPage() {
 
     async function handleRequestEmailCodeForEdit() {
         if (!token || !editingAdmin) return;
+        if (!normalizedEditEmail) return setModalError('Вкажи email');
+        if (cooldownActive) return;
 
-        const nextEmail = editForm.email.trim().toLowerCase();
-        const emailChanged = nextEmail !== editingAdmin.email.toLowerCase();
+        const emailChanged = normalizedEditEmail !== normalizeEmail(editingAdmin.email);
 
         if (!emailChanged) {
             setModalMessage('Email не змінено, код не потрібен');
@@ -175,8 +247,16 @@ export default function AdminListPage() {
         setModalError('');
 
         try {
-            const result = await requestAdminEmailVerification(token, nextEmail);
+            const result = await requestAdminEmailVerification(token, normalizedEditEmail);
+            const until = Date.now() + EMAIL_COOLDOWN_MS;
+            const key = `${EMAIL_COOLDOWN_KEY}:${editingAdmin.id}`;
+
             setEmailCodeRequested(true);
+            setEmailCodeForEmail(normalizedEditEmail);
+            setEmailCooldownUntil(until);
+
+            window.localStorage.setItem(key, JSON.stringify({ email: normalizedEditEmail, until }));
+
             setModalMessage(result.message);
         } catch (err) {
             setModalError(err instanceof Error ? err.message : 'Не вдалося надіслати код підтвердження');
@@ -187,9 +267,9 @@ export default function AdminListPage() {
 
     async function handleStartPhoneVerificationForEdit() {
         if (!editingAdmin) return;
+        if (!normalizedEditPhone) return setModalError('Вкажи телефон');
 
-        const nextPhone = editForm.phone.trim();
-        const phoneChanged = nextPhone !== editingAdmin.phone;
+        const phoneChanged = normalizedEditPhone !== normalizePhone(editingAdmin.phone);
 
         if (!phoneChanged) {
             setModalMessage('Телефон не змінено, підтвердження не потрібне');
@@ -202,12 +282,11 @@ export default function AdminListPage() {
         setModalError('');
 
         try {
-            const result = await startPhoneVerification(nextPhone);
+            const result = await startPhoneVerification(normalizedEditPhone);
             setPhoneVerificationSessionId(result.sessionId);
             setPhoneVerified(false);
             setTelegramBotUrl(result.telegramBotUrl);
-
-            window.open(result.telegramBotUrl, '_blank', 'noopener,noreferrer');
+            setIsPhoneModalOpen(true);
 
             if (phonePollingRef.current) {
                 window.clearInterval(phonePollingRef.current);
@@ -224,6 +303,9 @@ export default function AdminListPage() {
                         }
 
                         setPhoneVerified(true);
+                        setPhoneVerifiedForPhone(normalizedEditPhone);
+                        setTelegramBotUrl('');
+                        setIsPhoneModalOpen(false);
                         setModalMessage('Телефон підтверджено');
                     }
 
@@ -260,16 +342,16 @@ export default function AdminListPage() {
         const nextLastName = editForm.lastName.trim();
         const nextFirstName = editForm.firstName.trim();
         const nextMiddleName = editForm.middleName.trim();
-        const nextEmail = editForm.email.trim().toLowerCase();
-        const nextPhone = editForm.phone.trim();
+        const nextEmail = normalizedEditEmail;
+        const nextPhone = normalizedEditPhone;
 
         const nameChanged =
             nextLastName !== editingAdmin.lastName ||
             nextFirstName !== editingAdmin.firstName ||
             nextMiddleName !== (editingAdmin.middleName || '');
 
-        const emailChanged = nextEmail !== editingAdmin.email.toLowerCase();
-        const phoneChanged = nextPhone !== editingAdmin.phone;
+        const emailChanged = nextEmail !== normalizeEmail(editingAdmin.email);
+        const phoneChanged = nextPhone !== normalizePhone(editingAdmin.phone);
 
         if (!nameChanged && !emailChanged && !phoneChanged) {
             setModalError('Немає змін для збереження');
@@ -297,7 +379,12 @@ export default function AdminListPage() {
             middleName?: string;
             email?: string;
             phone?: string;
-        } = {};
+            emailCode?: string;
+            phoneVerificationSessionId?: string;
+            superAdminPassword: string;
+        } = {
+            superAdminPassword: editForm.superAdminPassword.trim(),
+        };
 
         if (nameChanged) {
             payload.lastName = nextLastName;
@@ -307,10 +394,12 @@ export default function AdminListPage() {
 
         if (emailChanged) {
             payload.email = nextEmail;
+            payload.emailCode = editForm.emailCode.trim();
         }
 
         if (phoneChanged) {
             payload.phone = nextPhone;
+            payload.phoneVerificationSessionId = phoneVerificationSessionId;
         }
 
         setEditLoading(true);
@@ -320,20 +409,12 @@ export default function AdminListPage() {
         try {
             const result = await updateAdmin(token, editingAdmin.id, payload);
 
-            setAdmins((prev) =>
-                prev.map((item) => (item.id === editingAdmin.id ? result.admin : item)),
-            );
+            setAdmins((prev) => prev.map((item) => (item.id === editingAdmin.id ? result.admin : item)));
 
             setMessage(result.message);
             closeEditModal();
         } catch (err) {
             const raw = err instanceof Error ? err.message : 'Не вдалося оновити адміністратора';
-
-            if (raw.includes('property superAdminPassword should not exist') || raw.includes('property emailCode should not exist')) {
-                setModalError('Бекенд не приймає додаткові поля підтвердження. Онови DTO бекенда для secure update.');
-                return;
-            }
-
             setModalError(raw || 'Не вдалося оновити адміністратора');
         } finally {
             setEditLoading(false);
@@ -371,9 +452,7 @@ export default function AdminListPage() {
                         )}
 
                         {!isAllowed ? (
-                            <div className="admin-list-page__blocked">
-                                Доступно лише для SUPER_ADMIN.
-                            </div>
+                            <div className="admin-list-page__blocked">Доступно лише для SUPER_ADMIN.</div>
                         ) : loading ? (
                             <div className="admin-list-page__loading">Завантаження...</div>
                         ) : (
@@ -384,7 +463,9 @@ export default function AdminListPage() {
                                             <h3>
                                                 {admin.lastName} {admin.firstName} {admin.middleName || ''}
                                                 <span
-                                                    className={`admin-list-page__status-dot ${admin.isActive ? 'is-active' : 'is-inactive'}`}
+                                                    className={`admin-list-page__status-dot ${
+                                                        admin.isActive ? 'is-active' : 'is-inactive'
+                                                    }`}
                                                     aria-label={admin.isActive ? 'Активний' : 'Неактивний'}
                                                     title={admin.isActive ? 'Активний' : 'Неактивний'}
                                                 />
@@ -433,7 +514,9 @@ export default function AdminListPage() {
                         <h2>Редагування адміністратора</h2>
 
                         {modalError && <AlertToast message={modalError} variant="error" onClose={() => setModalError('')} />}
-                        {modalMessage && <AlertToast message={modalMessage} variant="success" onClose={() => setModalMessage('')} />}
+                        {modalMessage && (
+                            <AlertToast message={modalMessage} variant="success" onClose={() => setModalMessage('')} />
+                        )}
 
                         <input
                             value={editForm.lastName}
@@ -452,29 +535,45 @@ export default function AdminListPage() {
                         />
                         <input
                             value={editForm.email}
-                            onChange={(e) => {
-                                setEditForm((prev) => ({ ...prev, email: e.target.value, emailCode: '' }));
-                                setEmailCodeRequested(false);
-                            }}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
                             placeholder="Email"
                         />
                         <input
                             value={editForm.phone}
-                            onChange={(e) => {
-                                setEditForm((prev) => ({ ...prev, phone: e.target.value }));
-                                setPhoneVerificationSessionId('');
-                                setPhoneVerified(false);
-                                setTelegramBotUrl('');
-                            }}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, phone: e.target.value }))}
                             placeholder="Телефон"
                         />
 
                         <div className="admin-list-page__verify-row">
-                            <button type="button" onClick={handleRequestEmailCodeForEdit} disabled={emailCodeLoading}>
-                                {emailCodeLoading ? 'НАДСИЛАННЯ...' : 'НАДІСЛАТИ КОД НА ПОШТУ'}
+                            <button
+                                type="button"
+                                onClick={handleRequestEmailCodeForEdit}
+                                disabled={emailCodeLoading || cooldownActive}
+                                title={emailCodeRequested ? 'Надіслати код' : undefined}
+                            >
+                                {emailCodeLoading
+                                    ? 'НАДСИЛАННЯ...'
+                                    : cooldownActive
+                                        ? `НАДІСЛАНО ${formatCooldown(cooldownLeftMs)}`
+                                        : emailCodeRequested
+                                            ? 'НАДІСЛАТИ КОД'
+                                            : 'НАДІСЛАТИ КОД НА ПОШТУ'}
                             </button>
-                            <button type="button" onClick={handleStartPhoneVerificationForEdit} disabled={phoneVerifyLoading}>
-                                {phoneVerifyLoading ? 'ПІДГОТОВКА...' : 'ПІДТВЕРДИТИ ТЕЛЕФОН'}
+
+                            <button
+                                type="button"
+                                onClick={handleStartPhoneVerificationForEdit}
+                                disabled={
+                                    phoneVerifyLoading ||
+                                    !normalizedEditPhone ||
+                                    (phoneVerified && normalizedEditPhone === phoneVerifiedForPhone)
+                                }
+                            >
+                                {phoneVerifyLoading
+                                    ? 'ПІДГОТОВКА...'
+                                    : phoneVerified && normalizedEditPhone === phoneVerifiedForPhone
+                                        ? 'ТЕЛЕФОН ПІДТВЕРДЖЕНО'
+                                        : 'ПІДТВЕРДИТИ ТЕЛЕФОН'}
                             </button>
                         </div>
 
@@ -498,20 +597,37 @@ export default function AdminListPage() {
                             <span className={phoneVerified ? 'ok' : 'pending'}>
                                 Телефон: {phoneVerified ? 'підтверджено' : 'не підтверджено'}
                             </span>
-                            {telegramBotUrl && (
-                                <a href={telegramBotUrl} target="_blank" rel="noreferrer">
-                                    ВІДКРИТИ TELEGRAM
-                                </a>
-                            )}
                         </div>
 
                         <div className="admin-list-page__modal-actions">
-                            <button type="button" onClick={closeEditModal}>Скасувати</button>
+                            <button type="button" onClick={closeEditModal}>
+                                СКАСУВАТИ
+                            </button>
                             <button type="submit" disabled={editLoading}>
-                                {editLoading ? 'Збереження...' : 'Зберегти'}
+                                {editLoading ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ'}
                             </button>
                         </div>
                     </form>
+                </div>
+            )}
+
+            {isPhoneModalOpen && telegramBotUrl && (
+                <div className="admin-list-page__phone-modal-backdrop">
+                    <div className="admin-list-page__phone-modal">
+                        <h2>ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ</h2>
+                        <TelegramQrCard
+                            telegramBotUrl={telegramBotUrl}
+                            title="QR ДЛЯ ПІДТВЕРДЖЕННЯ НОВОГО ТЕЛЕФОНУ"
+                            subtitle="Скануй код через Telegram або натисни кнопку переходу. Вікно закриється після підтвердження."
+                        />
+                        <div className="admin-list-page__phone-modal-loader">
+                            <div className="admin-list-page__spinner" />
+                            <span>Очікуємо підтвердження...</span>
+                        </div>
+                        <button type="button" onClick={() => setIsPhoneModalOpen(false)}>
+                            ЗГОРНУТИ
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

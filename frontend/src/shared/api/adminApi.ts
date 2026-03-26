@@ -1,3 +1,4 @@
+﻿// C:\Users\hmax0\Desktop\oradent\frontend\src\shared\api\adminApi.ts
 import { http } from './http';
 
 export async function getAllAdmins(token: string) {
@@ -37,8 +38,8 @@ export async function createAdmin(
         phone: string;
         email: string;
         password: string;
-        emailCode: string;
-        phoneVerificationSessionId: string;
+        emailCode?: string;
+        phoneVerificationSessionId?: string;
     },
 ) {
     return http<{
@@ -71,6 +72,9 @@ export async function updateAdmin(
         middleName?: string;
         email?: string;
         phone?: string;
+        emailCode?: string;
+        phoneVerificationSessionId?: string;
+        superAdminPassword: string;
     },
 ) {
     return http<{

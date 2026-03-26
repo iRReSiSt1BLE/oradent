@@ -8,6 +8,7 @@ import { ConfigModule } from '@nestjs/config';
 import { VerificationModule } from '../verification/verification.module';
 import { MailModule } from '../mail/mail.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
+import { PatientModule } from '../patient/patient.module';
 
 @Module({
     imports: [
@@ -17,11 +18,10 @@ import { PhoneVerificationModule } from '../phone-verification/phone-verificatio
         VerificationModule,
         MailModule,
         PhoneVerificationModule,
+        PatientModule,
     ],
     providers: [AdminService],
     controllers: [AdminController],
     exports: [AdminService],
 })
 export class AdminModule {}
-
-

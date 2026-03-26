@@ -3,6 +3,7 @@ import {
     ForbiddenException,
     Injectable,
     OnModuleInit,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
@@ -18,7 +19,7 @@ import { VerificationType } from '../common/enums/verification-type.enum';
 import { MailService } from '../mail/mail.service';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
 import { UpdateAdminDto } from './dto/update-admin.dto';
-
+import { PatientService } from '../patient/patient.service';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -30,10 +31,64 @@ export class AdminService implements OnModuleInit {
         private readonly verificationService: VerificationService,
         private readonly mailService: MailService,
         private readonly phoneVerificationService: PhoneVerificationService,
+        private readonly patientService: PatientService,
     ) {}
 
     async onModuleInit() {
         await this.ensureDefaultSuperAdmin();
+    }
+
+    private normalizePhone(phone: string) {
+        return phone.trim();
+    }
+
+    async findByUserId(userId: string): Promise<Admin | null> {
+        return this.adminRepository.findOne({
+            where: { user: { id: userId } },
+        });
+    }
+
+    async findByPhone(phone: string): Promise<Admin | null> {
+        return this.adminRepository.findOne({
+            where: { phone: this.normalizePhone(phone) },
+        });
+    }
+
+    async saveAdmin(admin: Admin): Promise<Admin> {
+        return this.adminRepository.save(admin);
+    }
+
+    private async ensurePhoneAvailable(phone: string, exceptAdminId?: string) {
+        const normalizedPhone = this.normalizePhone(phone);
+
+        const adminWithPhone = await this.findByPhone(normalizedPhone);
+        if (adminWithPhone && adminWithPhone.id !== exceptAdminId) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим адміністратором');
+        }
+
+        const patientWithPhone = await this.patientService.findByPhone(normalizedPhone);
+        if (patientWithPhone) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+        }
+
+        return normalizedPhone;
+    }
+
+    private async verifySuperAdminPassword(currentUserId: string, password: string) {
+        const currentUser = await this.userService.findById(currentUserId);
+
+        if (!currentUser || currentUser.role !== UserRole.SUPER_ADMIN) {
+            throw new ForbiddenException('Тільки супер-адмін може виконувати цю дію');
+        }
+
+        if (!currentUser.passwordHash) {
+            throw new BadRequestException('Для супер-адміна не задано локальний пароль');
+        }
+
+        const isValid = await argon2.verify(currentUser.passwordHash, password);
+        if (!isValid) {
+            throw new UnauthorizedException('Невірний пароль SUPER_ADMIN');
+        }
     }
 
     async ensureDefaultSuperAdmin() {
@@ -42,7 +97,8 @@ export class AdminService implements OnModuleInit {
         const lastName = this.configService.get<string>('SUPER_ADMIN_LAST_NAME') || 'Owner';
         const firstName = this.configService.get<string>('SUPER_ADMIN_FIRST_NAME') || 'Super';
         const middleName = this.configService.get<string>('SUPER_ADMIN_MIDDLE_NAME') || null;
-        const phone = this.configService.get<string>('SUPER_ADMIN_PHONE') || '+380000000000';
+        const phoneRaw = this.configService.get<string>('SUPER_ADMIN_PHONE') || '+380000000000';
+        const phone = this.normalizePhone(phoneRaw);
 
         if (!email || !password) return;
 
@@ -63,6 +119,8 @@ export class AdminService implements OnModuleInit {
             }
             return;
         }
+
+        await this.ensurePhoneAvailable(phone);
 
         const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
@@ -89,23 +147,17 @@ export class AdminService implements OnModuleInit {
         await this.adminRepository.save(admin);
     }
 
-    async findByUserId(userId: string): Promise<Admin | null> {
-        return this.adminRepository.findOne({
-            where: { user: { id: userId } },
-        });
-    }
-
     async ensureSuperAdmin(userId: string) {
         const user = await this.userService.findById(userId);
 
         if (!user || user.role !== UserRole.SUPER_ADMIN) {
-            throw new ForbiddenException('Тільки суперадмін може виконувати цю дію');
+            throw new ForbiddenException('Тільки супер-адмін може виконувати цю дію');
         }
 
         const admin = await this.findByUserId(userId);
 
         if (!admin || !admin.isActive) {
-            throw new ForbiddenException('Профіль суперадміна неактивний');
+            throw new ForbiddenException('Профіль супер-адміна неактивний');
         }
 
         return { user, admin };
@@ -138,6 +190,7 @@ export class AdminService implements OnModuleInit {
         await this.ensureSuperAdmin(currentUserId);
 
         const normalizedEmail = dto.email.trim().toLowerCase();
+        const normalizedPhone = await this.ensurePhoneAvailable(dto.phone);
 
         const existingUser = await this.userService.findByEmail(normalizedEmail);
         if (existingUser) {
@@ -152,7 +205,7 @@ export class AdminService implements OnModuleInit {
 
         await this.phoneVerificationService.ensureVerified(
             dto.phoneVerificationSessionId,
-            dto.phone,
+            normalizedPhone,
         );
 
         const passwordHash = await argon2.hash(dto.password, {
@@ -174,7 +227,7 @@ export class AdminService implements OnModuleInit {
             lastName: dto.lastName,
             firstName: dto.firstName,
             middleName: dto.middleName || null,
-            phone: dto.phone,
+            phone: normalizedPhone,
             phoneVerified: true,
             isActive: true,
         });
@@ -236,7 +289,7 @@ export class AdminService implements OnModuleInit {
         }
 
         if (admin.user.role === UserRole.SUPER_ADMIN) {
-            throw new BadRequestException('Не можна деактивувати суперадміністратора');
+            throw new BadRequestException('Не можна деактивувати супер-адміністратора');
         }
 
         admin.isActive = !admin.isActive;
@@ -249,9 +302,9 @@ export class AdminService implements OnModuleInit {
         };
     }
 
-
     async updateAdmin(currentUserId: string, adminId: string, dto: UpdateAdminDto) {
         await this.ensureSuperAdmin(currentUserId);
+        await this.verifySuperAdminPassword(currentUserId, dto.superAdminPassword);
 
         const admin = await this.adminRepository.findOne({
             where: { id: adminId },
@@ -261,34 +314,77 @@ export class AdminService implements OnModuleInit {
             throw new BadRequestException('Адміністратора не знайдено');
         }
 
-        if (dto.email) {
-            const normalizedEmail = dto.email.trim().toLowerCase();
-            const existingUser = await this.userService.findByEmail(normalizedEmail);
-
-            if (existingUser && existingUser.id !== admin.user.id) {
-                throw new BadRequestException('Користувач з такою поштою вже існує');
-            }
-
-            if (admin.user.email !== normalizedEmail) {
-                admin.user.email = normalizedEmail;
-
-                admin.user.googleId = null;
-                admin.user.authProvider = AuthProvider.LOCAL;
-            }
-
-            await this.userService.save(admin.user);
+        if (admin.user.role === UserRole.SUPER_ADMIN) {
+            throw new BadRequestException('Супер-адміністратора змінювати через цей endpoint заборонено');
         }
 
+        let hasChanges = false;
 
-        if (dto.lastName !== undefined) admin.lastName = dto.lastName;
-        if (dto.firstName !== undefined) admin.firstName = dto.firstName;
-        if (dto.middleName !== undefined) admin.middleName = dto.middleName || null;
+        if (dto.email !== undefined) {
+            const normalizedEmail = dto.email.trim().toLowerCase();
+            const emailChanged = admin.user.email !== normalizedEmail;
+
+            if (emailChanged) {
+                if (!dto.emailCode?.trim()) {
+                    throw new BadRequestException('Для зміни пошти потрібен код підтвердження');
+                }
+
+                const existingUser = await this.userService.findByEmail(normalizedEmail);
+                if (existingUser && existingUser.id !== admin.user.id) {
+                    throw new BadRequestException('Користувач з такою поштою вже існує');
+                }
+
+                await this.verificationService.verifyCode(
+                    normalizedEmail,
+                    VerificationType.EMAIL_VERIFY,
+                    dto.emailCode.trim(),
+                );
+
+                admin.user.email = normalizedEmail;
+                admin.user.googleId = null;
+                admin.user.authProvider = AuthProvider.LOCAL;
+                await this.userService.save(admin.user);
+                hasChanges = true;
+            }
+        }
 
         if (dto.phone !== undefined) {
-            if (admin.phone !== dto.phone) {
-                admin.phoneVerified = false;
+            const normalizedPhone = this.normalizePhone(dto.phone);
+            const phoneChanged = admin.phone !== normalizedPhone;
+
+            if (phoneChanged) {
+                if (!dto.phoneVerificationSessionId?.trim()) {
+                    throw new BadRequestException('Для зміни телефону потрібна верифікація телефону');
+                }
+
+                await this.phoneVerificationService.ensureVerified(
+                    dto.phoneVerificationSessionId.trim(),
+                    normalizedPhone,
+                );
+
+                await this.ensurePhoneAvailable(normalizedPhone, admin.id);
+
+                admin.phone = normalizedPhone;
+                admin.phoneVerified = true;
+                hasChanges = true;
             }
-            admin.phone = dto.phone;
+        }
+
+        if (dto.lastName !== undefined) {
+            admin.lastName = dto.lastName;
+            hasChanges = true;
+        }
+        if (dto.firstName !== undefined) {
+            admin.firstName = dto.firstName;
+            hasChanges = true;
+        }
+        if (dto.middleName !== undefined) {
+            admin.middleName = dto.middleName || null;
+            hasChanges = true;
+        }
+
+        if (!hasChanges) {
+            throw new BadRequestException('Немає змін для збереження');
         }
 
         const savedAdmin = await this.adminRepository.save(admin);
@@ -309,5 +405,4 @@ export class AdminService implements OnModuleInit {
             },
         };
     }
-
 }

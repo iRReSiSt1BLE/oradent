@@ -1,4 +1,4 @@
-.admin-list-page {
+﻿.admin-list-page {
   &__container {
     display: flex;
     justify-content: center;
@@ -114,6 +114,9 @@
     border-radius: 50%;
     display: inline-block;
     flex-shrink: 0;
+    border: none;
+    outline: none;
+    box-shadow: none;
   }
 
   &__status-dot.is-active {
@@ -175,7 +178,9 @@
 
   &__modal {
     width: 100%;
-    max-width: 620px;
+    max-width: 700px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
     background: #f8f8f8;
     border: 2px solid #111;
     box-shadow: 8px 8px 0 #111;
@@ -191,6 +196,8 @@
     }
 
     .alert-toast {
+      width: 100%;
+      max-width: none;
       margin-bottom: 4px;
     }
 
@@ -212,7 +219,7 @@
 
   &__verify-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 10px;
 
     button {
@@ -249,12 +256,6 @@
       color: #6b7280;
       font-weight: 700;
     }
-
-    a {
-      color: #111;
-      text-decoration: underline;
-      font-weight: 700;
-    }
   }
 
   &__modal-actions {
@@ -282,6 +283,81 @@
     button[type='submit'] {
       background: #84d8ce;
     }
+  }
+
+  &__phone-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1200;
+  }
+
+  &__phone-modal {
+    width: 100%;
+    max-width: 620px;
+    background: #f8f8f8;
+    border: 1.5px solid #111111;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 8px 8px 0 #111111;
+    display: grid;
+    gap: 12px;
+
+    h2 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #111111;
+    }
+
+    button {
+      min-height: 42px;
+      border: 2px solid #111111;
+      border-radius: 0;
+      background: #ffffff;
+      color: #111111;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      outline: none;
+    }
+
+    button:hover,
+    button:focus-visible {
+      box-shadow: 4px 4px 0 #111111;
+    }
+  }
+
+  &__phone-modal-loader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #374151;
+  }
+
+  &__spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #cfd4da;
+    border-top-color: #111111;
+    border-radius: 50%;
+    animation: admin-list-spin 0.8s linear infinite;
+  }
+}
+
+@keyframes admin-list-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

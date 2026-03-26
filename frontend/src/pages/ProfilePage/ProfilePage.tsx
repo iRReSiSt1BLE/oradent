@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getToken, removeToken } from '../../shared/utils/authStorage';
 import { getPhoneVerificationStatus } from '../../shared/api/phoneVerificationApi';
 import {
+    changeMyPassword,
     confirmEmailChange,
     confirmPhoneChange,
     getMyProfile,
@@ -10,6 +11,7 @@ import {
     updateProfile,
 } from '../../shared/api/profileApi';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
+import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import './ProfilePage.scss';
 
 type Profile = {
@@ -25,7 +27,20 @@ type Profile = {
     phoneVerified: boolean;
 };
 
-type ModalType = 'none' | 'name' | 'email' | 'phone';
+type ModalType = 'none' | 'name' | 'email' | 'phone' | 'password';
+
+const EMAIL_COOLDOWN_MS = 3 * 60 * 1000;
+
+function normalizeEmail(value: string) {
+    return value.trim().toLowerCase();
+}
+
+function formatCooldown(ms: number) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 export default function ProfilePage() {
     const token = getToken();
@@ -43,6 +58,7 @@ export default function ProfilePage() {
     const [nameLoading, setNameLoading] = useState(false);
     const [emailLoading, setEmailLoading] = useState(false);
     const [phoneLoading, setPhoneLoading] = useState(false);
+    const [passwordLoading, setPasswordLoading] = useState(false);
 
     const [nameForm, setNameForm] = useState({
         lastName: '',
@@ -58,9 +74,19 @@ export default function ProfilePage() {
         code: '',
     });
 
+    const [emailCooldownUntil, setEmailCooldownUntil] = useState(0);
+    const [emailCodeForEmail, setEmailCodeForEmail] = useState('');
+    const [nowTs, setNowTs] = useState(Date.now());
+
     const [phoneForm, setPhoneForm] = useState({
         phone: '',
         password: '',
+    });
+
+    const [passwordForm, setPasswordForm] = useState({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
     });
 
     const [telegramBotUrl, setTelegramBotUrl] = useState('');
@@ -69,7 +95,18 @@ export default function ProfilePage() {
     const pollingRef = useRef<number | null>(null);
 
     const isAdminProfile = profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN';
-    const canEditSelf = profile?.role !== 'ADMIN';
+    const canEditData = profile?.role !== 'ADMIN';
+    const canChangePassword = profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN';
+
+    const normalizedNewEmail = useMemo(() => normalizeEmail(emailForm.newEmail), [emailForm.newEmail]);
+    const cooldownLeftMs = Math.max(0, emailCooldownUntil - nowTs);
+    const cooldownActive = cooldownLeftMs > 0;
+    const cooldownKey = profile ? `profile.emailCooldown.v1:${profile.userId}` : 'profile.emailCooldown.v1:anon';
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         void loadProfile();
@@ -81,6 +118,16 @@ export default function ProfilePage() {
         };
     }, []);
 
+    useEffect(() => {
+        if (!emailCodeForEmail) return;
+        if (normalizedNewEmail !== emailCodeForEmail) {
+            setEmailStep('request');
+            setEmailForm((prev) => ({ ...prev, code: '' }));
+            setEmailCooldownUntil(0);
+            setEmailCodeForEmail('');
+        }
+    }, [normalizedNewEmail, emailCodeForEmail]);
+
     async function loadProfile() {
         if (!token) {
             setPageError('Спочатку увійди в систему');
@@ -90,7 +137,6 @@ export default function ProfilePage() {
 
         try {
             const result = await getMyProfile(token);
-
             setProfile(result.profile);
             setNameForm({
                 lastName: result.profile.lastName,
@@ -110,13 +156,26 @@ export default function ProfilePage() {
         setModalMessage('');
     }
 
-    function openModal(type: ModalType) {
-        if (!canEditSelf) return;
+    function readCooldownForEmail(email: string) {
+        try {
+            const raw = window.localStorage.getItem(cooldownKey);
+            if (!raw) return 0;
+            const parsed = JSON.parse(raw) as { email: string; until: number };
+            if (normalizeEmail(parsed.email) === normalizeEmail(email) && parsed.until > Date.now()) {
+                return parsed.until;
+            }
+            return 0;
+        } catch {
+            return 0;
+        }
+    }
 
+    function openModal(type: ModalType) {
         clearModalState();
         setModalType(type);
 
-        if (type === 'name' && profile) {
+        if (type === 'name') {
+            if (!canEditData || !profile) return;
             setNameForm({
                 lastName: profile.lastName,
                 firstName: profile.firstName,
@@ -126,21 +185,30 @@ export default function ProfilePage() {
         }
 
         if (type === 'email') {
+            if (!canEditData) return;
             setEmailStep('request');
-            setEmailForm({
-                newEmail: '',
-                password: '',
-                code: '',
-            });
+            setEmailForm({ newEmail: '', password: '', code: '' });
+            setEmailCooldownUntil(0);
+            setEmailCodeForEmail('');
         }
 
         if (type === 'phone') {
+            if (!canEditData) return;
             setPhoneForm({
                 phone: profile?.phone || '',
                 password: '',
             });
             setTelegramBotUrl('');
             setWaitingTelegram(false);
+        }
+
+        if (type === 'password') {
+            if (!canChangePassword) return;
+            setPasswordForm({
+                currentPassword: '',
+                newPassword: '',
+                confirmPassword: '',
+            });
         }
     }
 
@@ -159,10 +227,11 @@ export default function ProfilePage() {
     async function handleSaveName(e: React.FormEvent) {
         e.preventDefault();
 
-        if (!token || !canEditSelf) return;
+        if (!token || !canEditData) return;
 
         setNameLoading(true);
         clearModalState();
+
         try {
             const result = await updateProfile(token, {
                 lastName: nameForm.lastName,
@@ -192,7 +261,8 @@ export default function ProfilePage() {
     }
 
     async function handleRequestEmailChange() {
-        if (!token || !canEditSelf) return;
+        if (!token || !canEditData) return;
+        if (cooldownActive) return;
 
         setEmailLoading(true);
         clearModalState();
@@ -203,7 +273,16 @@ export default function ProfilePage() {
                 password: emailForm.password,
             });
 
+            const until = Date.now() + EMAIL_COOLDOWN_MS;
             setEmailStep('confirm');
+            setEmailCodeForEmail(normalizedNewEmail);
+            setEmailCooldownUntil(until);
+
+            window.localStorage.setItem(
+                cooldownKey,
+                JSON.stringify({ email: normalizedNewEmail, until }),
+            );
+
             setModalMessage(result.message);
         } catch (err) {
             setModalError(err instanceof Error ? err.message : 'Не вдалося надіслати код');
@@ -213,7 +292,7 @@ export default function ProfilePage() {
     }
 
     async function handleConfirmEmailChange() {
-        if (!token || !canEditSelf) return;
+        if (!token || !canEditData) return;
 
         setEmailLoading(true);
         clearModalState();
@@ -224,14 +303,11 @@ export default function ProfilePage() {
                 code: emailForm.code,
             });
 
-            setProfile((prev) =>
-                prev
-                    ? {
-                        ...prev,
-                        email: result.email,
-                    }
-                    : prev,
-            );
+            setProfile((prev) => (prev ? { ...prev, email: result.email } : prev));
+
+            window.localStorage.removeItem(cooldownKey);
+            setEmailCooldownUntil(0);
+            setEmailCodeForEmail('');
 
             setPageMessage(result.message);
             closeModal();
@@ -243,7 +319,7 @@ export default function ProfilePage() {
     }
 
     async function handleStartPhoneChange() {
-        if (!token || !canEditSelf) return;
+        if (!token || !canEditData) return;
 
         setPhoneLoading(true);
         clearModalState();
@@ -257,7 +333,9 @@ export default function ProfilePage() {
             setTelegramBotUrl(result.telegramBotUrl);
             setWaitingTelegram(true);
 
-            window.open(result.telegramBotUrl, '_blank', 'noopener,noreferrer');
+            if (pollingRef.current) {
+                window.clearInterval(pollingRef.current);
+            }
 
             pollingRef.current = window.setInterval(async () => {
                 try {
@@ -319,6 +397,43 @@ export default function ProfilePage() {
         }
     }
 
+    async function handleChangePassword(e: React.FormEvent) {
+        e.preventDefault();
+        if (!token || !canChangePassword) return;
+
+        if (!passwordForm.currentPassword.trim()) {
+            setModalError('Введи поточний пароль');
+            return;
+        }
+
+        if (!passwordForm.newPassword.trim()) {
+            setModalError('Введи новий пароль');
+            return;
+        }
+
+        if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+            setModalError('Новий пароль і підтвердження не співпадають');
+            return;
+        }
+
+        setPasswordLoading(true);
+        clearModalState();
+
+        try {
+            const result = await changeMyPassword(token, {
+                currentPassword: passwordForm.currentPassword,
+                newPassword: passwordForm.newPassword,
+            });
+
+            setPageMessage(result.message || 'Пароль успішно змінено');
+            closeModal();
+        } catch (err) {
+            setModalError(err instanceof Error ? err.message : 'Не вдалося змінити пароль');
+        } finally {
+            setPasswordLoading(false);
+        }
+    }
+
     function handleLogout() {
         removeToken();
         window.location.href = '/login';
@@ -347,9 +462,9 @@ export default function ProfilePage() {
                                     {isAdminProfile ? 'ПРОФІЛЬ АДМІНА' : 'ПРОФІЛЬ ПАЦІЄНТА'}
                                 </h1>
                                 <p className="profile-retro__subtitle">
-                                    {canEditSelf
+                                    {canEditData
                                         ? 'Тут можна змінити ПІБ, пошту та номер телефону.'
-                                        : 'Редагування профілю доступне лише для SUPER_ADMIN.'}
+                                        : 'Редагування ПІБ/контактів доступне лише для SUPER_ADMIN.'}
                                 </p>
                             </div>
 
@@ -384,28 +499,36 @@ export default function ProfilePage() {
                                     </div>
                                 </div>
 
-                                {canEditSelf && (
-                                    <div className="profile-retro__actions">
-                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('name')}>
-                                            ЗМІНИТИ ІМ’Я
-                                        </button>
+                                <div className="profile-retro__actions">
+                                    {canEditData && (
+                                        <>
+                                            <button className="profile-retro__secondary" type="button" onClick={() => openModal('name')}>
+                                                ЗМІНИТИ ІМ’Я
+                                            </button>
 
-                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('email')}>
-                                            ЗМІНИТИ ПОШТУ
-                                        </button>
+                                            <button className="profile-retro__secondary" type="button" onClick={() => openModal('email')}>
+                                                ЗМІНИТИ ПОШТУ
+                                            </button>
 
-                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('phone')}>
-                                            ЗМІНИТИ ТЕЛЕФОН
+                                            <button className="profile-retro__secondary" type="button" onClick={() => openModal('phone')}>
+                                                ЗМІНИТИ ТЕЛЕФОН
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {canChangePassword && (
+                                        <button className="profile-retro__secondary" type="button" onClick={() => openModal('password')}>
+                                            ЗМІНИТИ ПАРОЛЬ
                                         </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </>
                         ) : null}
                     </div>
                 </div>
             </div>
 
-            {modalType !== 'none' && canEditSelf && (
+            {modalType !== 'none' && (
                 <div className="profile-retro__modal-backdrop">
                     <div className="profile-retro__modal">
                         {modalError && (
@@ -420,7 +543,7 @@ export default function ProfilePage() {
                             </div>
                         )}
 
-                        {modalType === 'name' && (
+                        {modalType === 'name' && canEditData && (
                             <>
                                 <h2 className="profile-retro__modal-title">ЗМІНА ІМЕНІ</h2>
 
@@ -480,7 +603,7 @@ export default function ProfilePage() {
                             </>
                         )}
 
-                        {modalType === 'email' && (
+                        {modalType === 'email' && canEditData && (
                             <>
                                 <h2 className="profile-retro__modal-title">ЗМІНА ПОШТИ</h2>
 
@@ -494,7 +617,12 @@ export default function ProfilePage() {
                                                 type="email"
                                                 placeholder="new@email.com"
                                                 value={emailForm.newEmail}
-                                                onChange={(e) => setEmailForm((prev) => ({ ...prev, newEmail: e.target.value }))}
+                                                onChange={(e) => {
+                                                    const next = e.target.value;
+                                                    setEmailForm((prev) => ({ ...prev, newEmail: next }));
+                                                    const until = readCooldownForEmail(next);
+                                                    setEmailCooldownUntil(until);
+                                                }}
                                             />
                                         </div>
                                         <div className="profile-retro__field">
@@ -518,9 +646,16 @@ export default function ProfilePage() {
                                                 className="profile-retro__submit"
                                                 type="button"
                                                 onClick={handleRequestEmailChange}
-                                                disabled={emailLoading}
+                                                disabled={emailLoading || cooldownActive}
+                                                title={emailCodeForEmail ? 'Надіслати код' : undefined}
                                             >
-                                                {emailLoading ? 'НАДСИЛАННЯ...' : 'ОТРИМАТИ КОД'}
+                                                {emailLoading
+                                                    ? 'НАДСИЛАННЯ...'
+                                                    : cooldownActive
+                                                        ? `НАДІСЛАНО ${formatCooldown(cooldownLeftMs)}`
+                                                        : emailCodeForEmail
+                                                            ? 'НАДІСЛАТИ КОД'
+                                                            : 'ОТРИМАТИ КОД'}
                                             </button>
                                         </div>
                                     </>
@@ -560,7 +695,7 @@ export default function ProfilePage() {
                             </>
                         )}
 
-                        {modalType === 'phone' && (
+                        {modalType === 'phone' && canEditData && (
                             <>
                                 <h2 className="profile-retro__modal-title">ЗМІНА ТЕЛЕФОНУ</h2>
 
@@ -600,7 +735,7 @@ export default function ProfilePage() {
                                                 onClick={handleStartPhoneChange}
                                                 disabled={phoneLoading}
                                             >
-                                                {phoneLoading ? 'ПІДГОТОВКА...' : 'ВІДКРИТИ TELEGRAM'}
+                                                {phoneLoading ? 'ПІДГОТОВКА...' : 'ПОКАЗАТИ QR-КОД'}
                                             </button>
                                         </div>
                                     </>
@@ -611,14 +746,11 @@ export default function ProfilePage() {
                                         </p>
 
                                         {telegramBotUrl && (
-                                            <a
-                                                className="profile-retro__telegram-button"
-                                                href={telegramBotUrl}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                            >
-                                                ВІДКРИТИ TELEGRAM
-                                            </a>
+                                            <TelegramQrCard
+                                                telegramBotUrl={telegramBotUrl}
+                                                title="QR ДЛЯ ПІДТВЕРДЖЕННЯ НОВОГО ТЕЛЕФОНУ"
+                                                subtitle="Скануй QR через Telegram або натисни кнопку переходу."
+                                            />
                                         )}
 
                                         <div className="profile-retro__loading">
@@ -635,10 +767,66 @@ export default function ProfilePage() {
                                 )}
                             </>
                         )}
+
+                        {modalType === 'password' && canChangePassword && (
+                            <>
+                                <h2 className="profile-retro__modal-title">ЗМІНА ПАРОЛЮ</h2>
+
+                                <form className="profile-retro__modal-form" onSubmit={handleChangePassword}>
+                                    <div className="profile-retro__field">
+                                        <label htmlFor="current-password">ПОТОЧНИЙ ПАРОЛЬ</label>
+                                        <input
+                                            id="current-password"
+                                            className="profile-retro__input"
+                                            type="password"
+                                            value={passwordForm.currentPassword}
+                                            onChange={(e) =>
+                                                setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="profile-retro__field">
+                                        <label htmlFor="new-password">НОВИЙ ПАРОЛЬ</label>
+                                        <input
+                                            id="new-password"
+                                            className="profile-retro__input"
+                                            type="password"
+                                            value={passwordForm.newPassword}
+                                            onChange={(e) =>
+                                                setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="profile-retro__field">
+                                        <label htmlFor="confirm-password">ПІДТВЕРДИ НОВИЙ ПАРОЛЬ</label>
+                                        <input
+                                            id="confirm-password"
+                                            className="profile-retro__input"
+                                            type="password"
+                                            value={passwordForm.confirmPassword}
+                                            onChange={(e) =>
+                                                setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="profile-retro__modal-actions">
+                                        <button className="profile-retro__secondary" type="button" onClick={closeModal}>
+                                            СКАСУВАТИ
+                                        </button>
+
+                                        <button className="profile-retro__submit" type="submit" disabled={passwordLoading}>
+                                            {passwordLoading ? 'ЗМІНА...' : 'ЗМІНИТИ ПАРОЛЬ'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
         </div>
     );
 }
-
