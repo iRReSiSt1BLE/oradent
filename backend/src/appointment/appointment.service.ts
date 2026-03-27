@@ -7,6 +7,7 @@ import { PhoneVerificationService } from '../phone-verification/phone-verificati
 import { CreateGuestAppointmentDto } from './dto/create-guest-appointment.dto';
 import { CreateAuthenticatedAppointmentDto } from './dto/create-authenticated-appointment.dto';
 import { UserService } from '../user/user.service';
+import { ServicesService } from '../services/services.service';
 
 @Injectable()
 export class AppointmentService {
@@ -16,6 +17,7 @@ export class AppointmentService {
         private readonly patientService: PatientService,
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly userService: UserService,
+        private readonly servicesService: ServicesService,
     ) {}
 
     async createGuestAppointment(dto: CreateGuestAppointmentDto) {
@@ -23,6 +25,8 @@ export class AppointmentService {
             dto.phoneVerificationSessionId,
             dto.phone,
         );
+
+        await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
 
         let patient = await this.patientService.findByPhone(dto.phone);
 
@@ -79,15 +83,15 @@ export class AppointmentService {
             throw new BadRequestException('Пацієнта не знайдено');
         }
 
-
         const patient = user.patient;
 
         if (!patient.phoneVerified) {
-            if(!patient.phone){
+            if (!patient.phone) {
                 throw new BadRequestException(
                     'У профілі пацієнта відсутній номер телефону',
                 );
             }
+
             if (!dto.phoneVerificationSessionId) {
                 throw new BadRequestException(
                     'Потрібно один раз підтвердити номер телефону',
@@ -106,6 +110,8 @@ export class AppointmentService {
         if (!dto.doctorId || !dto.serviceId || !dto.appointmentDate) {
             throw new BadRequestException('Потрібно заповнити лікаря, послугу і дату запису');
         }
+
+        await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
 
         const appointment = this.appointmentRepository.create({
             patient,
@@ -134,6 +140,7 @@ export class AppointmentService {
             },
         };
     }
+
     async getAllAppointments() {
         return this.appointmentRepository.find({
             relations: ['patient'],

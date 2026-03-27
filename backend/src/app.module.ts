@@ -3,27 +3,23 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppointmentModule } from './appointment/appointment.module';
 import { VideoModule } from './video/video.module';
-
-
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
 import { PatientModule } from './patient/patient.module';
 import { VerificationModule } from './verification/verification.module';
-
 import { PatientMedicalRecordModule } from './patient-medical-record/patient-medical-record.module';
 import { PhoneVerificationModule } from './phone-verification/phone-verification.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CleanupModule } from './cleanup/cleanup.module';
-import {ProfileModule} from "./profile/profile.module";
-import {AdminModule} from "./admin/admin.module";
-
+import { ProfileModule } from './profile/profile.module';
+import { AdminModule } from './admin/admin.module';
+import { ServicesModule } from './services/services.module';
 
 @Module({
     imports: [
         ConfigModule.forRoot({
             isGlobal: true,
         }),
-
         TypeOrmModule.forRootAsync({
             imports: [ConfigModule],
             inject: [ConfigService],
@@ -40,7 +36,6 @@ import {AdminModule} from "./admin/admin.module";
         }),
         ScheduleModule.forRoot(),
         CleanupModule,
-
         UserModule,
         PatientModule,
         AuthModule,
@@ -51,7 +46,7 @@ import {AdminModule} from "./admin/admin.module";
         PhoneVerificationModule,
         ProfileModule,
         AdminModule,
-
+        ServicesModule,
     ],
     controllers: [],
     providers: [],

@@ -113,7 +113,8 @@
     grid-column: 1 / -1;
   }
 
-  &__input {
+  &__input,
+  &__select {
     width: 100%;
     min-height: 42px;
     padding: 8px 12px;
@@ -307,6 +308,7 @@
     }
 
     &__input,
+    &__select,
     &__submit,
     &__mode {
       min-height: 40px;

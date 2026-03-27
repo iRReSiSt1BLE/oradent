@@ -33,6 +33,7 @@ export default function Header() {
 
     const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'DOCTOR';
     const isSuperAdmin = role === 'SUPER_ADMIN';
+    const isAdminOrSuperAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
 
     const [menuOpen, setMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -50,6 +51,8 @@ export default function Header() {
         { to: '/', label: 'Головна' },
         { to: '/profile', label: 'Профіль' },
         { to: '/appointment', label: 'Записи' },
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/services/list', label: 'Послуги (перегляд)' }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/services/create', label: 'Послуги (створення)' }] : []),
         ...(isSuperAdmin ? [{ to: '/admins/list', label: 'Адміністратори (список)' }] : []),
         ...(isSuperAdmin ? [{ to: '/admins/create', label: 'Створення адміністратора' }] : []),
     ];

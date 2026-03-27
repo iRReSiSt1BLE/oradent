@@ -6,6 +6,7 @@ import { AppointmentService } from './appointment.service';
 import { PatientModule } from '../patient/patient.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { UserModule } from '../user/user.module';
+import { ServicesModule } from '../services/services.module';
 
 @Module({
     imports: [
@@ -13,6 +14,7 @@ import { UserModule } from '../user/user.module';
         PatientModule,
         PhoneVerificationModule,
         UserModule,
+        ServicesModule,
     ],
     controllers: [AppointmentController],
     providers: [AppointmentService],

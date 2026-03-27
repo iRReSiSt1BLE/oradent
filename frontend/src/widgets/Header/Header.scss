@@ -25,15 +25,15 @@
     letter-spacing: 0.34em;
     text-transform: uppercase;
     text-align: center;
-    transition: background .5s ease, color 0.2s ease;
+    transition: background 0.5s ease, color 0.2s ease;
   }
 
   &__topbar-link--left {
-    background: #81D3C5;
+    background: #81d3c5;
   }
 
   &__topbar-link--right {
-    background: #70B2A5;
+    background: #70b2a5;
     border-left: 1px solid rgba(255, 255, 255, 0.1);
   }
 
@@ -205,6 +205,7 @@
   &__menu-button--open &__menu-caret {
     transform: rotate(-135deg) translateY(-1px);
   }
+
   &__menu-panel {
     position: absolute;
     top: calc(100% + 10px);
