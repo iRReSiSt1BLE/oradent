@@ -16,6 +16,7 @@ import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { ConfigService } from '@nestjs/config';
+import { DoctorService } from '../doctor/doctor.service';
 
 type RateSource = 'live' | 'cache' | 'fallback';
 
@@ -31,6 +32,7 @@ export class ServicesService {
         private readonly userService: UserService,
         private readonly adminService: AdminService,
         private readonly configService: ConfigService,
+        private readonly doctorService: DoctorService,
     ) {}
 
     private normalizeName(name: string): string {
@@ -121,6 +123,13 @@ export class ServicesService {
             throw new BadRequestException(
                 `Користувачі не є лікарями: ${notDoctors.map((u) => u.id).join(', ')}`,
             );
+        }
+
+        for (const doctorUser of doctors) {
+            const doctorProfile = await this.doctorService.findByUserId(doctorUser.id);
+            if (!doctorProfile || !doctorProfile.isActive) {
+                throw new BadRequestException(`Лікар деактивований або не має профілю: ${doctorUser.email}`);
+            }
         }
 
         return doctors;
@@ -474,7 +483,7 @@ export class ServicesService {
     async getDoctorsForAssignment(currentUserId: string) {
         await this.ensureManagerAccess(currentUserId);
 
-        const doctors = await this.userService.findByRole(UserRole.DOCTOR);
+        const doctors = await this.doctorService.getDoctorsForOptions();
 
         return {
             ok: true,
@@ -633,9 +642,14 @@ export class ServicesService {
             throw new BadRequestException('Категорія послуги деактивована');
         }
 
-        const doctor = await this.userService.findById(doctorId);
-        if (!doctor || doctor.role !== UserRole.DOCTOR) {
+        const doctorUser = await this.userService.findById(doctorId);
+        if (!doctorUser || doctorUser.role !== UserRole.DOCTOR) {
             throw new BadRequestException('Лікаря не знайдено');
+        }
+
+        const doctorProfile = await this.doctorService.findByUserId(doctorUser.id);
+        if (!doctorProfile || !doctorProfile.isActive) {
+            throw new BadRequestException('Лікаря деактивовано');
         }
 
         if (service.doctorUsers.length > 0) {

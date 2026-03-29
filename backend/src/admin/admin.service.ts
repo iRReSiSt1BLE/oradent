@@ -20,12 +20,15 @@ import { MailService } from '../mail/mail.service';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { PatientService } from '../patient/patient.service';
+import { Doctor } from '../doctor/entities/doctor.entity';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
     constructor(
         @InjectRepository(Admin)
         private readonly adminRepository: Repository<Admin>,
+        @InjectRepository(Doctor)
+        private readonly doctorRepository: Repository<Doctor>,
         private readonly userService: UserService,
         private readonly configService: ConfigService,
         private readonly verificationService: VerificationService,
@@ -64,6 +67,13 @@ export class AdminService implements OnModuleInit {
         const adminWithPhone = await this.findByPhone(normalizedPhone);
         if (adminWithPhone && adminWithPhone.id !== exceptAdminId) {
             throw new BadRequestException('Цей номер телефону вже використовується іншим адміністратором');
+        }
+
+        const doctorWithPhone = await this.doctorRepository.findOne({
+            where: { phone: normalizedPhone },
+        });
+        if (doctorWithPhone) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
         }
 
         const patientWithPhone = await this.patientService.findByPhone(normalizedPhone);

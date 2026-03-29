@@ -3,6 +3,20 @@ import { http } from './http';
 export type ServiceDoctor = {
     id: string;
     email: string;
+    fullName?: string;
+    lastName?: string;
+    firstName?: string;
+    middleName?: string | null;
+    hasAvatar?: boolean;
+    avatarVersion?: number;
+};
+
+export type ServiceDoctorOption = {
+    id: string;
+    email: string;
+    fullName?: string;
+    hasAvatar?: boolean;
+    avatarVersion?: number;
 };
 
 export type ServiceCategory = {
@@ -105,7 +119,7 @@ export async function toggleCategoryActive(token: string, categoryId: string) {
 }
 
 export async function getDoctorsOptions(token: string) {
-    return http<{ ok: boolean; doctors: ServiceDoctor[] }>('/services/doctors/options', {
+    return http<{ ok: boolean; doctors: ServiceDoctorOption[] }>('/services/doctors/options', {
         method: 'GET',
         token,
     });

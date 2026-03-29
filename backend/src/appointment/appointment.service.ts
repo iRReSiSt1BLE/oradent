@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+    BadRequestException,
+    ForbiddenException,
+    Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
@@ -8,12 +12,23 @@ import { CreateGuestAppointmentDto } from './dto/create-guest-appointment.dto';
 import { CreateAuthenticatedAppointmentDto } from './dto/create-authenticated-appointment.dto';
 import { UserService } from '../user/user.service';
 import { ServicesService } from '../services/services.service';
+import { Video } from '../video/entities/video.entity';
+import { UserRole } from '../common/enums/user-role.enum';
+
+type JwtUser = {
+    id: string;
+    email: string;
+    role: UserRole;
+    patientId: string | null;
+};
 
 @Injectable()
 export class AppointmentService {
     constructor(
         @InjectRepository(Appointment)
         private readonly appointmentRepository: Repository<Appointment>,
+        @InjectRepository(Video)
+        private readonly videoRepository: Repository<Video>,
         private readonly patientService: PatientService,
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly userService: UserService,
@@ -55,6 +70,8 @@ export class AppointmentService {
                 : null,
             status: 'BOOKED',
             source: 'GUEST',
+            recordingCompleted: false,
+            recordingCompletedAt: null,
         });
 
         const savedAppointment = await this.appointmentRepository.save(appointment);
@@ -108,7 +125,9 @@ export class AppointmentService {
         }
 
         if (!dto.doctorId || !dto.serviceId || !dto.appointmentDate) {
-            throw new BadRequestException('Потрібно заповнити лікаря, послугу і дату запису');
+            throw new BadRequestException(
+                'Потрібно заповнити лікаря, послугу і дату запису',
+            );
         }
 
         await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
@@ -122,6 +141,8 @@ export class AppointmentService {
                 : null,
             status: 'BOOKED',
             source: 'AUTHENTICATED',
+            recordingCompleted: false,
+            recordingCompletedAt: null,
         });
 
         const savedAppointment = await this.appointmentRepository.save(appointment);
@@ -138,6 +159,46 @@ export class AppointmentService {
                 phone: patient.phone,
                 phoneVerified: patient.phoneVerified,
             },
+        };
+    }
+
+    async completeRecording(appointmentId: string, actor: JwtUser) {
+        const appointment = await this.appointmentRepository.findOne({
+            where: { id: appointmentId },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new BadRequestException('Запис на прийом не знайдено');
+        }
+
+        if (actor.role === UserRole.DOCTOR && appointment.doctorId !== actor.id) {
+            throw new ForbiddenException('Цей прийом не належить поточному лікарю');
+        }
+
+        if (actor.role === UserRole.PATIENT) {
+            throw new ForbiddenException('Пацієнт не може завершувати запис прийому');
+        }
+
+        const recordingsCount = await this.videoRepository.count({
+            where: { appointmentId },
+        });
+
+        if (recordingsCount === 0) {
+            throw new BadRequestException(
+                'Неможливо завершити запис без жодного відео',
+            );
+        }
+
+        appointment.recordingCompleted = true;
+        appointment.recordingCompletedAt = new Date();
+
+        const saved = await this.appointmentRepository.save(appointment);
+
+        return {
+            ok: true,
+            message: 'Запис прийому завершено',
+            appointment: saved,
         };
     }
 

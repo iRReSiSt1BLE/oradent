@@ -1,0 +1,145 @@
+.doctor-appointments-page {
+  &__container {
+    display: flex;
+    justify-content: center;
+  }
+
+  &__card {
+    width: 100%;
+    max-width: 980px;
+    background: #f8f8f8;
+    border: 1.5px solid #111;
+    border-radius: 16px;
+    box-shadow: 10px 10px 0 #111;
+    padding: 24px;
+  }
+
+  &__title {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    letter-spacing: 0.06em;
+    color: #111;
+  }
+
+  &__subtitle {
+    margin: 8px 0 16px;
+    color: #55606d;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  &__top-alert {
+    margin-bottom: 12px;
+
+    .alert-toast {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  &__search {
+    width: 100%;
+    min-height: 44px;
+    border: 2px solid #111;
+    border-radius: 0;
+    background: #fff;
+    padding: 0 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    margin-bottom: 14px;
+  }
+
+  &__state,
+  &__blocked {
+    border: 1.5px solid #d6dce2;
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: #44505d;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  &__list {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__item {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1.5px solid #111;
+    border-radius: 12px;
+    background: #fff;
+    padding: 14px;
+    color: #111;
+    transition: box-shadow 0.12s ease;
+  }
+
+  &__item:hover,
+  &__item:focus-visible {
+    box-shadow: 4px 4px 0 #111;
+  }
+
+  &__item-main {
+    h3 {
+      margin: 0 0 6px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 30px;
+      color: #111;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #5b6674;
+      line-height: 1.45;
+    }
+  }
+
+  &__item-status {
+    display: grid;
+    gap: 6px;
+    justify-items: end;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: #111;
+    }
+
+    strong.is-done {
+      color: #166534;
+    }
+  }
+
+  &__status-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    border: 2px solid #111;
+    padding: 6px 10px;
+    background: #84d8ce;
+    color: #111;
+    text-transform: uppercase;
+  }
+}
+
+@media (max-width: 760px) {
+  .doctor-appointments-page {
+    &__item {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    &__item-status {
+      justify-items: start;
+    }
+  }
+}

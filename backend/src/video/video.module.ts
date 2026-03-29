@@ -6,9 +6,11 @@ import { VideoService } from './video.service';
 import { VideoSignatureService } from './video-signature.service';
 import { VideoTsaService } from './video-tsa.service';
 import { VideoEncryptionService } from './video-encryption.service';
+import { Appointment } from '../appointment/entities/appointment.entity';
+import { User } from '../user/entities/user.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Video])],
+    imports: [TypeOrmModule.forFeature([Video, Appointment, User])],
     controllers: [VideoController],
     providers: [
         VideoService,

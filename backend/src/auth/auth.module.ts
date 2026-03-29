@@ -14,7 +14,8 @@ import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { PendingRegistration } from './entities/pending-registration.entity';
 import { PendingRegistrationService } from './pending-registration.service';
 import { MailModule } from '../mail/mail.module';
-import {AdminModule} from "../admin/admin.module";
+import { AdminModule } from '../admin/admin.module';
+import { DoctorModule } from '../doctor/doctor.module';
 
 @Module({
     imports: [
@@ -25,6 +26,7 @@ import {AdminModule} from "../admin/admin.module";
         VerificationModule,
         MailModule,
         AdminModule,
+        DoctorModule,
         JwtModule.registerAsync({
             imports: [ConfigModule],
             inject: [ConfigService],

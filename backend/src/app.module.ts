@@ -14,6 +14,7 @@ import { CleanupModule } from './cleanup/cleanup.module';
 import { ProfileModule } from './profile/profile.module';
 import { AdminModule } from './admin/admin.module';
 import { ServicesModule } from './services/services.module';
+import { DoctorModule } from './doctor/doctor.module';
 
 @Module({
     imports: [
@@ -46,6 +47,7 @@ import { ServicesModule } from './services/services.module';
         PhoneVerificationModule,
         ProfileModule,
         AdminModule,
+        DoctorModule,
         ServicesModule,
     ],
     controllers: [],

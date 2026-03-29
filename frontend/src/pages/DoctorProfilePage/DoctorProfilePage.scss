@@ -1,0 +1,286 @@
+.doctor-profile-page {
+  &__container {
+    display: flex;
+    justify-content: center;
+    padding-top: 22px;
+    padding-bottom: 22px;
+  }
+
+  &__content {
+    width: 100%;
+    max-width: 860px;
+  }
+
+  &__top-alert {
+    margin-bottom: 18px;
+
+    .alert-toast {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  &__card {
+    width: 100%;
+    background: #f8f8f8;
+    border: 1.5px solid #111111;
+    border-radius: 12px;
+    padding: 28px 24px 22px;
+    box-shadow: 8px 8px 0 #111111;
+  }
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 22px;
+  }
+
+  &__title {
+    margin: 0 0 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    line-height: 1;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #111111;
+  }
+
+  &__subtitle {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #374151;
+  }
+
+  &__stack {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  &__info-card {
+    padding: 18px 16px;
+    border: 2px solid #111111;
+    background: #ffffff;
+    font-family: 'IBM Plex Mono', monospace;
+
+    span {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+    }
+
+    strong {
+      display: block;
+      font-size: 18px;
+      color: #111111;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  &__state {
+    border: 1.5px solid #d6dce2;
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: #44505d;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  &__danger,
+  &__secondary,
+  &__submit {
+    min-height: 46px;
+    border: 2px solid #111111;
+    border-radius: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: box-shadow 0.12s ease, transform 0.12s ease, background 0.12s ease;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__danger {
+    padding: 0 16px;
+    background: #ef4444;
+    color: #ffffff;
+    flex-shrink: 0;
+  }
+
+  &__secondary {
+    padding: 0 18px;
+    background: #ffffff;
+    color: #111111;
+  }
+
+  &__submit {
+    width: 100%;
+    padding: 0 18px;
+    background: #84d8ce;
+    color: #111111;
+  }
+
+  &__danger:hover:not(:disabled),
+  &__secondary:hover:not(:disabled),
+  &__submit:hover:not(:disabled),
+  &__danger:focus-visible,
+  &__secondary:focus-visible,
+  &__submit:focus-visible {
+    box-shadow: 4px 4px 0 #111111;
+    outline: none;
+  }
+
+  &__danger:active:not(:disabled),
+  &__secondary:active:not(:disabled),
+  &__submit:active:not(:disabled) {
+    transform: translate(1px, 1px);
+    box-shadow: 2px 2px 0 #111111;
+  }
+
+  &__modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1000;
+  }
+
+  &__modal {
+    width: 100%;
+    max-width: 560px;
+    background: #f8f8f8;
+    border: 1.5px solid #111111;
+    border-radius: 12px;
+    padding: 26px 22px 20px;
+    box-shadow: 8px 8px 0 #111111;
+    display: grid;
+    gap: 14px;
+  }
+
+  &__modal-alert {
+    .alert-toast {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  &__modal-title {
+    margin: 0;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 24px;
+    line-height: 1.1;
+    font-weight: 700;
+    color: #111111;
+    text-transform: uppercase;
+  }
+
+  &__modal-form {
+    display: grid;
+    gap: 14px;
+  }
+
+  &__field {
+    display: grid;
+    gap: 6px;
+
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #111111;
+      text-transform: uppercase;
+    }
+
+    input {
+      width: 100%;
+      min-height: 50px;
+      padding: 10px 14px;
+      border: 2px solid #222222;
+      border-radius: 0;
+      background: #ffffff;
+      outline: none;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: #111111;
+      transition: box-shadow 0.12s ease;
+      box-shadow: none;
+    }
+
+    input:focus,
+    input:focus-visible {
+      border-color: #222222;
+      outline: none;
+      box-shadow: 4px 4px 0 #111111;
+    }
+  }
+
+  &__modal-actions {
+    display: flex;
+    gap: 12px;
+
+    > * {
+      flex: 1;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .doctor-profile-page {
+    &__card {
+      padding: 20px 14px 16px;
+      box-shadow: 6px 6px 0 #111111;
+    }
+
+    &__header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    &__title {
+      font-size: 22px;
+    }
+
+    &__actions {
+      flex-direction: column;
+    }
+
+    &__modal {
+      padding: 22px 16px 18px;
+      box-shadow: 6px 6px 0 #111111;
+    }
+
+    &__modal-title {
+      font-size: 20px;
+    }
+
+    &__modal-actions {
+      flex-direction: column;
+    }
+  }
+}

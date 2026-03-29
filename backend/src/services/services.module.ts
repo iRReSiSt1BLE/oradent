@@ -7,12 +7,14 @@ import { UserModule } from '../user/user.module';
 import { AdminModule } from '../admin/admin.module';
 import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { ConfigModule } from '@nestjs/config';
+import { DoctorModule } from '../doctor/doctor.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([ClinicServiceEntity, ServiceCategoryEntity]),
         UserModule,
         AdminModule,
+        DoctorModule,
         ConfigModule,
     ],
     providers: [ServicesService],

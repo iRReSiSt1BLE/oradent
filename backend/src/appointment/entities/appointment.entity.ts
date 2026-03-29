@@ -34,6 +34,12 @@ export class Appointment {
     @Column({ type: 'varchar', length: 50, default: 'GUEST' })
     source: string;
 
+    @Column({ type: 'boolean', default: false })
+    recordingCompleted: boolean;
+
+    @Column({ type: 'datetime', nullable: true })
+    recordingCompletedAt: Date | null;
+
     @CreateDateColumn()
     createdAt: Date;
 

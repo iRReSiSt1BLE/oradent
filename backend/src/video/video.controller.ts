@@ -4,9 +4,11 @@ import {
     Get,
     Param,
     Post,
+    Req,
     Res,
     StreamableFile,
     UploadedFile,
+    UseGuards,
     UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -14,11 +16,22 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { VideoService } from './video.service';
 import { UploadVideoDto } from './dto/upload-video.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { UserRole } from '../common/enums/user-role.enum';
+import { StreamVideoDto } from './dto/stream-video.dto';
+
+type JwtUser = {
+    id: string;
+    email: string;
+    role: UserRole;
+    patientId: string | null;
+};
 
 @Controller('video')
 export class VideoController {
     constructor(private readonly videoService: VideoService) {}
 
+    @UseGuards(JwtAuthGuard)
     @Post('upload')
     @UseInterceptors(
         FileInterceptor('video', {
@@ -31,8 +44,13 @@ export class VideoController {
     async uploadVideo(
         @UploadedFile() file: Express.Multer.File,
         @Body() dto: UploadVideoDto,
+        @Req() req: { user: JwtUser },
     ) {
-        const savedVideo = await this.videoService.saveUploadedVideo(file, dto);
+        const savedVideo = await this.videoService.saveUploadedVideo(
+            file,
+            dto,
+            req.user,
+        );
 
         return {
             ok: true,
@@ -41,9 +59,16 @@ export class VideoController {
         };
     }
 
-    @Get()
-    async getAllVideos() {
-        const videos = await this.videoService.getAllVideos();
+    @UseGuards(JwtAuthGuard)
+    @Get('appointment/:appointmentId')
+    async getVideosByAppointment(
+        @Param('appointmentId') appointmentId: string,
+        @Req() req: { user: JwtUser },
+    ) {
+        const videos = await this.videoService.getVideosByAppointmentId(
+            appointmentId,
+            req.user,
+        );
 
         return {
             ok: true,
@@ -51,12 +76,30 @@ export class VideoController {
         };
     }
 
-    @Get(':id/stream')
-    async streamVideo(
+    @UseGuards(JwtAuthGuard)
+    @Get()
+    async getAllVideos(@Req() req: { user: JwtUser }) {
+        const videos = await this.videoService.getAllVideosForRole(req.user);
+
+        return {
+            ok: true,
+            data: videos,
+        };
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/stream-auth')
+    async streamVideoWithPassword(
         @Param('id') id: string,
+        @Body() dto: StreamVideoDto,
+        @Req() req: { user: JwtUser },
         @Res({ passthrough: true }) res: Response,
     ): Promise<StreamableFile> {
-        const result = await this.videoService.streamDecryptedVideo(id);
+        const result = await this.videoService.streamDecryptedVideoWithPassword(
+            id,
+            dto.password,
+            req.user,
+        );
 
         res.set({
             'Content-Type': result.mimeType,

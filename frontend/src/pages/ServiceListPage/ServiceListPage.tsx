@@ -3,15 +3,42 @@ import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     getAdminCategories,
     getAdminServices,
+    getDoctorsOptions,
     refreshServicesPricing,
     toggleCategoryActive,
     toggleServiceActive,
     updateService,
     updateServiceCategory,
 } from '../../shared/api/servicesApi';
-import type { ClinicService, ServiceCategory } from '../../shared/api/servicesApi';
+import type { ClinicService, ServiceCategory, ServiceDoctorOption } from '../../shared/api/servicesApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
+import { buildDoctorAvatarUrl } from '../../shared/api/doctorApi';
 import './ServiceListPage.scss';
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function detectPreferredSize(): 'sm' | 'md' | 'lg' {
+    const dpr = window.devicePixelRatio || 1;
+    const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
+    const effectiveType = connection?.effectiveType || '';
+
+    if (effectiveType === 'slow-2g' || effectiveType === '2g') return 'sm';
+    if (effectiveType === '3g') return 'md';
+    if (dpr >= 2) return 'lg';
+    return 'md';
+}
+
+function buildAvatarSrcSet(doctorId: string, avatarVersion?: number) {
+    const sm = buildDoctorAvatarUrl(doctorId, 'sm', avatarVersion);
+    const md = buildDoctorAvatarUrl(doctorId, 'md', avatarVersion);
+    const lg = buildDoctorAvatarUrl(doctorId, 'lg', avatarVersion);
+    return `${sm} 160w, ${md} 320w, ${lg} 640w`;
+}
+
+function doctorName(option?: ServiceDoctorOption) {
+    if (!option) return 'Лікар';
+    return option.fullName?.trim() || option.email;
+}
 
 export default function ServiceListPage() {
     const token = getToken();
@@ -20,7 +47,10 @@ export default function ServiceListPage() {
 
     const [services, setServices] = useState<ClinicService[]>([]);
     const [categories, setCategories] = useState<ServiceCategory[]>([]);
+    const [doctorOptions, setDoctorOptions] = useState<ServiceDoctorOption[]>([]);
     const [pricingRate, setPricingRate] = useState<number | null>(null);
+
+    const [preferredSize, setPreferredSize] = useState<'sm' | 'md' | 'lg'>('md');
 
     const [loading, setLoading] = useState(true);
     const [togglingServiceId, setTogglingServiceId] = useState<string | null>(null);
@@ -39,7 +69,15 @@ export default function ServiceListPage() {
         priceUsd: '0',
         categoryId: '',
         isActive: true,
+        doctorIds: [] as string[],
     });
+
+    useEffect(() => {
+        setPreferredSize(detectPreferredSize());
+        const onResize = () => setPreferredSize(detectPreferredSize());
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     useEffect(() => {
         void bootstrap();
@@ -53,20 +91,28 @@ export default function ServiceListPage() {
 
         setLoading(true);
         try {
-            const [servicesRes, categoriesRes] = await Promise.all([
+            const [servicesRes, categoriesRes, doctorsRes] = await Promise.all([
                 getAdminServices(token),
                 getAdminCategories(token),
+                getDoctorsOptions(token).catch(() => ({ doctors: [] })),
             ]);
 
             setServices(servicesRes.services);
             setCategories(categoriesRes.categories);
             setPricingRate(servicesRes.pricing?.usdBuyRate ?? null);
+            setDoctorOptions(doctorsRes.doctors || []);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Не вдалося завантажити послуги');
         } finally {
             setLoading(false);
         }
     }
+
+    const doctorById = useMemo(() => {
+        const map = new Map<string, ServiceDoctorOption>();
+        doctorOptions.forEach((d) => map.set(d.id, d));
+        return map;
+    }, [doctorOptions]);
 
     const grouped = useMemo(() => {
         const sortedCategories = [...categories].sort(
@@ -90,7 +136,17 @@ export default function ServiceListPage() {
             priceUsd: String(service.priceUsd),
             categoryId: service.categoryId,
             isActive: service.isActive,
+            doctorIds: service.doctorIds || [],
         });
+    }
+
+    function toggleEditDoctor(doctorId: string) {
+        setEditForm((prev) => ({
+            ...prev,
+            doctorIds: prev.doctorIds.includes(doctorId)
+                ? prev.doctorIds.filter((id) => id !== doctorId)
+                : [...prev.doctorIds, doctorId],
+        }));
     }
 
     async function handleSaveEdit(e: React.FormEvent) {
@@ -102,21 +158,15 @@ export default function ServiceListPage() {
         const durationMinutes = Number(editForm.durationMinutes);
         const priceUsd = Number(editForm.priceUsd);
 
-        if (!name) {
-            setError('Вкажи назву');
-            return;
-        }
-        if (!editForm.categoryId) {
-            setError('Обери категорію');
-            return;
-        }
+        if (!name) return setError('Вкажи назву');
+        if (!editForm.categoryId) return setError('Обери категорію');
+
         if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 480) {
-            setError('Тривалість має бути від 5 до 480 хв');
-            return;
+            return setError('Тривалість має бути від 5 до 480 хв');
         }
+
         if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
-            setError('Ціна в USD має бути більшою за 0');
-            return;
+            return setError('Ціна в USD має бути більшою за 0');
         }
 
         setSavingEdit(true);
@@ -131,6 +181,7 @@ export default function ServiceListPage() {
                 priceUsd,
                 categoryId: editForm.categoryId,
                 isActive: editForm.isActive,
+                doctorIds: editForm.doctorIds.filter((id) => UUID_V4_REGEX.test(id)),
             });
 
             setServices((prev) => prev.map((s) => (s.id === editingService.id ? result.service : s)));
@@ -273,10 +324,7 @@ export default function ServiceListPage() {
                                                 <span className={`service-list-page__dot ${category.isActive ? 'is-active' : 'is-inactive'}`} />
                                             </h2>
                                             <div className="service-list-page__category-actions">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRenameCategory(category)}
-                                                >
+                                                <button type="button" onClick={() => handleRenameCategory(category)}>
                                                     РЕДАГУВАТИ
                                                 </button>
                                                 <button
@@ -309,6 +357,39 @@ export default function ServiceListPage() {
                                                         <p>
                                                             {service.durationMinutes} хв · ${service.priceUsd.toFixed(2)} · {Math.round(service.priceUah)} грн
                                                         </p>
+
+                                                        <div className="service-list-page__doctor-row">
+                                                            {service.doctorIds.length === 0 ? (
+                                                                <span className="service-list-page__doctor-empty">Лікарі не призначені</span>
+                                                            ) : (
+                                                                service.doctorIds.map((doctorId) => {
+                                                                    const doc = doctorById.get(doctorId);
+                                                                    const hasAvatar = Boolean(doc?.hasAvatar || doc?.avatarVersion);
+                                                                    const src = buildDoctorAvatarUrl(doctorId, preferredSize, doc?.avatarVersion);
+                                                                    const srcSet = buildAvatarSrcSet(doctorId, doc?.avatarVersion);
+
+                                                                    return (
+                                                                        <span key={doctorId} className="service-list-page__doctor-chip">
+                                                                            {hasAvatar ? (
+                                                                                <img
+                                                                                    src={src}
+                                                                                    srcSet={srcSet}
+                                                                                    sizes="28px"
+                                                                                    alt=""
+                                                                                    loading="lazy"
+                                                                                    decoding="async"
+                                                                                />
+                                                                            ) : (
+                                                                                <span className="service-list-page__doctor-chip-placeholder">
+                                                                                    {doctorName(doc).charAt(0).toUpperCase() || 'Л'}
+                                                                                </span>
+                                                                            )}
+                                                                            <em>{doctorName(doc)}</em>
+                                                                        </span>
+                                                                    );
+                                                                })
+                                                            )}
+                                                        </div>
                                                     </div>
 
                                                     <div className="service-list-page__service-actions">
@@ -349,18 +430,12 @@ export default function ServiceListPage() {
 
                         <label className="service-list-page__field">
                             <span>НАЗВА</span>
-                            <input
-                                value={editForm.name}
-                                onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
-                            />
+                            <input value={editForm.name} onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))} />
                         </label>
 
                         <label className="service-list-page__field">
                             <span>КАТЕГОРІЯ</span>
-                            <select
-                                value={editForm.categoryId}
-                                onChange={(e) => setEditForm((prev) => ({ ...prev, categoryId: e.target.value }))}
-                            >
+                            <select value={editForm.categoryId} onChange={(e) => setEditForm((prev) => ({ ...prev, categoryId: e.target.value }))}>
                                 {categories.map((category) => (
                                     <option key={category.id} value={category.id}>
                                         {category.name}
@@ -377,9 +452,7 @@ export default function ServiceListPage() {
                                     min={5}
                                     max={480}
                                     value={editForm.durationMinutes}
-                                    onChange={(e) =>
-                                        setEditForm((prev) => ({ ...prev, durationMinutes: e.target.value }))
-                                    }
+                                    onChange={(e) => setEditForm((prev) => ({ ...prev, durationMinutes: e.target.value }))}
                                 />
                             </label>
 
@@ -403,6 +476,55 @@ export default function ServiceListPage() {
                                 onChange={(e) => setEditForm((prev) => ({ ...prev, description: e.target.value }))}
                             />
                         </label>
+
+                        <div className="service-list-page__doctor-picker">
+                            <div className="service-list-page__doctor-picker-title">ПРИЗНАЧЕНІ ЛІКАРІ</div>
+                            <div className="service-list-page__doctor-picker-list">
+                                {doctorOptions.length === 0 ? (
+                                    <div className="service-list-page__doctor-empty">Активних лікарів поки немає.</div>
+                                ) : (
+                                    doctorOptions.map((doctor) => {
+                                        const checked = editForm.doctorIds.includes(doctor.id);
+                                        const hasAvatar = Boolean(doctor.hasAvatar || doctor.avatarVersion);
+                                        const src = buildDoctorAvatarUrl(doctor.id, preferredSize, doctor.avatarVersion);
+                                        const srcSet = buildAvatarSrcSet(doctor.id, doctor.avatarVersion);
+
+                                        return (
+                                            <label key={doctor.id} className={`service-list-page__doctor-item ${checked ? 'is-checked' : ''}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={() => toggleEditDoctor(doctor.id)}
+                                                />
+
+                                                <div className="service-list-page__doctor-avatar-wrap">
+                                                    {hasAvatar ? (
+                                                        <img
+                                                            className="service-list-page__doctor-avatar"
+                                                            src={src}
+                                                            srcSet={srcSet}
+                                                            sizes="44px"
+                                                            alt=""
+                                                            loading="lazy"
+                                                            decoding="async"
+                                                        />
+                                                    ) : (
+                                                        <div className="service-list-page__doctor-avatar-placeholder">
+                                                            {doctorName(doctor).charAt(0).toUpperCase() || 'Л'}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="service-list-page__doctor-text">
+                                                    <span className="service-list-page__doctor-name">{doctorName(doctor)}</span>
+                                                    <span className="service-list-page__doctor-email">{doctor.email}</span>
+                                                </div>
+                                            </label>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
 
                         <label className="service-list-page__switch">
                             <input

@@ -66,17 +66,17 @@
     cursor: pointer;
     box-shadow: none;
     transition: box-shadow 0.12s ease, background 0.12s ease, transform 0.12s ease;
+  }
 
-    &:hover,
-    &:focus-visible {
-      box-shadow: 4px 4px 0 #111111;
-      outline: none;
-    }
+  &__mode:hover,
+  &__mode:focus-visible {
+    box-shadow: 4px 4px 0 #111111;
+    outline: none;
+  }
 
-    &:active {
-      transform: translate(1px, 1px);
-      box-shadow: 2px 2px 0 #111111;
-    }
+  &__mode:active {
+    transform: translate(1px, 1px);
+    box-shadow: 2px 2px 0 #111111;
   }
 
   &__mode--active {
@@ -127,29 +127,117 @@
     color: #111111;
     box-shadow: none;
     transition: box-shadow 0.12s ease;
-
-    &::placeholder {
-      color: #6b7280;
-    }
-
-    &:focus,
-    &:focus-visible,
-    &:active {
-      border-color: #222222;
-      outline: none;
-      box-shadow: 4px 4px 0 #111111;
-    }
   }
 
-  &__input:-webkit-autofill,
-  &__input:-webkit-autofill:hover,
-  &__input:-webkit-autofill:focus,
-  &__input:-webkit-autofill:active {
-    -webkit-text-fill-color: #111111;
-    -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
-    box-shadow: 0 0 0 1000px #ffffff inset;
-    transition: background-color 9999s ease-in-out 0s;
-    caret-color: #111111;
+  &__input::placeholder {
+    color: #6b7280;
+  }
+
+  &__input:focus,
+  &__input:focus-visible,
+  &__input:active,
+  &__select:focus,
+  &__select:focus-visible {
+    border-color: #222222;
+    outline: none;
+    box-shadow: 4px 4px 0 #111111;
+  }
+
+  &__doctor-empty {
+    width: 100%;
+    min-height: 42px;
+    border: 2px solid #d3d9df;
+    background: #fff;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  &__doctor-list {
+    display: grid;
+    gap: 8px;
+    max-height: 220px;
+    overflow: auto;
+    border: 2px solid #111;
+    background: #fff;
+    padding: 8px;
+  }
+
+  &__doctor-item {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    border: 1.5px solid #d6dce2;
+    background: #fff;
+    padding: 8px;
+    text-align: left;
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+  }
+
+  &__doctor-item:hover,
+  &__doctor-item:focus-visible {
+    border-color: #111;
+    box-shadow: 3px 3px 0 #111;
+    outline: none;
+  }
+
+  &__doctor-item.is-active {
+    border-color: #111;
+    background: #f3fffc;
+    box-shadow: 3px 3px 0 #111;
+  }
+
+  &__doctor-avatar-wrap {
+    width: 44px;
+    height: 44px;
+  }
+
+  &__doctor-avatar,
+  &__doctor-avatar-placeholder {
+    width: 44px;
+    height: 44px;
+    border: 1.5px solid #111;
+    border-radius: 8px;
+    object-fit: cover;
+  }
+
+  &__doctor-avatar-placeholder {
+    display: grid;
+    place-items: center;
+    background: #e8eef5;
+    color: #334155;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  &__doctor-text {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: #111;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: #66758a;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   &__submit {
@@ -168,26 +256,26 @@
     box-shadow: none;
     transition: box-shadow 0.12s ease, transform 0.12s ease, background 0.12s ease;
     outline: none;
+  }
 
-    &:hover:not(:disabled),
-    &:focus,
-    &:focus-visible {
-      background: #79cfc5;
-      color: #ffffff;
-      border-color: #111111;
-      outline: none;
-      box-shadow: 4px 4px 0 #111111;
-    }
+  &__submit:hover:not(:disabled),
+  &__submit:focus,
+  &__submit:focus-visible {
+    background: #79cfc5;
+    color: #ffffff;
+    border-color: #111111;
+    outline: none;
+    box-shadow: 4px 4px 0 #111111;
+  }
 
-    &:active {
-      transform: translate(1px, 1px);
-      box-shadow: 2px 2px 0 #111111;
-    }
+  &__submit:active {
+    transform: translate(1px, 1px);
+    box-shadow: 2px 2px 0 #111111;
+  }
 
-    &:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
+  &__submit:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
   }
 
   &__modal-backdrop {

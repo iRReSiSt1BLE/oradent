@@ -1,4 +1,5 @@
 import {
+    ForbiddenException,
     Injectable,
     InternalServerErrorException,
     NotFoundException,
@@ -7,33 +8,150 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
-import { Video } from './entities/video.entity';
-import { UploadVideoDto } from './dto/upload-video.dto';
+import * as argon2 from 'argon2';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash, randomUUID } from 'crypto';
+import { Video } from './entities/video.entity';
+import { UploadVideoDto } from './dto/upload-video.dto';
 import { VideoSignatureService } from './video-signature.service';
 import { VideoTsaService } from './video-tsa.service';
 import { VideoEncryptionService } from './video-encryption.service';
+import { Appointment } from '../appointment/entities/appointment.entity';
+import { User } from '../user/entities/user.entity';
+import { UserRole } from '../common/enums/user-role.enum';
+
+type JwtUser = {
+    id: string;
+    email: string;
+    role: UserRole;
+    patientId: string | null;
+};
 
 @Injectable()
 export class VideoService {
     constructor(
         @InjectRepository(Video)
         private readonly videoRepository: Repository<Video>,
+        @InjectRepository(Appointment)
+        private readonly appointmentRepository: Repository<Appointment>,
+        @InjectRepository(User)
+        private readonly userRepository: Repository<User>,
         private readonly configService: ConfigService,
         private readonly videoSignatureService: VideoSignatureService,
         private readonly videoTsaService: VideoTsaService,
         private readonly videoEncryptionService: VideoEncryptionService,
     ) {}
 
+    private async assertAppointmentAccess(
+        appointmentId: string,
+        actor: JwtUser,
+    ): Promise<Appointment> {
+        const appointment = await this.appointmentRepository.findOne({
+            where: { id: appointmentId },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new NotFoundException('Прийом не знайдено');
+        }
+
+        if (
+            actor.role === UserRole.ADMIN ||
+            actor.role === UserRole.SUPER_ADMIN
+        ) {
+            return appointment;
+        }
+
+        if (actor.role === UserRole.DOCTOR) {
+            if (appointment.doctorId !== actor.id) {
+                throw new ForbiddenException(
+                    'Немає доступу до цього прийому',
+                );
+            }
+            return appointment;
+        }
+
+        if (actor.role === UserRole.PATIENT) {
+            if (!actor.patientId || appointment.patient?.id !== actor.patientId) {
+                throw new ForbiddenException(
+                    'Немає доступу до цього прийому',
+                );
+            }
+            return appointment;
+        }
+
+        throw new ForbiddenException('Немає доступу');
+    }
+
+    private async verifyAccountPassword(userId: string, password: string) {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+
+        if (!user || !user.passwordHash) {
+            throw new ForbiddenException('Для цього акаунта пароль не встановлено');
+        }
+
+        const ok = await argon2.verify(user.passwordHash, password);
+
+        if (!ok) {
+            throw new ForbiddenException('Невірний пароль');
+        }
+    }
+
+    private decryptVideoToStream(video: Video): {
+        file: StreamableFile;
+        mimeType: string;
+        fileName: string;
+    } {
+        if (!video.encryptionIv || !video.encryptionAuthTag) {
+            throw new InternalServerErrorException(
+                'Відсутні параметри шифрування для відео',
+            );
+        }
+
+        const storageRoot = this.configService.get<string>('VIDEO_STORAGE_ROOT');
+
+        if (!storageRoot) {
+            throw new InternalServerErrorException(
+                'Не задано VIDEO_STORAGE_ROOT у .env',
+            );
+        }
+
+        const fullEncryptedPath = path.join(storageRoot, video.storageRelativePath);
+
+        if (!fs.existsSync(fullEncryptedPath)) {
+            throw new NotFoundException('Файл відео не знайдено');
+        }
+
+        const encryptedBuffer = fs.readFileSync(fullEncryptedPath);
+
+        const decryptedBuffer = this.videoEncryptionService.decryptBuffer({
+            encryptedBuffer,
+            ivBase64: video.encryptionIv,
+            authTagBase64: video.encryptionAuthTag,
+        });
+
+        return {
+            file: new StreamableFile(decryptedBuffer),
+            mimeType: video.mimeType || 'video/webm',
+            fileName: video.originalFileName || 'video.webm',
+        };
+    }
+
     async saveUploadedVideo(
         file: Express.Multer.File,
         dto: UploadVideoDto,
+        actor: JwtUser,
     ): Promise<Video> {
         if (!file) {
             throw new InternalServerErrorException('Файл не отримано');
         }
+
+        if (!dto.appointmentId) {
+            throw new InternalServerErrorException('Потрібен appointmentId');
+        }
+
+        await this.assertAppointmentAccess(dto.appointmentId, actor);
 
         const storageRoot = this.configService.get<string>('VIDEO_STORAGE_ROOT');
         const recordsDir =
@@ -88,7 +206,7 @@ export class VideoService {
             .replace(/\\/g, '/');
 
         const video = this.videoRepository.create({
-            appointmentId: dto.appointmentId || null,
+            appointmentId: dto.appointmentId,
             originalFileName: file.originalname,
             storedFileName,
             storageRelativePath,
@@ -168,17 +286,68 @@ export class VideoService {
         return await this.videoRepository.save(savedVideo);
     }
 
-    async getAllVideos(): Promise<Video[]> {
-        return await this.videoRepository.find({
+    async getVideosByAppointmentId(
+        appointmentId: string,
+        actor: JwtUser,
+    ): Promise<Video[]> {
+        await this.assertAppointmentAccess(appointmentId, actor);
+
+        return this.videoRepository.find({
+            where: { appointmentId },
             order: { createdAt: 'DESC' },
         });
     }
 
-    async streamDecryptedVideo(id: string): Promise<{
+    async getAllVideosForRole(actor: JwtUser): Promise<Video[]> {
+        if (actor.role === UserRole.ADMIN || actor.role === UserRole.SUPER_ADMIN) {
+            return this.videoRepository.find({
+                order: { createdAt: 'DESC' },
+            });
+        }
+
+        if (actor.role === UserRole.DOCTOR) {
+            const myAppointments = await this.appointmentRepository.find({
+                where: { doctorId: actor.id },
+                select: ['id'],
+            });
+            const ids = myAppointments.map((a) => a.id);
+            if (ids.length === 0) return [];
+            return this.videoRepository
+                .createQueryBuilder('v')
+                .where('v.appointmentId IN (:...ids)', { ids })
+                .orderBy('v.createdAt', 'DESC')
+                .getMany();
+        }
+
+        if (actor.role === UserRole.PATIENT && actor.patientId) {
+            const myAppointments = await this.appointmentRepository.find({
+                where: { patient: { id: actor.patientId } },
+                relations: ['patient'],
+                select: ['id'],
+            });
+            const ids = myAppointments.map((a) => a.id);
+            if (ids.length === 0) return [];
+            return this.videoRepository
+                .createQueryBuilder('v')
+                .where('v.appointmentId IN (:...ids)', { ids })
+                .orderBy('v.createdAt', 'DESC')
+                .getMany();
+        }
+
+        return [];
+    }
+
+    async streamDecryptedVideoWithPassword(
+        id: string,
+        password: string,
+        actor: JwtUser,
+    ): Promise<{
         file: StreamableFile;
         mimeType: string;
         fileName: string;
     }> {
+        await this.verifyAccountPassword(actor.id, password);
+
         const video = await this.videoRepository.findOne({
             where: { id },
         });
@@ -187,38 +356,12 @@ export class VideoService {
             throw new NotFoundException('Відео не знайдено');
         }
 
-        if (!video.encryptionIv || !video.encryptionAuthTag) {
-            throw new InternalServerErrorException(
-                'Відсутні параметри шифрування для відео',
-            );
+        if (!video.appointmentId) {
+            throw new ForbiddenException('Відео не привʼязане до прийому');
         }
 
-        const storageRoot = this.configService.get<string>('VIDEO_STORAGE_ROOT');
+        await this.assertAppointmentAccess(video.appointmentId, actor);
 
-        if (!storageRoot) {
-            throw new InternalServerErrorException(
-                'Не задано VIDEO_STORAGE_ROOT у .env',
-            );
-        }
-
-        const fullEncryptedPath = path.join(storageRoot, video.storageRelativePath);
-
-        if (!fs.existsSync(fullEncryptedPath)) {
-            throw new NotFoundException('Файл відео не знайдено');
-        }
-
-        const encryptedBuffer = fs.readFileSync(fullEncryptedPath);
-
-        const decryptedBuffer = this.videoEncryptionService.decryptBuffer({
-            encryptedBuffer,
-            ivBase64: video.encryptionIv,
-            authTagBase64: video.encryptionAuthTag,
-        });
-
-        return {
-            file: new StreamableFile(decryptedBuffer),
-            mimeType: video.mimeType || 'video/webm',
-            fileName: video.originalFileName || 'video.webm',
-        };
+        return this.decryptVideoToStream(video);
     }
 }

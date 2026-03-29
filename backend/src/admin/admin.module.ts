@@ -9,10 +9,11 @@ import { VerificationModule } from '../verification/verification.module';
 import { MailModule } from '../mail/mail.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { PatientModule } from '../patient/patient.module';
+import { Doctor } from '../doctor/entities/doctor.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([Admin]),
+        TypeOrmModule.forFeature([Admin, Doctor]),
         UserModule,
         ConfigModule,
         VerificationModule,

@@ -8,6 +8,7 @@ import { MailModule } from '../mail/mail.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { AdminModule } from '../admin/admin.module';
+import { DoctorModule } from '../doctor/doctor.module';
 
 @Module({
     imports: [
@@ -18,6 +19,7 @@ import { AdminModule } from '../admin/admin.module';
         PhoneVerificationModule,
         TelegramModule,
         AdminModule,
+        DoctorModule,
     ],
     controllers: [ProfileController],
     providers: [ProfileService],

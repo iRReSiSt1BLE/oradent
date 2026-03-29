@@ -1,5 +1,6 @@
 import {
-    BadRequestException, ForbiddenException,
+    BadRequestException,
+    ForbiddenException,
     Injectable,
     UnauthorizedException,
 } from '@nestjs/common';
@@ -17,8 +18,8 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { PendingRegistrationService } from './pending-registration.service';
 import { MailService } from '../mail/mail.service';
-import {AdminService} from "../admin/admin.service";
-
+import { AdminService } from '../admin/admin.service';
+import { DoctorService } from '../doctor/doctor.service';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +31,7 @@ export class AuthService {
         private readonly pendingRegistrationService: PendingRegistrationService,
         private readonly mailService: MailService,
         private readonly adminService: AdminService,
+        private readonly doctorService: DoctorService,
     ) {}
 
     async register(dto: RegisterDto) {
@@ -125,7 +127,15 @@ export class AuthService {
             const admin = await this.adminService.findByUserId(user.id);
 
             if (!admin || !admin.isActive) {
-                throw new ForbiddenException('Адміністратор деактивований');
+                throw new ForbiddenException('Адміністратора деактивовано');
+            }
+        }
+
+        if (user.role === UserRole.DOCTOR) {
+            const doctor = await this.doctorService.findByUserId(user.id);
+
+            if (!doctor || !doctor.isActive) {
+                throw new ForbiddenException('Лікаря деактивовано');
             }
         }
 
@@ -134,6 +144,7 @@ export class AuthService {
         if (!isValid) {
             throw new UnauthorizedException('Невірна пошта або пароль');
         }
+
         const payload = {
             sub: user.id,
             email: user.email,
@@ -174,7 +185,6 @@ export class AuthService {
         };
     }
 
-
     async googleLogin(googleUser: {
         googleId: string;
         email: string | null;
@@ -188,7 +198,6 @@ export class AuthService {
         const normalizedGoogleEmail = googleUser.email.trim().toLowerCase();
 
         let user: User | null = await this.userService.findByGoogleId(googleUser.googleId);
-
 
         if (!user) {
             const existingByEmail = await this.userService.findByEmail(normalizedGoogleEmail);
@@ -215,7 +224,15 @@ export class AuthService {
             const admin = await this.adminService.findByUserId(user.id);
 
             if (!admin || !admin.isActive) {
-                throw new ForbiddenException('Адміністратор деактивований');
+                throw new ForbiddenException('Адміністратора деактивовано');
+            }
+        }
+
+        if (user.role === UserRole.DOCTOR) {
+            const doctor = await this.doctorService.findByUserId(user.id);
+
+            if (!doctor || !doctor.isActive) {
+                throw new ForbiddenException('Лікаря деактивовано');
             }
         }
 

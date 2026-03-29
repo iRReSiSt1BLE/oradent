@@ -8,18 +8,37 @@ import {
     getPricingMeta,
 } from '../../shared/api/servicesApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
+import { buildDoctorAvatarUrl } from '../../shared/api/doctorApi';
 import './ServiceCreatePage.scss';
 
-type DoctorOption = { id: string; email: string; isPlaceholder?: boolean };
-
-const PLACEHOLDER_DOCTORS: DoctorOption[] = [
-    { id: 'placeholder-1', email: 'Лікар #1 (заглушка)', isPlaceholder: true },
-    { id: 'placeholder-2', email: 'Лікар #2 (заглушка)', isPlaceholder: true },
-    { id: 'placeholder-3', email: 'Лікар #3 (заглушка)', isPlaceholder: true },
-];
+type DoctorOption = {
+    id: string;
+    email: string;
+    fullName?: string;
+    hasAvatar?: boolean;
+    avatarVersion?: number;
+};
 
 const UUID_V4_REGEX =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function detectPreferredSize(): 'sm' | 'md' | 'lg' {
+    const dpr = window.devicePixelRatio || 1;
+    const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
+    const effectiveType = connection?.effectiveType || '';
+
+    if (effectiveType === 'slow-2g' || effectiveType === '2g') return 'sm';
+    if (effectiveType === '3g') return 'md';
+    if (dpr >= 2) return 'lg';
+    return 'md';
+}
+
+function buildAvatarSrcSet(doctorId: string, avatarVersion?: number) {
+    const sm = buildDoctorAvatarUrl(doctorId, 'sm', avatarVersion);
+    const md = buildDoctorAvatarUrl(doctorId, 'md', avatarVersion);
+    const lg = buildDoctorAvatarUrl(doctorId, 'lg', avatarVersion);
+    return `${sm} 160w, ${md} 320w, ${lg} 640w`;
+}
 
 export default function ServiceCreatePage() {
     const token = getToken();
@@ -30,7 +49,6 @@ export default function ServiceCreatePage() {
         Array<{ id: string; name: string; description: string | null; isActive: boolean; sortOrder: number }>
     >([]);
     const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-    const [doctorHint, setDoctorHint] = useState('');
 
     const [pricing, setPricing] = useState<{ usdBuyRate: number; source: string; roundedTo: number } | null>(null);
 
@@ -40,6 +58,8 @@ export default function ServiceCreatePage() {
 
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+
+    const [preferredSize, setPreferredSize] = useState<'sm' | 'md' | 'lg'>('md');
 
     const [categoryForm, setCategoryForm] = useState({
         name: '',
@@ -66,6 +86,13 @@ export default function ServiceCreatePage() {
     }, [pricing, serviceForm.priceUsd]);
 
     useEffect(() => {
+        setPreferredSize(detectPreferredSize());
+        const onResize = () => setPreferredSize(detectPreferredSize());
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+
+    useEffect(() => {
         void bootstrap();
     }, []);
 
@@ -87,10 +114,8 @@ export default function ServiceCreatePage() {
 
             if (doctorsRes && doctorsRes.doctors.length > 0) {
                 setDoctors(doctorsRes.doctors);
-                setDoctorHint('');
             } else {
-                setDoctors(PLACEHOLDER_DOCTORS);
-                setDoctorHint('Лікарі ще не додані. Поки працюють заглушки.');
+                setDoctors([]);
             }
 
             if (pricingRes?.pricing) {
@@ -109,9 +134,6 @@ export default function ServiceCreatePage() {
     }
 
     function toggleDoctor(id: string) {
-        const isPlaceholder = doctors.some((d) => d.id === id && d.isPlaceholder);
-        if (isPlaceholder) return;
-
         setServiceForm((prev) => ({
             ...prev,
             doctorIds: prev.doctorIds.includes(id)
@@ -395,24 +417,63 @@ export default function ServiceCreatePage() {
 
                                     <div className="service-create-page__doctors">
                                         <div className="service-create-page__doctors-title">ПРИЗНАЧЕНІ ЛІКАРІ</div>
-                                        {doctorHint && <div className="service-create-page__doctor-hint">{doctorHint}</div>}
+
                                         <div className="service-create-page__doctor-list">
-                                            {doctors.map((doctor) => (
-                                                <label
-                                                    key={doctor.id}
-                                                    className={`service-create-page__doctor-item ${
-                                                        doctor.isPlaceholder ? 'is-placeholder' : ''
-                                                    }`}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={serviceForm.doctorIds.includes(doctor.id)}
-                                                        onChange={() => toggleDoctor(doctor.id)}
-                                                        disabled={Boolean(doctor.isPlaceholder)}
-                                                    />
-                                                    <span>{doctor.email}</span>
-                                                </label>
-                                            ))}
+                                            {doctors.length === 0 ? (
+                                                <div className="service-create-page__doctor-empty">
+                                                    Активних лікарів ще немає. Спочатку створи лікарів.
+                                                </div>
+                                            ) : (
+                                                doctors.map((doctor) => {
+                                                    const checked = serviceForm.doctorIds.includes(doctor.id);
+                                                    const hasAvatar = Boolean(doctor.hasAvatar);
+
+                                                    const src = hasAvatar
+                                                        ? buildDoctorAvatarUrl(doctor.id, preferredSize, doctor.avatarVersion)
+                                                        : '';
+                                                    const srcSet = hasAvatar
+                                                        ? buildAvatarSrcSet(doctor.id, doctor.avatarVersion)
+                                                        : '';
+
+                                                    return (
+                                                        <label
+                                                            key={doctor.id}
+                                                            className={`service-create-page__doctor-item ${checked ? 'is-checked' : ''}`}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                onChange={() => toggleDoctor(doctor.id)}
+                                                            />
+
+                                                            <div className="service-create-page__doctor-avatar-wrap">
+                                                                {hasAvatar ? (
+                                                                    <img
+                                                                        className="service-create-page__doctor-avatar"
+                                                                        src={src}
+                                                                        srcSet={srcSet}
+                                                                        sizes="44px"
+                                                                        alt=""
+                                                                        loading="lazy"
+                                                                        decoding="async"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="service-create-page__doctor-avatar-placeholder">
+                                                                        {doctor.fullName?.trim()?.[0]?.toUpperCase() || 'L'}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="service-create-page__doctor-text">
+                                                                <span className="service-create-page__doctor-name">
+                                                                    {doctor.fullName || doctor.email}
+                                                                </span>
+                                                                <span className="service-create-page__doctor-email">{doctor.email}</span>
+                                                            </div>
+                                                        </label>
+                                                    );
+                                                })
+                                            )}
                                         </div>
                                     </div>
 

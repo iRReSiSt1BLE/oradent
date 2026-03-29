@@ -21,6 +21,7 @@ import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { AdminService } from '../admin/admin.service';
 import { UserRole } from '../common/enums/user-role.enum';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { DoctorService } from '../doctor/doctor.service';
 
 @Injectable()
 export class ProfileService {
@@ -32,6 +33,7 @@ export class ProfileService {
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly telegramService: TelegramService,
         private readonly adminService: AdminService,
+        private readonly doctorService: DoctorService,
     ) {}
 
     private normalizePhone(phone: string) {
@@ -73,6 +75,7 @@ export class ProfileService {
                 user,
                 patient: user.patient,
                 admin: null,
+                doctor: null,
             };
         }
 
@@ -88,6 +91,23 @@ export class ProfileService {
                 user,
                 patient: null,
                 admin,
+                doctor: null,
+            };
+        }
+
+        if (user.role === UserRole.DOCTOR) {
+            const doctor = await this.doctorService.findByUserId(user.id);
+
+            if (!doctor) {
+                throw new BadRequestException('Профіль лікаря не знайдено');
+            }
+
+            return {
+                mode: 'doctor' as const,
+                user,
+                patient: null,
+                admin: null,
+                doctor,
             };
         }
 
@@ -116,6 +136,14 @@ export class ProfileService {
             throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
         }
 
+        const doctorWithPhone = await this.doctorService.findByPhone(normalizedPhone);
+        if (
+            doctorWithPhone &&
+            !(owner.mode === 'doctor' && doctorWithPhone.id === owner.doctor.id)
+        ) {
+            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+        }
+
         return normalizedPhone;
     }
 
@@ -140,6 +168,24 @@ export class ProfileService {
             };
         }
 
+        if (owner.mode === 'admin') {
+            return {
+                ok: true,
+                profile: {
+                    userId: owner.user.id,
+                    email: owner.user.email,
+                    authProvider: owner.user.authProvider,
+                    role: owner.user.role,
+                    patientId: null,
+                    lastName: owner.admin.lastName,
+                    firstName: owner.admin.firstName,
+                    middleName: owner.admin.middleName,
+                    phone: owner.admin.phone,
+                    phoneVerified: owner.admin.phoneVerified,
+                },
+            };
+        }
+
         return {
             ok: true,
             profile: {
@@ -148,11 +194,11 @@ export class ProfileService {
                 authProvider: owner.user.authProvider,
                 role: owner.user.role,
                 patientId: null,
-                lastName: owner.admin.lastName,
-                firstName: owner.admin.firstName,
-                middleName: owner.admin.middleName,
-                phone: owner.admin.phone,
-                phoneVerified: owner.admin.phoneVerified,
+                lastName: owner.doctor.lastName,
+                firstName: owner.doctor.firstName,
+                middleName: owner.doctor.middleName,
+                phone: owner.doctor.phone,
+                phoneVerified: owner.doctor.phoneVerified,
             },
         };
     }
@@ -181,6 +227,10 @@ export class ProfileService {
                     middleName: savedAdmin.middleName,
                 },
             };
+        }
+
+        if (owner.mode === 'doctor') {
+            throw new ForbiddenException('Лікар не може змінювати ПІБ у своєму профілі');
         }
 
         owner.patient.lastName = dto.lastName;
@@ -325,15 +375,28 @@ export class ProfileService {
             };
         }
 
-        owner.admin.phone = normalizedPhone;
-        owner.admin.phoneVerified = true;
-        await this.adminService.saveAdmin(owner.admin);
+        if (owner.mode === 'admin') {
+            owner.admin.phone = normalizedPhone;
+            owner.admin.phoneVerified = true;
+            await this.adminService.saveAdmin(owner.admin);
+
+            return {
+                ok: true,
+                message: 'Телефон оновлено',
+                phone: owner.admin.phone,
+                phoneVerified: owner.admin.phoneVerified,
+            };
+        }
+
+        owner.doctor.phone = normalizedPhone;
+        owner.doctor.phoneVerified = true;
+        await this.doctorService.saveDoctor(owner.doctor);
 
         return {
             ok: true,
             message: 'Телефон оновлено',
-            phone: owner.admin.phone,
-            phoneVerified: owner.admin.phoneVerified,
+            phone: owner.doctor.phone,
+            phoneVerified: owner.doctor.phoneVerified,
         };
     }
 }

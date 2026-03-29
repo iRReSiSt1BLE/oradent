@@ -34,6 +34,7 @@ export default function Header() {
     const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'DOCTOR';
     const isSuperAdmin = role === 'SUPER_ADMIN';
     const isAdminOrSuperAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const isDoctor = role === 'DOCTOR';
 
     const [menuOpen, setMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -50,9 +51,12 @@ export default function Header() {
     const staffItems: StaffMenuItem[] = [
         { to: '/', label: 'Головна' },
         { to: '/profile', label: 'Профіль' },
-        { to: '/appointment', label: 'Записи' },
+        ...(isDoctor ? [{ to: '/doctor/appointments', label: 'Мої прийоми' }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/appointment', label: 'Записи' }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/services/list', label: 'Послуги (перегляд)' }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/services/create', label: 'Послуги (створення)' }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/doctors/list', label: 'Лікарі (список)' }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/doctors/create', label: 'Створення лікаря' }] : []),
         ...(isSuperAdmin ? [{ to: '/admins/list', label: 'Адміністратори (список)' }] : []),
         ...(isSuperAdmin ? [{ to: '/admins/create', label: 'Створення адміністратора' }] : []),
     ];
