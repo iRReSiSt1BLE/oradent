@@ -1,6 +1,7 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
     Param,
     ParseUUIDPipe,
@@ -26,6 +27,11 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 @Controller('doctors')
 export class DoctorController {
     constructor(private readonly doctorService: DoctorService) {}
+
+    @Get('public')
+    getPublic() {
+        return this.doctorService.getPublicDoctors();
+    }
 
     @UseGuards(JwtAuthGuard)
     @Get()
@@ -98,6 +104,15 @@ export class DoctorController {
         @UploadedFile() file: Express.Multer.File,
     ) {
         return this.doctorService.uploadAvatar(req.user.id, id, file);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Delete(':id/avatar')
+    removeAvatar(
+        @Req() req: { user: { id: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+    ) {
+        return this.doctorService.removeAvatar(req.user.id, id);
     }
 
     @Get(':id/avatar')

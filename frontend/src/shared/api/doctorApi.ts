@@ -20,6 +20,27 @@ export type DoctorItem = {
     } | null;
 };
 
+export type PublicDoctorItem = {
+    id: string;
+    userId: string;
+    lastName: string;
+    firstName: string;
+    middleName: string | null;
+    hasAvatar: boolean;
+    avatarVersion: number;
+    avatar: {
+        sm: string;
+        md: string;
+        lg: string;
+    } | null;
+};
+
+export async function getPublicDoctors() {
+    return http<{ ok: boolean; doctors: PublicDoctorItem[] }>('/doctors/public', {
+        method: 'GET',
+    });
+}
+
 export async function getAllDoctors(token: string) {
     return http<{ ok: boolean; doctors: DoctorItem[] }>('/doctors', {
         method: 'GET',
@@ -98,6 +119,13 @@ export async function uploadDoctorAvatar(token: string, doctorId: string, file: 
         method: 'POST',
         token,
         body,
+    });
+}
+
+export async function removeDoctorAvatar(token: string, doctorId: string) {
+    return http<{ ok: boolean; message: string; doctor: DoctorItem }>(`/doctors/${doctorId}/avatar`, {
+        method: 'DELETE',
+        token,
     });
 }
 

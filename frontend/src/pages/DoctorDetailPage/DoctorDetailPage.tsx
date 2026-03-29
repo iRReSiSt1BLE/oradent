@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     buildDoctorAvatarUrl,
     getDoctorById,
+    removeDoctorAvatar,
+    requestDoctorEmailVerification,
+    updateDoctor,
     uploadDoctorAvatar,
 } from '../../shared/api/doctorApi';
+import { getPhoneVerificationStatus, startPhoneVerification } from '../../shared/api/phoneVerificationApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
+import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import './DoctorDetailPage.scss';
 
 type DoctorItem = {
@@ -22,15 +27,39 @@ type DoctorItem = {
     avatarVersion: number;
 };
 
+const OUTPUT_SIZE = 640;
+const MOVE_STEP = 18;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const EMAIL_COOLDOWN_MS = 3 * 60 * 1000;
+
 function detectPreferredSize(): 'sm' | 'md' | 'lg' {
     const dpr = window.devicePixelRatio || 1;
     const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
     const effectiveType = connection?.effectiveType || '';
-
     if (effectiveType === 'slow-2g' || effectiveType === '2g') return 'sm';
     if (effectiveType === '3g') return 'md';
     if (dpr >= 2) return 'lg';
     return 'md';
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizeEmail(value: string) {
+    return value.trim().toLowerCase();
+}
+
+function normalizePhone(value: string) {
+    return value.trim();
+}
+
+function formatCooldown(ms: number) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 export default function DoctorDetailPage() {
@@ -42,9 +71,62 @@ export default function DoctorDetailPage() {
     const [doctor, setDoctor] = useState<DoctorItem | null>(null);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [removing, setRemoving] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [preferredSize, setPreferredSize] = useState<'sm' | 'md' | 'lg'>('md');
+
+    const [editorOpen, setEditorOpen] = useState(false);
+    const [editorImageUrl, setEditorImageUrl] = useState('');
+    const [editorImage, setEditorImage] = useState<HTMLImageElement | null>(null);
+    const [editorScale, setEditorScale] = useState(1);
+    const [editorX, setEditorX] = useState(0);
+    const [editorY, setEditorY] = useState(0);
+    const [frameSize, setFrameSize] = useState(300);
+
+    const [editOpen, setEditOpen] = useState(false);
+    const [editLoading, setEditLoading] = useState(false);
+    const [emailCodeLoading, setEmailCodeLoading] = useState(false);
+    const [phoneVerifyLoading, setPhoneVerifyLoading] = useState(false);
+    const [editError, setEditError] = useState('');
+    const [editMessage, setEditMessage] = useState('');
+    const [editForm, setEditForm] = useState({
+        lastName: '',
+        firstName: '',
+        middleName: '',
+        email: '',
+        phone: '',
+        emailCode: '',
+        actorPassword: '',
+    });
+
+    const [emailCodeRequested, setEmailCodeRequested] = useState(false);
+    const [emailCodeForEmail, setEmailCodeForEmail] = useState('');
+    const [emailCooldownUntil, setEmailCooldownUntil] = useState(0);
+    const [nowTs, setNowTs] = useState(Date.now());
+
+    const [phoneVerificationSessionId, setPhoneVerificationSessionId] = useState('');
+    const [phoneVerified, setPhoneVerified] = useState(false);
+    const [phoneVerifiedForPhone, setPhoneVerifiedForPhone] = useState('');
+    const [telegramBotUrl, setTelegramBotUrl] = useState('');
+    const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const frameRef = useRef<HTMLDivElement | null>(null);
+    const dragPointerIdRef = useRef<number | null>(null);
+    const dragStartRef = useRef({ x: 0, y: 0, originX: 0, originY: 0 });
+    const phonePollingRef = useRef<number | null>(null);
+
+    const normalizedEditEmail = useMemo(() => normalizeEmail(editForm.email), [editForm.email]);
+    const normalizedEditPhone = useMemo(() => normalizePhone(editForm.phone), [editForm.phone]);
+    const cooldownLeftMs = Math.max(0, emailCooldownUntil - nowTs);
+    const cooldownActive = cooldownLeftMs > 0;
+    const cooldownKey = doctor ? `doctorDetail.emailCooldown.v1:${doctor.id}` : 'doctorDetail.emailCooldown.v1:anon';
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         setPreferredSize(detectPreferredSize());
@@ -59,10 +141,8 @@ export default function DoctorDetailPage() {
                 setLoading(false);
                 return;
             }
-
             setLoading(true);
             setError('');
-
             try {
                 const res = await getDoctorById(token, doctorId);
                 setDoctor(res.doctor);
@@ -74,7 +154,49 @@ export default function DoctorDetailPage() {
         }
 
         void load();
+
+        return () => {
+            if (phonePollingRef.current) {
+                window.clearInterval(phonePollingRef.current);
+            }
+        };
     }, [token, doctorId, isAllowed]);
+
+    useEffect(() => {
+        return () => {
+            if (editorImageUrl) URL.revokeObjectURL(editorImageUrl);
+        };
+    }, [editorImageUrl]);
+
+    useEffect(() => {
+        if (!editorOpen) return;
+        const updateFrame = () => {
+            const width = frameRef.current?.clientWidth || 300;
+            setFrameSize(width);
+        };
+        updateFrame();
+        window.addEventListener('resize', updateFrame);
+        return () => window.removeEventListener('resize', updateFrame);
+    }, [editorOpen]);
+
+    useEffect(() => {
+        if (!emailCodeForEmail) return;
+        if (normalizedEditEmail !== emailCodeForEmail) {
+            setEmailCodeRequested(false);
+            setEditForm((prev) => ({ ...prev, emailCode: '' }));
+            setEmailCooldownUntil(0);
+        }
+    }, [normalizedEditEmail, emailCodeForEmail]);
+
+    useEffect(() => {
+        if (!phoneVerifiedForPhone) return;
+        if (normalizedEditPhone !== phoneVerifiedForPhone) {
+            setPhoneVerified(false);
+            setPhoneVerificationSessionId('');
+            setTelegramBotUrl('');
+            setIsPhoneModalOpen(false);
+        }
+    }, [normalizedEditPhone, phoneVerifiedForPhone]);
 
     const avatarSrc = useMemo(() => {
         if (!doctor?.hasAvatar) return '';
@@ -89,15 +211,365 @@ export default function DoctorDetailPage() {
         return `${sm} 160w, ${md} 320w, ${lg} 640w`;
     }, [doctor]);
 
-    async function handleUpload(file: File | null) {
-        if (!file || !token || !doctor) return;
+    const frameMetrics = useMemo(() => {
+        if (!editorImage) return { renderW: frameSize, renderH: frameSize, maxX: 0, maxY: 0 };
+        const baseScale = Math.max(frameSize / editorImage.width, frameSize / editorImage.height);
+        const renderW = editorImage.width * baseScale * editorScale;
+        const renderH = editorImage.height * baseScale * editorScale;
+        const maxX = Math.max(0, (renderW - frameSize) / 2);
+        const maxY = Math.max(0, (renderH - frameSize) / 2);
+        return { renderW, renderH, maxX, maxY };
+    }, [editorImage, editorScale, frameSize]);
 
-        setUploading(true);
-        setMessage('');
+    useEffect(() => {
+        if (!editorOpen || !editorImage) return;
+        setEditorX((prev) => clamp(prev, -frameMetrics.maxX, frameMetrics.maxX));
+        setEditorY((prev) => clamp(prev, -frameMetrics.maxY, frameMetrics.maxY));
+    }, [editorOpen, editorImage, frameMetrics.maxX, frameMetrics.maxY]);
+
+    function clampPosition(nextX: number, nextY: number) {
+        return {
+            x: clamp(nextX, -frameMetrics.maxX, frameMetrics.maxX),
+            y: clamp(nextY, -frameMetrics.maxY, frameMetrics.maxY),
+        };
+    }
+
+    function readCooldownForEmail(email: string) {
+        try {
+            const raw = window.localStorage.getItem(cooldownKey);
+            if (!raw) return 0;
+            const parsed = JSON.parse(raw) as { email: string; until: number };
+            if (normalizeEmail(parsed.email) === normalizeEmail(email) && parsed.until > Date.now()) {
+                return parsed.until;
+            }
+        } catch {}
+        return 0;
+    }
+
+    async function openEditorWithFile(file: File) {
+        if (!file.type.startsWith('image/')) {
+            setError('Дозволені лише зображення');
+            return;
+        }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.decoding = 'async';
+        await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error('Не вдалося прочитати зображення'));
+            img.src = url;
+        });
+
+        if (editorImageUrl) URL.revokeObjectURL(editorImageUrl);
+        setEditorImageUrl(url);
+        setEditorImage(img);
+        setEditorScale(1);
+        setEditorX(0);
+        setEditorY(0);
+        setEditorOpen(true);
         setError('');
+        setMessage('');
+    }
+
+    async function openEditorFromCurrentAvatar() {
+        if (!doctor || !doctor.hasAvatar) return;
+        try {
+            const url = buildDoctorAvatarUrl(doctor.id, 'lg', doctor.avatarVersion);
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) throw new Error('Не вдалося завантажити поточне фото');
+            const blob = await response.blob();
+            const file = new File([blob], `${doctor.id}-current.webp`, { type: blob.type || 'image/webp' });
+            await openEditorWithFile(file);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Не вдалося відкрити редактор');
+        }
+    }
+
+    function closeEditor() {
+        setEditorOpen(false);
+        setEditorScale(1);
+        setEditorX(0);
+        setEditorY(0);
+        setEditorImage(null);
+        if (editorImageUrl) {
+            URL.revokeObjectURL(editorImageUrl);
+            setEditorImageUrl('');
+        }
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+
+    function openEditModal() {
+        if (!doctor) return;
+        const until = readCooldownForEmail(doctor.email);
+        setEditForm({
+            lastName: doctor.lastName,
+            firstName: doctor.firstName,
+            middleName: doctor.middleName || '',
+            email: doctor.email,
+            phone: doctor.phone,
+            emailCode: '',
+            actorPassword: '',
+        });
+        setEmailCodeRequested(until > Date.now());
+        setEmailCodeForEmail(until > Date.now() ? normalizeEmail(doctor.email) : '');
+        setEmailCooldownUntil(until > Date.now() ? until : 0);
+        setPhoneVerificationSessionId('');
+        setPhoneVerified(false);
+        setPhoneVerifiedForPhone('');
+        setTelegramBotUrl('');
+        setIsPhoneModalOpen(false);
+        setEditError('');
+        setEditMessage('');
+        setEditOpen(true);
+    }
+
+    function closeEditModal() {
+        setEditOpen(false);
+        if (phonePollingRef.current) {
+            window.clearInterval(phonePollingRef.current);
+            phonePollingRef.current = null;
+        }
+    }
+
+    async function handleRequestEmailCode() {
+        if (!token || !doctor) return;
+        if (!normalizedEditEmail) return setEditError('Вкажи email');
+        if (cooldownActive) return;
+
+        const emailChanged = normalizedEditEmail !== normalizeEmail(doctor.email);
+        if (!emailChanged) {
+            setEditMessage('Email не змінено, код не потрібен');
+            setEditError('');
+            return;
+        }
+
+        setEmailCodeLoading(true);
+        setEditError('');
+        setEditMessage('');
 
         try {
-            const res = await uploadDoctorAvatar(token, doctor.id, file);
+            const result = await requestDoctorEmailVerification(token, normalizedEditEmail);
+            const until = Date.now() + EMAIL_COOLDOWN_MS;
+
+            setEmailCodeRequested(true);
+            setEmailCodeForEmail(normalizedEditEmail);
+            setEmailCooldownUntil(until);
+
+            window.localStorage.setItem(cooldownKey, JSON.stringify({ email: normalizedEditEmail, until }));
+            setEditMessage(result.message);
+        } catch (err) {
+            setEditError(err instanceof Error ? err.message : 'Не вдалося надіслати код');
+        } finally {
+            setEmailCodeLoading(false);
+        }
+    }
+
+    async function handleStartPhoneVerification() {
+        if (!normalizedEditPhone) return setEditError('Вкажи телефон');
+        if (!doctor) return;
+
+        const phoneChanged = normalizedEditPhone !== normalizePhone(doctor.phone);
+        if (!phoneChanged) {
+            setEditMessage('Телефон не змінено, підтвердження не потрібне');
+            setEditError('');
+            return;
+        }
+
+        setPhoneVerifyLoading(true);
+        setEditError('');
+        setEditMessage('');
+
+        try {
+            const result = await startPhoneVerification(normalizedEditPhone);
+            setPhoneVerificationSessionId(result.sessionId);
+            setPhoneVerified(false);
+            setTelegramBotUrl(result.telegramBotUrl);
+            setIsPhoneModalOpen(true);
+
+            if (phonePollingRef.current) window.clearInterval(phonePollingRef.current);
+
+            phonePollingRef.current = window.setInterval(async () => {
+                try {
+                    const status = await getPhoneVerificationStatus(result.sessionId);
+
+                    if (status.status === 'VERIFIED') {
+                        if (phonePollingRef.current) {
+                            window.clearInterval(phonePollingRef.current);
+                            phonePollingRef.current = null;
+                        }
+                        setPhoneVerified(true);
+                        setPhoneVerifiedForPhone(normalizedEditPhone);
+                        setTelegramBotUrl('');
+                        setIsPhoneModalOpen(false);
+                        setEditMessage('Телефон підтверджено');
+                    }
+
+                    if (status.status === 'FAILED' || status.status === 'EXPIRED') {
+                        if (phonePollingRef.current) {
+                            window.clearInterval(phonePollingRef.current);
+                            phonePollingRef.current = null;
+                        }
+                        setPhoneVerified(false);
+                        setEditError('Підтвердження телефону не завершено');
+                    }
+                } catch (pollErr) {
+                    if (phonePollingRef.current) {
+                        window.clearInterval(phonePollingRef.current);
+                        phonePollingRef.current = null;
+                    }
+                    setPhoneVerified(false);
+                    setEditError(pollErr instanceof Error ? pollErr.message : 'Помилка перевірки телефону');
+                }
+            }, 2000);
+        } catch (err) {
+            setEditError(err instanceof Error ? err.message : 'Не вдалося запустити підтвердження телефону');
+        } finally {
+            setPhoneVerifyLoading(false);
+        }
+    }
+
+    async function saveProfileEdit(e: React.FormEvent) {
+        e.preventDefault();
+        if (!token || !doctor) return;
+
+        const nextLastName = editForm.lastName.trim();
+        const nextFirstName = editForm.firstName.trim();
+        const nextMiddleName = editForm.middleName.trim();
+        const nextEmail = normalizedEditEmail;
+        const nextPhone = normalizedEditPhone;
+
+        const nameChanged =
+            nextLastName !== doctor.lastName ||
+            nextFirstName !== doctor.firstName ||
+            nextMiddleName !== (doctor.middleName || '');
+
+        const emailChanged = nextEmail !== normalizeEmail(doctor.email);
+        const phoneChanged = nextPhone !== normalizePhone(doctor.phone);
+
+        if (!nameChanged && !emailChanged && !phoneChanged) {
+            setEditError('Немає змін для збереження');
+            return;
+        }
+
+        if (emailChanged && (!emailCodeRequested || !editForm.emailCode.trim())) {
+            setEditError('Для зміни пошти надішли та введи код');
+            return;
+        }
+
+        if (phoneChanged && (!phoneVerificationSessionId || !phoneVerified)) {
+            setEditError('Для зміни телефону пройди підтвердження');
+            return;
+        }
+
+        if (!editForm.actorPassword.trim()) {
+            setEditError('Введи свій пароль для підтвердження');
+            return;
+        }
+
+        setEditLoading(true);
+        setEditError('');
+        setEditMessage('');
+
+        try {
+            const result = await updateDoctor(token, doctor.id, {
+                lastName: nextLastName,
+                firstName: nextFirstName,
+                middleName: nextMiddleName || undefined,
+                email: emailChanged ? nextEmail : undefined,
+                phone: phoneChanged ? nextPhone : undefined,
+                emailCode: emailChanged ? editForm.emailCode.trim() : undefined,
+                phoneVerificationSessionId: phoneChanged ? phoneVerificationSessionId : undefined,
+                actorPassword: editForm.actorPassword.trim(),
+            });
+
+            setDoctor(result.doctor);
+            setMessage(result.message);
+            closeEditModal();
+        } catch (err) {
+            setEditError(err instanceof Error ? err.message : 'Не вдалося зберегти зміни');
+        } finally {
+            setEditLoading(false);
+        }
+    }
+
+    function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+        if (!editorImage) return;
+        dragPointerIdRef.current = e.pointerId;
+        dragStartRef.current = {
+            x: e.clientX,
+            y: e.clientY,
+            originX: editorX,
+            originY: editorY,
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    }
+
+    function onDrag(e: React.PointerEvent<HTMLDivElement>) {
+        if (dragPointerIdRef.current !== e.pointerId || !editorImage) return;
+        const dx = e.clientX - dragStartRef.current.x;
+        const dy = e.clientY - dragStartRef.current.y;
+        const next = clampPosition(dragStartRef.current.originX + dx, dragStartRef.current.originY + dy);
+        setEditorX(next.x);
+        setEditorY(next.y);
+    }
+
+    function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+        if (dragPointerIdRef.current !== e.pointerId) return;
+        dragPointerIdRef.current = null;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
+    function changeZoom(nextScale: number) {
+        const clampedScale = clamp(nextScale, MIN_ZOOM, MAX_ZOOM);
+        setEditorScale(clampedScale);
+        const next = clampPosition(editorX, editorY);
+        setEditorX(next.x);
+        setEditorY(next.y);
+    }
+
+    function moveBy(dx: number, dy: number) {
+        const next = clampPosition(editorX + dx, editorY + dy);
+        setEditorX(next.x);
+        setEditorY(next.y);
+    }
+
+    async function handleUploadFromEditor() {
+        if (!doctor || !token || !editorImage) return;
+
+        setUploading(true);
+        setError('');
+        setMessage('');
+
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = OUTPUT_SIZE;
+            canvas.height = OUTPUT_SIZE;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Canvas context unavailable');
+
+            const ratio = OUTPUT_SIZE / frameSize;
+            const outRenderW = frameMetrics.renderW * ratio;
+            const outRenderH = frameMetrics.renderH * ratio;
+            const outX = (OUTPUT_SIZE - outRenderW) / 2 + editorX * ratio;
+            const outY = (OUTPUT_SIZE - outRenderH) / 2 + editorY * ratio;
+
+            ctx.clearRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+            ctx.drawImage(editorImage, outX, outY, outRenderW, outRenderH);
+
+            const blob: Blob = await new Promise((resolve, reject) => {
+                canvas.toBlob(
+                    (result) => {
+                        if (!result) return reject(new Error('Не вдалося згенерувати файл'));
+                        resolve(result);
+                    },
+                    'image/webp',
+                    0.92,
+                );
+            });
+
+            const finalFile = new File([blob], `${doctor.id}-avatar.webp`, { type: 'image/webp' });
+            const res = await uploadDoctorAvatar(token, doctor.id, finalFile);
+
             setDoctor({
                 id: res.doctor.id,
                 userId: res.doctor.userId,
@@ -110,11 +582,43 @@ export default function DoctorDetailPage() {
                 hasAvatar: res.doctor.hasAvatar,
                 avatarVersion: res.doctor.avatarVersion,
             });
+
             setMessage(res.message);
+            closeEditor();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Не вдалося завантажити аватар');
         } finally {
             setUploading(false);
+        }
+    }
+
+    async function handleRemoveAvatar() {
+        if (!doctor || !token) return;
+        setRemoving(true);
+        setError('');
+        setMessage('');
+
+        try {
+            const res = await removeDoctorAvatar(token, doctor.id);
+
+            setDoctor({
+                id: res.doctor.id,
+                userId: res.doctor.userId,
+                email: res.doctor.email,
+                lastName: res.doctor.lastName,
+                firstName: res.doctor.firstName,
+                middleName: res.doctor.middleName,
+                phone: res.doctor.phone,
+                isActive: res.doctor.isActive,
+                hasAvatar: res.doctor.hasAvatar,
+                avatarVersion: res.doctor.avatarVersion,
+            });
+
+            setMessage(res.message);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Не вдалося видалити аватар');
+        } finally {
+            setRemoving(false);
         }
     }
 
@@ -165,7 +669,7 @@ export default function DoctorDetailPage() {
                                         className="doctor-detail-page__avatar"
                                         src={avatarSrc}
                                         srcSet={avatarSrcSet}
-                                        sizes="(max-width: 640px) 160px, (max-width: 1024px) 220px, 260px"
+                                        sizes="(max-width: 640px) 180px, (max-width: 1024px) 240px, 300px"
                                         alt="Аватар лікаря"
                                         loading="eager"
                                         decoding="async"
@@ -175,19 +679,231 @@ export default function DoctorDetailPage() {
                                 )}
                             </div>
 
-                            <label className="doctor-detail-page__upload">
-                                <span>{uploading ? 'Завантаження...' : 'Завантажити/замінити фото'}</span>
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    disabled={uploading}
-                                    onChange={(e) => handleUpload(e.target.files?.[0] || null)}
-                                />
-                            </label>
+                            <div className="doctor-detail-page__avatar-actions">
+                                <label className="doctor-detail-page__upload">
+                                    <span>{uploading ? 'Завантаження...' : 'Завантажити/замінити фото'}</span>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        disabled={uploading || removing}
+                                        onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            await openEditorWithFile(file);
+                                        }}
+                                    />
+                                </label>
+
+                                <button
+                                    type="button"
+                                    className="doctor-detail-page__edit-btn"
+                                    disabled={!doctor.hasAvatar || uploading || removing}
+                                    onClick={openEditorFromCurrentAvatar}
+                                >
+                                    Редагувати фото
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="doctor-detail-page__danger-btn"
+                                    disabled={!doctor.hasAvatar || removing || uploading}
+                                    onClick={handleRemoveAvatar}
+                                >
+                                    {removing ? 'Видалення...' : 'Видалити фото'}
+                                </button>
+
+                                <button type="button" className="doctor-detail-page__profile-btn" onClick={openEditModal}>
+                                    Редагувати профіль
+                                </button>
+                            </div>
                         </>
                     )}
                 </section>
             </div>
+
+            {editorOpen && editorImage && (
+                <div className="doctor-detail-page__modal-backdrop">
+                    <div className="doctor-detail-page__modal">
+                        <h2>Редактор фото</h2>
+
+                        <div
+                            ref={frameRef}
+                            className="doctor-detail-page__editor-frame"
+                            onPointerDown={startDrag}
+                            onPointerMove={onDrag}
+                            onPointerUp={endDrag}
+                            onPointerCancel={endDrag}
+                        >
+                            <img
+                                src={editorImageUrl}
+                                alt="Попередній перегляд"
+                                draggable={false}
+                                style={{
+                                    width: `${frameMetrics.renderW}px`,
+                                    height: `${frameMetrics.renderH}px`,
+                                    left: '50%',
+                                    top: '50%',
+                                    transform: `translate(calc(-50% + ${editorX}px), calc(-50% + ${editorY}px))`,
+                                }}
+                            />
+                        </div>
+
+                        <div className="doctor-detail-page__editor-controls">
+                            <button type="button" onClick={() => changeZoom(editorScale - 0.15)} disabled={editorScale <= MIN_ZOOM}>
+                                Зменшити
+                            </button>
+                            <button type="button" onClick={() => changeZoom(editorScale + 0.15)} disabled={editorScale >= MAX_ZOOM}>
+                                Збільшити
+                            </button>
+                            <button type="button" onClick={() => moveBy(MOVE_STEP, 0)}>←</button>
+                            <button type="button" onClick={() => moveBy(-MOVE_STEP, 0)}>→</button>
+                            <button type="button" onClick={() => moveBy(0, MOVE_STEP)}>↑</button>
+                            <button type="button" onClick={() => moveBy(0, -MOVE_STEP)}>↓</button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setEditorScale(1);
+                                    setEditorX(0);
+                                    setEditorY(0);
+                                }}
+                            >
+                                Скинути
+                            </button>
+                        </div>
+
+                        <div className="doctor-detail-page__modal-actions">
+                            <button type="button" onClick={closeEditor} disabled={uploading}>
+                                Скасувати
+                            </button>
+                            <button type="button" onClick={handleUploadFromEditor} disabled={uploading}>
+                                {uploading ? 'Збереження...' : 'Зберегти фото'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {editOpen && (
+                <div className="doctor-detail-page__modal-backdrop">
+                    <form className="doctor-detail-page__modal doctor-detail-page__modal--profile" onSubmit={saveProfileEdit}>
+                        <h2>Редагування лікаря</h2>
+
+                        {editError && <AlertToast message={editError} variant="error" onClose={() => setEditError('')} />}
+                        {editMessage && <AlertToast message={editMessage} variant="success" onClose={() => setEditMessage('')} />}
+
+                        <input
+                            value={editForm.lastName}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                            placeholder="Прізвище"
+                        />
+                        <input
+                            value={editForm.firstName}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                            placeholder="Ім'я"
+                        />
+                        <input
+                            value={editForm.middleName}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, middleName: e.target.value }))}
+                            placeholder="По батькові"
+                        />
+                        <input
+                            value={editForm.email}
+                            onChange={(e) => {
+                                const next = e.target.value;
+                                setEditForm((prev) => ({ ...prev, email: next }));
+                                setEmailCooldownUntil(readCooldownForEmail(next));
+                            }}
+                            placeholder="Email"
+                        />
+                        <input
+                            value={editForm.phone}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, phone: e.target.value }))}
+                            placeholder="Телефон"
+                        />
+
+                        <div className="doctor-detail-page__verify-row">
+                            <button
+                                type="button"
+                                onClick={handleRequestEmailCode}
+                                disabled={emailCodeLoading || cooldownActive}
+                                title={emailCodeRequested ? 'Надіслати код' : undefined}
+                            >
+                                {emailCodeLoading
+                                    ? 'НАДСИЛАННЯ...'
+                                    : cooldownActive
+                                        ? `НАДІСЛАНО ${formatCooldown(cooldownLeftMs)}`
+                                        : emailCodeRequested
+                                            ? 'НАДІСЛАТИ КОД'
+                                            : 'НАДІСЛАТИ КОД НА ПОШТУ'}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleStartPhoneVerification}
+                                disabled={
+                                    phoneVerifyLoading ||
+                                    !normalizedEditPhone ||
+                                    (phoneVerified && normalizedEditPhone === phoneVerifiedForPhone)
+                                }
+                            >
+                                {phoneVerifyLoading
+                                    ? 'ПІДГОТОВКА...'
+                                    : phoneVerified && normalizedEditPhone === phoneVerifiedForPhone
+                                        ? 'ТЕЛЕФОН ПІДТВЕРДЖЕНО'
+                                        : 'ПІДТВЕРДИТИ ТЕЛЕФОН'}
+                            </button>
+                        </div>
+
+                        <input
+                            value={editForm.emailCode}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, emailCode: e.target.value }))}
+                            placeholder="Код підтвердження email"
+                        />
+
+                        <input
+                            type="password"
+                            value={editForm.actorPassword}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, actorPassword: e.target.value }))}
+                            placeholder="Твій пароль SUPER_ADMIN / ADMIN"
+                        />
+
+                        <div className="doctor-detail-page__verify-status">
+                            <span className={emailCodeRequested ? 'ok' : 'pending'}>
+                                Email: {emailCodeRequested ? 'код надіслано' : 'код не надіслано'}
+                            </span>
+                            <span className={phoneVerified ? 'ok' : 'pending'}>
+                                Телефон: {phoneVerified ? 'підтверджено' : 'не підтверджено'}
+                            </span>
+                        </div>
+
+                        <div className="doctor-detail-page__modal-actions">
+                            <button type="button" onClick={closeEditModal}>
+                                Скасувати
+                            </button>
+                            <button type="submit" disabled={editLoading}>
+                                {editLoading ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {isPhoneModalOpen && telegramBotUrl && (
+                <div className="doctor-detail-page__modal-backdrop">
+                    <div className="doctor-detail-page__modal doctor-detail-page__modal--phone">
+                        <h2>Підтвердження телефону</h2>
+                        <TelegramQrCard
+                            telegramBotUrl={telegramBotUrl}
+                            title="QR для підтвердження нового телефону"
+                            subtitle="Скануй QR через Telegram або натисни кнопку переходу."
+                        />
+                        <button type="button" onClick={() => setIsPhoneModalOpen(false)}>
+                            Згорнути
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

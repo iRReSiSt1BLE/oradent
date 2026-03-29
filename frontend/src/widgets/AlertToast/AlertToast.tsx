@@ -26,11 +26,20 @@ export default function AlertToast({
 
     return (
         <div className={`alert-toast alert-toast--${variant}`} role="alert">
-
-
             <div className="alert-toast__content">
                 <div className="alert-toast__icon">
-                    {variant === 'success' && '✓'}
+                    {variant === 'success' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16">
+                            <polyline
+                                fill="none"
+                                stroke="#000"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.5"
+                                points="2.75 8.75 6.25 12.25 13.25 4.75"
+                            />
+                        </svg>
+                    )}
                     {variant === 'error' && '✕'}
                     {variant === 'info' && 'i'}
                 </div>
@@ -47,10 +56,7 @@ export default function AlertToast({
                 </button>
             </div>
 
-            <div
-                className="alert-toast__timer"
-                style={{ animationDuration: `${duration}ms` }}
-            />
+            <div className="alert-toast__timer" style={{ animationDuration: `${duration}ms` }} />
         </div>
     );
 }

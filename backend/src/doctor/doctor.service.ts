@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import sharp from 'sharp';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Doctor } from './entities/doctor.entity';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
@@ -37,6 +38,7 @@ export class DoctorService {
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly patientService: PatientService,
         private readonly adminService: AdminService,
+        private readonly configService: ConfigService,
     ) {}
 
     private normalizePhone(phone: string) {
@@ -48,7 +50,16 @@ export class DoctorService {
     }
 
     private getAvatarRoot() {
-        return path.join(process.cwd(), 'storage', 'doctor-avatars');
+        const configured = this.configService.get<string>('DOCTOR_AVATAR_STORAGE_ROOT');
+        if (configured && configured.trim().length > 0) {
+            return configured.trim();
+        }
+
+        if (process.platform === 'win32') {
+            return 'C:\\Users\\hmax0\\Desktop\\oradent-storage\\doctor-avatars';
+        }
+
+        return '/home/u569589412/doctor-avatars';
     }
 
     private buildAvatarUrl(doctorId: string, size: AvatarSize, version: number) {
@@ -248,6 +259,36 @@ export class DoctorService {
         };
     }
 
+    async getPublicDoctors() {
+        const doctors = await this.doctorRepository.find({
+            where: { isActive: true },
+            order: {
+                lastName: 'ASC',
+                firstName: 'ASC',
+            },
+        });
+
+        return {
+            ok: true,
+            doctors: doctors.map((doctor) => ({
+                id: doctor.id,
+                userId: doctor.user.id,
+                lastName: doctor.lastName,
+                firstName: doctor.firstName,
+                middleName: doctor.middleName,
+                hasAvatar: doctor.hasAvatar,
+                avatarVersion: doctor.avatarVersion,
+                avatar: doctor.hasAvatar
+                    ? {
+                        sm: this.buildAvatarUrl(doctor.id, 'sm', doctor.avatarVersion),
+                        md: this.buildAvatarUrl(doctor.id, 'md', doctor.avatarVersion),
+                        lg: this.buildAvatarUrl(doctor.id, 'lg', doctor.avatarVersion),
+                    }
+                    : null,
+            })),
+        };
+    }
+
     async getDoctorById(currentUserId: string, doctorId: string) {
         await this.ensureManagerAccess(currentUserId);
 
@@ -428,6 +469,48 @@ export class DoctorService {
         return {
             ok: true,
             message: 'Аватар лікаря оновлено',
+            doctor: this.mapDoctor(savedDoctor),
+        };
+    }
+
+    async removeAvatar(currentUserId: string, doctorId: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const doctor = await this.doctorRepository.findOne({ where: { id: doctorId } });
+        if (!doctor) {
+            throw new BadRequestException('Лікаря не знайдено');
+        }
+
+        const files = [doctor.avatarSmPath, doctor.avatarMdPath, doctor.avatarLgPath].filter(
+            (v): v is string => Boolean(v),
+        );
+
+        for (const filePath of files) {
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            } catch {}
+        }
+
+        const doctorDir = path.join(this.getAvatarRoot(), doctor.id);
+        try {
+            if (fs.existsSync(doctorDir) && fs.readdirSync(doctorDir).length === 0) {
+                fs.rmdirSync(doctorDir);
+            }
+        } catch {}
+
+        doctor.hasAvatar = false;
+        doctor.avatarVersion = (doctor.avatarVersion || 1) + 1;
+        doctor.avatarSmPath = null;
+        doctor.avatarMdPath = null;
+        doctor.avatarLgPath = null;
+
+        const savedDoctor = await this.doctorRepository.save(doctor);
+
+        return {
+            ok: true,
+            message: 'Аватар лікаря видалено',
             doctor: this.mapDoctor(savedDoctor),
         };
     }
