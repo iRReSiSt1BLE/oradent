@@ -6,16 +6,19 @@ import { ServicesController } from './services.controller';
 import { UserModule } from '../user/user.module';
 import { AdminModule } from '../admin/admin.module';
 import { ServiceCategoryEntity } from './entities/service-category.entity';
-import { ConfigModule } from '@nestjs/config';
+import { DoctorSpecialty } from '../doctor/entities/doctor-specialty.entity';
 import { DoctorModule } from '../doctor/doctor.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([ClinicServiceEntity, ServiceCategoryEntity]),
+        TypeOrmModule.forFeature([
+            ClinicServiceEntity,
+            ServiceCategoryEntity,
+            DoctorSpecialty,
+        ]),
         UserModule,
         AdminModule,
         DoctorModule,
-        ConfigModule,
     ],
     providers: [ServicesService],
     controllers: [ServicesController],

@@ -2,6 +2,18 @@ import { http } from './http';
 
 const API_BASE_URL = 'http://localhost:3000';
 
+export type DoctorSpecialtyItem = {
+    id: string;
+    name: string;
+    nameI18n?: {
+        ua?: string;
+        en?: string;
+        de?: string;
+        fr?: string;
+    };
+    order: number;
+};
+
 export type DoctorItem = {
     id: string;
     userId: string;
@@ -9,6 +21,9 @@ export type DoctorItem = {
     lastName: string;
     firstName: string;
     middleName: string | null;
+    specialty: string | null;
+    specialties: string[];
+    infoBlock: string | null;
     phone: string;
     isActive: boolean;
     hasAvatar: boolean;
@@ -20,12 +35,36 @@ export type DoctorItem = {
     } | null;
 };
 
+
 export type PublicDoctorItem = {
     id: string;
     userId: string;
     lastName: string;
     firstName: string;
     middleName: string | null;
+    specialty: string | null;
+    specialtyI18n?: {
+        ua?: string;
+        en?: string;
+        de?: string;
+        fr?: string;
+    };
+    specialties: Array<{
+        value: string;
+        i18n?: {
+            ua?: string;
+            en?: string;
+            de?: string;
+            fr?: string;
+        };
+    }>;
+    infoBlock: string | null;
+    infoBlockI18n?: {
+        ua?: string;
+        en?: string;
+        de?: string;
+        fr?: string;
+    };
     hasAvatar: boolean;
     avatarVersion: number;
     avatar: {
@@ -34,6 +73,35 @@ export type PublicDoctorItem = {
         lg: string;
     } | null;
 };
+export async function getDoctorSpecialties(token: string | null) {
+    return http<{ ok: boolean; specialties: DoctorSpecialtyItem[] }>('/doctors/specialties', {
+        method: 'GET',
+        token,
+    });
+}
+
+export async function createDoctorSpecialty(token: string, name: string) {
+    return http<{ ok: boolean; specialty: DoctorSpecialtyItem }>('/doctors/specialties', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function updateDoctorSpecialty(token: string, specialtyId: string, name: string) {
+    return http<{ ok: boolean; specialty: DoctorSpecialtyItem }>(`/doctors/specialties/${specialtyId}`, {
+        method: 'PATCH',
+        token,
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function deleteDoctorSpecialty(token: string, specialtyId: string) {
+    return http<{ ok: boolean; message?: string }>(`/doctors/specialties/${specialtyId}`, {
+        method: 'DELETE',
+        token,
+    });
+}
 
 export async function getPublicDoctors() {
     return http<{ ok: boolean; doctors: PublicDoctorItem[] }>('/doctors/public', {
@@ -69,6 +137,8 @@ export async function createDoctor(
         lastName: string;
         firstName: string;
         middleName?: string;
+        specialties: string[];
+        infoBlock?: string;
         phone: string;
         email: string;
         password: string;
@@ -90,6 +160,8 @@ export async function updateDoctor(
         lastName?: string;
         firstName?: string;
         middleName?: string;
+        specialties?: string[];
+        infoBlock?: string;
         email?: string;
         phone?: string;
         emailCode?: string;

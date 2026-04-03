@@ -27,6 +27,15 @@ export class Doctor {
     @Column({ type: 'varchar', length: 100, nullable: true })
     middleName: string | null;
 
+    @Column({ type: 'varchar', length: 140, nullable: true })
+    specialty: string | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    specialties: string[] | null;
+
+    @Column({ type: 'text', nullable: true })
+    infoBlock: string | null;
+
     @Column({ type: 'varchar', length: 20, unique: true })
     phone: string;
 

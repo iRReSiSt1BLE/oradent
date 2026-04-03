@@ -162,6 +162,7 @@ button {
     color: #cf222e;
   }
 }
+
 html,
 body,
 *,
@@ -185,6 +186,16 @@ p {
 input,
 textarea {
   cursor: text;
+}
+
+::selection {
+  background: #c9f3df;
+  color: #111;
+}
+
+::-moz-selection {
+  background: #c9f3df;
+  color: #111;
 }
 
 @media (max-width: 768px) {

@@ -12,17 +12,17 @@ import AdminListPage from '../../pages/AdminListPage/AdminListPage';
 import ServiceCreatePage from '../../pages/ServiceCreatePage/ServiceCreatePage';
 import ServiceListPage from '../../pages/ServiceListPage/ServiceListPage';
 import ServiceDetailPage from '../../pages/ServiceDetailPage/ServiceDetailPage';
-import DoctorCreatePage from '../../pages/DoctorCreatePage/DoctorCreatePage';
 import DoctorListPage from '../../pages/DoctorListPage/DoctorListPage';
 import DoctorDetailPage from '../../pages/DoctorDetailPage/DoctorDetailPage';
 import DoctorAppointmentsPage from '../../pages/DoctorAppointmentsPage/DoctorAppointmentsPage';
 import DoctorAppointmentDetailPage from '../../pages/DoctorAppointmentDetailPage/DoctorAppointmentDetailPage';
+import DoctorScheduleAdminPage from '../../pages/DoctorScheduleAdminPage/DoctorScheduleAdminPage';
+import DoctorSchedulePage from '../../pages/DoctorSchedulePage/DoctorSchedulePage';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 
 function SuperAdminOnly() {
     const token = getToken();
     const role = getUserRole();
-
     if (!token) return <Navigate to="/login" replace />;
     if (role !== 'SUPER_ADMIN') return <Navigate to="/" replace />;
     return <Outlet />;
@@ -31,7 +31,6 @@ function SuperAdminOnly() {
 function AdminPanelOnly() {
     const token = getToken();
     const role = getUserRole();
-
     if (!token) return <Navigate to="/login" replace />;
     if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') return <Navigate to="/" replace />;
     return <Outlet />;
@@ -40,7 +39,6 @@ function AdminPanelOnly() {
 function DoctorOnly() {
     const token = getToken();
     const role = getUserRole();
-
     if (!token) return <Navigate to="/login" replace />;
     if (role !== 'DOCTOR') return <Navigate to="/" replace />;
     return <Outlet />;
@@ -59,6 +57,8 @@ export const router = createBrowserRouter([
         children: [
             { index: true, element: <HomePage /> },
             { path: 'services/:serviceId', element: <ServiceDetailPage /> },
+            { path: 'doctors/:doctorId/schedule', element: <DoctorSchedulePage /> },
+
             { path: 'register', element: <RegisterPage /> },
             { path: 'login', element: <LoginPage /> },
             { path: 'login/success', element: <LoginSuccessPage /> },
@@ -78,8 +78,8 @@ export const router = createBrowserRouter([
                 children: [
                     { path: 'admin/services/create', element: <ServiceCreatePage /> },
                     { path: 'admin/services/list', element: <ServiceListPage /> },
-                    { path: 'admin/doctors/create', element: <DoctorCreatePage /> },
                     { path: 'admin/doctors/list', element: <DoctorListPage /> },
+                    { path: 'admin/doctors/schedule', element: <DoctorScheduleAdminPage /> },
                     { path: 'admin/doctors/:doctorId', element: <DoctorDetailPage /> },
                 ],
             },
@@ -89,7 +89,6 @@ export const router = createBrowserRouter([
                 children: [
                     { path: 'admins/create', element: <AdminCreatePage /> },
                     { path: 'admins/list', element: <AdminListPage /> },
-                    { path: 'super-admin', element: <AdminCreatePage /> },
                 ],
             },
         ],

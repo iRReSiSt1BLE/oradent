@@ -9,8 +9,8 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from 'typeorm';
-import { User } from '../../user/entities/user.entity';
 import { ServiceCategoryEntity } from './service-category.entity';
+import { DoctorSpecialty } from '../../doctor/entities/doctor-specialty.entity';
 
 const decimalToNumber = {
     to: (value: number) => value,
@@ -37,26 +37,7 @@ export class ClinicServiceEntity {
         scale: 2,
         transformer: decimalToNumber,
     })
-    priceUsd: number;
-
-    @Column({
-        type: 'decimal',
-        precision: 10,
-        scale: 2,
-        transformer: decimalToNumber,
-    })
-    usdBuyRate: number;
-
-    @Column({
-        type: 'decimal',
-        precision: 10,
-        scale: 2,
-        transformer: decimalToNumber,
-    })
     priceUah: number;
-
-    @Column({ type: 'datetime' })
-    priceUpdatedAt: Date;
 
     @Column({ type: 'boolean', default: true })
     isActive: boolean;
@@ -72,13 +53,13 @@ export class ClinicServiceEntity {
     @JoinColumn({ name: 'categoryId' })
     category: ServiceCategoryEntity;
 
-    @ManyToMany(() => User, { eager: true })
+    @ManyToMany(() => DoctorSpecialty, { eager: true })
     @JoinTable({
-        name: 'clinic_service_doctors',
+        name: 'clinic_service_specialties',
         joinColumn: { name: 'serviceId', referencedColumnName: 'id' },
-        inverseJoinColumn: { name: 'doctorUserId', referencedColumnName: 'id' },
+        inverseJoinColumn: { name: 'specialtyId', referencedColumnName: 'id' },
     })
-    doctorUsers: User[];
+    specialties: DoctorSpecialty[];
 
     @CreateDateColumn()
     createdAt: Date;

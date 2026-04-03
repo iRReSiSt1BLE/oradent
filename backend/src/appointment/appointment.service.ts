@@ -14,6 +14,8 @@ import { UserService } from '../user/user.service';
 import { ServicesService } from '../services/services.service';
 import { Video } from '../video/entities/video.entity';
 import { UserRole } from '../common/enums/user-role.enum';
+import { DoctorScheduleService } from '../doctor-schedule/doctor-schedule.service';
+import { ClinicServiceEntity } from '../services/entities/clinic-service.entity';
 
 type JwtUser = {
     id: string;
@@ -29,11 +31,39 @@ export class AppointmentService {
         private readonly appointmentRepository: Repository<Appointment>,
         @InjectRepository(Video)
         private readonly videoRepository: Repository<Video>,
+        @InjectRepository(ClinicServiceEntity)
+        private readonly clinicServiceRepository: Repository<ClinicServiceEntity>,
         private readonly patientService: PatientService,
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly userService: UserService,
         private readonly servicesService: ServicesService,
+        private readonly doctorScheduleService: DoctorScheduleService,
     ) {}
+
+    private parseAppointmentDateOrThrow(raw: string): Date {
+        const date = new Date(raw);
+        if (Number.isNaN(date.getTime())) {
+            throw new BadRequestException('Невірна дата запису');
+        }
+        return date;
+    }
+
+    private async ensureScheduleAllowsBooking(
+        doctorId: string,
+        serviceId: string,
+        appointmentDateRaw: string,
+    ) {
+        const service = await this.clinicServiceRepository.findOne({ where: { id: serviceId } });
+        if (!service) throw new BadRequestException('Послугу не знайдено');
+
+        const appointmentDate = this.parseAppointmentDateOrThrow(appointmentDateRaw);
+
+        await this.doctorScheduleService.ensureSlotAvailableForBooking(
+            doctorId,
+            appointmentDate,
+            Number(service.durationMinutes) || 20,
+        );
+    }
 
     async createGuestAppointment(dto: CreateGuestAppointmentDto) {
         await this.phoneVerificationService.ensureVerified(
@@ -42,6 +72,7 @@ export class AppointmentService {
         );
 
         await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
+        await this.ensureScheduleAllowsBooking(dto.doctorId, dto.serviceId, dto.appointmentDate);
 
         let patient = await this.patientService.findByPhone(dto.phone);
 
@@ -65,9 +96,7 @@ export class AppointmentService {
             patient,
             doctorId: dto.doctorId || null,
             serviceId: dto.serviceId || null,
-            appointmentDate: dto.appointmentDate
-                ? new Date(dto.appointmentDate)
-                : null,
+            appointmentDate: dto.appointmentDate ? new Date(dto.appointmentDate) : null,
             status: 'BOOKED',
             source: 'GUEST',
             recordingCompleted: false,
@@ -104,15 +133,11 @@ export class AppointmentService {
 
         if (!patient.phoneVerified) {
             if (!patient.phone) {
-                throw new BadRequestException(
-                    'У профілі пацієнта відсутній номер телефону',
-                );
+                throw new BadRequestException('У профілі пацієнта відсутній номер телефону');
             }
 
             if (!dto.phoneVerificationSessionId) {
-                throw new BadRequestException(
-                    'Потрібно один раз підтвердити номер телефону',
-                );
+                throw new BadRequestException('Потрібно один раз підтвердити номер телефону');
             }
 
             await this.phoneVerificationService.ensureVerified(
@@ -125,20 +150,17 @@ export class AppointmentService {
         }
 
         if (!dto.doctorId || !dto.serviceId || !dto.appointmentDate) {
-            throw new BadRequestException(
-                'Потрібно заповнити лікаря, послугу і дату запису',
-            );
+            throw new BadRequestException('Потрібно заповнити лікаря, послугу і дату запису');
         }
 
         await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
+        await this.ensureScheduleAllowsBooking(dto.doctorId, dto.serviceId, dto.appointmentDate);
 
         const appointment = this.appointmentRepository.create({
             patient,
             doctorId: dto.doctorId || null,
             serviceId: dto.serviceId || null,
-            appointmentDate: dto.appointmentDate
-                ? new Date(dto.appointmentDate)
-                : null,
+            appointmentDate: dto.appointmentDate ? new Date(dto.appointmentDate) : null,
             status: 'BOOKED',
             source: 'AUTHENTICATED',
             recordingCompleted: false,
@@ -185,9 +207,7 @@ export class AppointmentService {
         });
 
         if (recordingsCount === 0) {
-            throw new BadRequestException(
-                'Неможливо завершити запис без жодного відео',
-            );
+            throw new BadRequestException('Неможливо завершити запис без жодного відео');
         }
 
         appointment.recordingCompleted = true;

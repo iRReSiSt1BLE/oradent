@@ -15,7 +15,7 @@ function formatDate(value: string | null) {
     if (!value) return 'Дата не вказана';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
-    return d.toLocaleString('uk-UA');
+    return d.toLocaleString('ua-UA');
 }
 
 function statusLabel(status: string) {

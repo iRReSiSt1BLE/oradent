@@ -8,14 +8,17 @@ import { PhoneVerificationModule } from '../phone-verification/phone-verificatio
 import { UserModule } from '../user/user.module';
 import { ServicesModule } from '../services/services.module';
 import { Video } from '../video/entities/video.entity';
+import { DoctorScheduleModule } from '../doctor-schedule/doctor-schedule.module';
+import { ClinicServiceEntity } from '../services/entities/clinic-service.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([Appointment, Video]),
+        TypeOrmModule.forFeature([Appointment, Video, ClinicServiceEntity]),
         PatientModule,
         PhoneVerificationModule,
         UserModule,
         ServicesModule,
+        DoctorScheduleModule,
     ],
     controllers: [AppointmentController],
     providers: [AppointmentService],

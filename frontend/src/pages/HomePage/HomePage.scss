@@ -1,122 +1,255 @@
-.home-page {
-  &__container {
-    display: flex;
-    justify-content: center;
+.home-page__loading {
+  padding: 40px 16px;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px;
+}
+
+.home-page__doctors {
+  padding-top: 36px;
+  padding-bottom: 28px;
+}
+
+.home-page__doctors-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.home-page__doctor-card {
+  display: grid;
+  gap: 12px;
+}
+
+.home-page__doctor-photo-wrap {
+  width: 100%;
+}
+
+.home-page__doctor-photo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: #d9e1ea;
+  display: block;
+}
+
+.home-page__doctor-photo--placeholder {
+  display: grid;
+  place-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 68px;
+  font-weight: 700;
+  color: #5f6f85;
+}
+
+.home-page__doctor-name {
+  margin: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 19px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.home-page__doctor-specialty,
+.home-page__doctor-description {
+  margin: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.home-page__doctor-specialty {
+  font-size: 14px;
+  color: #5b6b80;
+}
+
+.home-page__doctor-description {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.home-page__catalog {
+  padding-bottom: 84px;
+}
+
+.home-page__category {
+  border-bottom: 1px solid #d5dde3;
+}
+
+.home-page__category-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.home-page__category-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: #111;
+  text-align: left;
+}
+
+.home-page__category-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 40px;
+  line-height: 1;
+  color: #111;
+  transition: transform 0.18s ease;
+  transform-origin: center;
+}
+
+.home-page__category-head.is-open .home-page__category-toggle {
+  transform: rotate(45deg);
+}
+
+.home-page__category-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.22s ease, opacity 0.18s ease;
+}
+
+.home-page__category-body.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.home-page__category-inner {
+  overflow: hidden;
+  padding-bottom: 26px;
+}
+
+.home-page__service-list {
+  margin: 0;
+  padding-left: 0;
+  display: grid;
+  gap: 16px;
+  list-style: none;
+}
+
+.home-page__service-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  align-items: center;
+  gap: 20px;
+  padding-left: 36px;
+  position: relative;
+}
+
+.home-page__service-item::before {
+  content: '•';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 20px;
+  color: #111;
+}
+
+.home-page__service-name-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.home-page__service-name,
+.home-page__service-price {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.home-page__service-name {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.home-page__service-price {
+  color: #111827;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.home-page__add-button {
+  width: 220px;
+  min-height: 44px;
+  border: 1.5px solid #111;
+  background: #fff;
+  padding: 0 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  justify-self: end;
+}
+
+@media (max-width: 1100px) {
+  .home-page__doctors-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page__doctors-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  &__doctors {
-    width: 100%;
-    max-width: 1200px;
-    padding: clamp(8px, 1.2vw, 14px) 0;
+  .home-page__category-title {
+    font-size: 20px;
   }
 
-  &__title {
-    margin: 0 0 18px;
-    text-align: center;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: clamp(30px, 3.2vw, 52px);
-    line-height: 1.05;
-    color: #111;
-    letter-spacing: -0.02em;
-  }
-
-  &__state {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 18px;
-    color: #44505d;
-    text-align: center;
-    padding: 12px 8px;
-  }
-
-  &__grid {
-    display: grid;
-    gap: 20px;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    align-items: start;
-  }
-
-  &__doctor-card {
-    width: 100%;
-    max-width: 320px;
-    margin: 0 auto;
-    display: grid;
+  .home-page__service-item {
+    grid-template-columns: 1fr;
     gap: 10px;
-    text-align: left;
   }
 
-  &__avatar-wrap {
+  .home-page__add-button {
+    width: 220px;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 480px) {
+  .home-page__doctors-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-page__category-head {
+    padding: 22px 0;
+  }
+
+  .home-page__category-title {
+    font-size: 18px;
+  }
+
+  .home-page__category-toggle {
+    font-size: 34px;
+  }
+
+  .home-page__service-item {
+    padding-left: 28px;
+  }
+
+  .home-page__service-item::before {
+    left: 8px;
+  }
+
+  .home-page__add-button {
     width: 100%;
-    display: grid;
-    justify-items: center;
-  }
-
-  &__avatar {
-    width: min(300px, 72vw);
-    aspect-ratio: 1 / 1;
-    object-fit: cover;
-    border-radius: 12px;
-    display: block;
-  }
-
-  &__avatar-placeholder {
-    width: min(300px, 72vw);
-    aspect-ratio: 1 / 1;
-    display: grid;
-    place-items: center;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: clamp(32px, 7vw, 56px);
-    font-weight: 700;
-    color: #6c7a8b;
-    background: #e8eef4;
-    border-radius: 12px;
-  }
-
-  h3 {
-    margin: 0;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: clamp(18px, 2vw, 30px);
-    color: #111;
-    line-height: 1.2;
-    text-align: left;
-  }
-}
-
-@media (max-width: 900px) {
-  .home-page {
-    &__grid {
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-    }
-
-    &__doctor-card {
-      max-width: 300px;
-    }
-
-    h3 {
-      font-size: clamp(17px, 4vw, 24px);
-    }
-  }
-}
-
-@media (max-width: 640px) {
-  .home-page {
-    &__grid {
-      grid-template-columns: 1fr;
-      gap: 18px;
-    }
-
-    &__doctor-card {
-      max-width: 100%;
-    }
-
-    &__avatar,
-    &__avatar-placeholder {
-      width: min(300px, 78vw);
-    }
-
-    h3 {
-      font-size: clamp(28px, 9vw, 40px);
-      line-height: 1.15;
-    }
   }
 }

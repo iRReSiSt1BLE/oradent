@@ -1,4 +1,5 @@
 import {
+    IsArray,
     IsEmail,
     IsNotEmpty,
     IsOptional,
@@ -22,6 +23,22 @@ export class UpdateDoctorDto {
     @IsString()
     @Length(1, 100)
     middleName?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 140)
+    specialty?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    @Length(1, 140, { each: true })
+    specialties?: string[];
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 4000)
+    infoBlock?: string;
 
     @IsOptional()
     @IsString()

@@ -89,7 +89,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 26px;
+    gap: 18px;
     flex-wrap: wrap;
   }
 
@@ -102,10 +102,6 @@
     font-size: 16px;
     font-weight: 600;
     line-height: 1;
-    transition: color 0.2s ease;
-  }
-
-  &__link-label {
     transition: color 0.2s ease;
   }
 
@@ -184,14 +180,6 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     cursor: pointer;
-    transition: border-color 0.2s ease, color 0.2s ease;
-  }
-
-  &__menu-button:hover,
-  &__menu-button--open {
-    color: #59636f;
-    border-color: #d7dde2;
-    box-shadow: none;
   }
 
   &__menu-caret {
@@ -218,6 +206,7 @@
     box-shadow: 0 24px 40px rgba(15, 23, 42, 0.16);
     display: grid;
     gap: 6px;
+    z-index: 80;
   }
 
   &__menu-link {
@@ -240,6 +229,158 @@
   &__menu-link--active {
     background: #e3f4f0;
     color: #2f7c72;
+  }
+
+  &__lang {
+    position: relative;
+  }
+
+  &__lang-button {
+    min-height: 40px;
+    border: 1px solid #d7dde2;
+    border-radius: 12px;
+    background: #fff;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    color: #59636f;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  &__lang-flag {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  &__lang-caret {
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg) translateY(-1px);
+  }
+
+  &__lang-button.is-open &__lang-caret {
+    transform: rotate(-135deg) translateY(-1px);
+  }
+
+  &__lang-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 175px;
+    border: 1px solid #d7dde2;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 20px 34px rgba(15, 23, 42, 0.15);
+    padding: 6px;
+    display: grid;
+    gap: 4px;
+    z-index: 85;
+  }
+
+  &__lang-item {
+    border: 0;
+    background: transparent;
+    min-height: 34px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    color: #334155;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  &__lang-item:hover {
+    background: #eef8f6;
+  }
+
+  &__lang-item.is-active {
+    background: #d9f3ec;
+    color: #0f766e;
+    font-weight: 700;
+  }
+
+  &__lang-item-flag {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .header__cart-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    min-height: 54px;
+    padding: 0;
+  }
+
+  .header__cart-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+  }
+
+  .header__cart-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: #1bbf83;
+    color: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 22px;
+    text-align: center;
+    padding: 0 6px;
+  }
+  .header__nav {
+    gap: 14px;
+  }
+
+  .header__lang {
+    margin-right: 0;
+  }
+
+  .header__cart-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    margin-left: -2px;
+  }
+
+  .header__cart-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #7ed3c7;
+    color: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    padding: 0 5px;
   }
 }
 
@@ -273,7 +414,7 @@
     &__nav {
       width: 100%;
       justify-content: flex-start;
-      gap: 14px;
+      gap: 12px;
     }
 
     &__logo-title {
@@ -313,10 +454,15 @@
       height: 13px;
     }
 
-    &__menu-button {
+    &__menu-button,
+    &__lang-button {
       min-height: 36px;
-      padding: 0 12px;
-      font-size: 13px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+
+    &__lang-menu {
+      min-width: 160px;
     }
   }
 }

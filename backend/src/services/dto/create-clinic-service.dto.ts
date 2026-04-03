@@ -1,40 +1,38 @@
 import {
-    ArrayUnique,
+    ArrayMinSize,
     IsArray,
     IsBoolean,
     IsInt,
-    IsNumber,
+    IsNotEmpty,
     IsOptional,
     IsString,
     IsUUID,
     Length,
+    Matches,
     Max,
     Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export class CreateClinicServiceDto {
     @IsString()
+    @IsNotEmpty()
     @Length(1, 120)
     name: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 3000)
+    @Length(1, 4000)
     description?: string;
 
-    @Type(() => Number)
     @IsInt()
     @Min(5)
-    @Max(480)
+    @Max(1440)
     durationMinutes: number;
 
-    @Type(() => Number)
-    @IsNumber({ maxDecimalPlaces: 2 })
-    @Min(1)
-    priceUsd: number;
+    @Matches(/^\d+(\.\d{1,2})?$/)
+    priceUah: number;
 
-    @IsUUID('4')
+    @IsUUID()
     categoryId: string;
 
     @IsOptional()
@@ -43,7 +41,7 @@ export class CreateClinicServiceDto {
 
     @IsOptional()
     @IsArray()
-    @ArrayUnique()
+    @ArrayMinSize(1)
     @IsUUID('4', { each: true })
-    doctorIds?: string[];
+    specialtyIds?: string[];
 }

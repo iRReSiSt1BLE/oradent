@@ -3,29 +3,27 @@ import { useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     buildDoctorAvatarUrl,
+    createDoctorSpecialty,
     getDoctorById,
+    getDoctorSpecialties,
     removeDoctorAvatar,
     requestDoctorEmailVerification,
     updateDoctor,
     uploadDoctorAvatar,
+    type DoctorItem,
+    type DoctorSpecialtyItem,
 } from '../../shared/api/doctorApi';
 import { getPhoneVerificationStatus, startPhoneVerification } from '../../shared/api/phoneVerificationApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
+import { useI18n } from '../../shared/i18n/I18nProvider';
+import {
+    parseDoctorInfoLocalized,
+    pickDoctorInfoByLanguage,
+    serializeDoctorInfoLocalized,
+} from '../../shared/i18n/doctorInfo';
 import './DoctorDetailPage.scss';
-
-type DoctorItem = {
-    id: string;
-    userId: string;
-    email: string;
-    lastName: string;
-    firstName: string;
-    middleName: string | null;
-    phone: string;
-    isActive: boolean;
-    hasAvatar: boolean;
-    avatarVersion: number;
-};
+import {pickDoctorSpecialtyByLanguage} from "../../shared/i18n/doctorSpecialty.ts";
 
 const OUTPUT_SIZE = 640;
 const MOVE_STEP = 18;
@@ -67,6 +65,7 @@ export default function DoctorDetailPage() {
     const token = getToken();
     const role = getUserRole();
     const isAllowed = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const { language } = useI18n();
 
     const [doctor, setDoctor] = useState<DoctorItem | null>(null);
     const [loading, setLoading] = useState(true);
@@ -88,17 +87,26 @@ export default function DoctorDetailPage() {
     const [editLoading, setEditLoading] = useState(false);
     const [emailCodeLoading, setEmailCodeLoading] = useState(false);
     const [phoneVerifyLoading, setPhoneVerifyLoading] = useState(false);
+    const loadingSpecialties = false;
+    const [creatingSpecialty, setCreatingSpecialty] = useState(false);
     const [editError, setEditError] = useState('');
     const [editMessage, setEditMessage] = useState('');
+
     const [editForm, setEditForm] = useState({
         lastName: '',
         firstName: '',
         middleName: '',
         email: '',
         phone: '',
+        infoBlock: '',
         emailCode: '',
         actorPassword: '',
     });
+
+    const [availableSpecialties, setAvailableSpecialties] = useState<DoctorSpecialtyItem[]>([]);
+    const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+    const [specialtyPick, setSpecialtyPick] = useState('');
+    const [newSpecialtyName, setNewSpecialtyName] = useState('');
 
     const [emailCodeRequested, setEmailCodeRequested] = useState(false);
     const [emailCodeForEmail, setEmailCodeForEmail] = useState('');
@@ -121,7 +129,11 @@ export default function DoctorDetailPage() {
     const normalizedEditPhone = useMemo(() => normalizePhone(editForm.phone), [editForm.phone]);
     const cooldownLeftMs = Math.max(0, emailCooldownUntil - nowTs);
     const cooldownActive = cooldownLeftMs > 0;
-    const cooldownKey = doctor ? `doctorDetail.emailCooldown.v1:${doctor.id}` : 'doctorDetail.emailCooldown.v1:anon';
+    const cooldownKey = doctor ? `doctorDetail.emailCooldown.v2:${doctor.id}` : 'doctorDetail.emailCooldown.v2:anon';
+    const localizedInfoBlock = useMemo(
+        () => pickDoctorInfoByLanguage(doctor?.infoBlock || '', language),
+        [doctor?.infoBlock, language],
+    );
 
     useEffect(() => {
         const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
@@ -141,11 +153,18 @@ export default function DoctorDetailPage() {
                 setLoading(false);
                 return;
             }
+
             setLoading(true);
             setError('');
+
             try {
-                const res = await getDoctorById(token, doctorId);
-                setDoctor(res.doctor);
+                const [doctorRes, specialtiesRes] = await Promise.all([
+                    getDoctorById(token, doctorId),
+                    getDoctorSpecialties(token).catch(() => ({ ok: true, specialties: [] as DoctorSpecialtyItem[] })),
+                ]);
+
+                setDoctor(doctorRes.doctor);
+                setAvailableSpecialties(specialtiesRes.specialties);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Не вдалося завантажити профіль лікаря');
             } finally {
@@ -246,14 +265,54 @@ export default function DoctorDetailPage() {
         return 0;
     }
 
+    function addSelectedSpecialty(name: string) {
+        const prepared = name.trim();
+        if (!prepared) return;
+        setSelectedSpecialties((prev) => {
+            if (prev.some((x) => x.toLowerCase() === prepared.toLowerCase())) return prev;
+            return [...prev, prepared];
+        });
+    }
+
+    function removeSelectedSpecialty(name: string) {
+        setSelectedSpecialties((prev) => prev.filter((x) => x !== name));
+    }
+
+    async function handleCreateSpecialty() {
+        if (!token) return;
+        const prepared = newSpecialtyName.trim();
+        if (!prepared) return;
+
+        setCreatingSpecialty(true);
+        setEditError('');
+        setEditMessage('');
+
+        try {
+            const res = await createDoctorSpecialty(token, prepared);
+            setAvailableSpecialties((prev) => {
+                if (prev.some((x) => x.name.toLowerCase() === res.specialty.name.toLowerCase())) return prev;
+                return [...prev, res.specialty].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+            });
+            addSelectedSpecialty(res.specialty.name);
+            setNewSpecialtyName('');
+            setEditMessage('Спеціальність додано');
+        } catch (err) {
+            setEditError(err instanceof Error ? err.message : 'Не вдалося додати спеціальність');
+        } finally {
+            setCreatingSpecialty(false);
+        }
+    }
+
     async function openEditorWithFile(file: File) {
         if (!file.type.startsWith('image/')) {
             setError('Дозволені лише зображення');
             return;
         }
+
         const url = URL.createObjectURL(file);
         const img = new Image();
         img.decoding = 'async';
+
         await new Promise<void>((resolve, reject) => {
             img.onload = () => resolve();
             img.onerror = () => reject(new Error('Не вдалося прочитати зображення'));
@@ -273,6 +332,7 @@ export default function DoctorDetailPage() {
 
     async function openEditorFromCurrentAvatar() {
         if (!doctor || !doctor.hasAvatar) return;
+
         try {
             const url = buildDoctorAvatarUrl(doctor.id, 'lg', doctor.avatarVersion);
             const response = await fetch(url, { cache: 'no-store' });
@@ -300,6 +360,7 @@ export default function DoctorDetailPage() {
 
     function openEditModal() {
         if (!doctor) return;
+
         const until = readCooldownForEmail(doctor.email);
         setEditForm({
             lastName: doctor.lastName,
@@ -307,17 +368,31 @@ export default function DoctorDetailPage() {
             middleName: doctor.middleName || '',
             email: doctor.email,
             phone: doctor.phone,
+            infoBlock: pickDoctorInfoByLanguage(doctor.infoBlock || '', language),
             emailCode: '',
             actorPassword: '',
         });
+
+        const initialSpecs = doctor.specialties && doctor.specialties.length > 0
+            ? doctor.specialties
+            : doctor.specialty
+                ? [doctor.specialty]
+                : [];
+
+        setSelectedSpecialties(initialSpecs);
+        setSpecialtyPick('');
+        setNewSpecialtyName('');
+
         setEmailCodeRequested(until > Date.now());
         setEmailCodeForEmail(until > Date.now() ? normalizeEmail(doctor.email) : '');
         setEmailCooldownUntil(until > Date.now() ? until : 0);
+
         setPhoneVerificationSessionId('');
         setPhoneVerified(false);
         setPhoneVerifiedForPhone('');
         setTelegramBotUrl('');
         setIsPhoneModalOpen(false);
+
         setEditError('');
         setEditMessage('');
         setEditOpen(true);
@@ -437,6 +512,21 @@ export default function DoctorDetailPage() {
         const nextMiddleName = editForm.middleName.trim();
         const nextEmail = normalizedEditEmail;
         const nextPhone = normalizedEditPhone;
+        const nextInfoBlock = editForm.infoBlock;
+        const prevInfoLocalized = parseDoctorInfoLocalized(doctor.infoBlock || '');
+        const prevInfoForCurrentLanguage = prevInfoLocalized[language] || '';
+        const nextInfoLocalized = { ...prevInfoLocalized, [language]: nextInfoBlock };
+        const nextSpecialties = selectedSpecialties.map((s) => s.trim()).filter(Boolean);
+
+        const prevSpecialties = doctor.specialties && doctor.specialties.length > 0
+            ? doctor.specialties
+            : doctor.specialty
+                ? [doctor.specialty]
+                : [];
+
+        const specialtiesChanged =
+            nextSpecialties.length !== prevSpecialties.length ||
+            nextSpecialties.some((item, index) => item !== prevSpecialties[index]);
 
         const nameChanged =
             nextLastName !== doctor.lastName ||
@@ -445,9 +535,15 @@ export default function DoctorDetailPage() {
 
         const emailChanged = nextEmail !== normalizeEmail(doctor.email);
         const phoneChanged = nextPhone !== normalizePhone(doctor.phone);
+        const infoChanged = nextInfoBlock !== prevInfoForCurrentLanguage;
 
-        if (!nameChanged && !emailChanged && !phoneChanged) {
+        if (!nameChanged && !emailChanged && !phoneChanged && !infoChanged && !specialtiesChanged) {
             setEditError('Немає змін для збереження');
+            return;
+        }
+
+        if (nextSpecialties.length === 0) {
+            setEditError('Обери хоча б одну спеціальність');
             return;
         }
 
@@ -475,37 +571,42 @@ export default function DoctorDetailPage() {
                 lastName: nextLastName,
                 firstName: nextFirstName,
                 middleName: nextMiddleName || undefined,
-                email: emailChanged ? nextEmail : undefined,
-                phone: phoneChanged ? nextPhone : undefined,
+                specialties: nextSpecialties,
+                infoBlock: Object.values(nextInfoLocalized).some((value) => value.trim().length > 0)
+                    ? serializeDoctorInfoLocalized(nextInfoLocalized)
+                    : undefined,
+                email: nextEmail,
+                phone: nextPhone,
                 emailCode: emailChanged ? editForm.emailCode.trim() : undefined,
                 phoneVerificationSessionId: phoneChanged ? phoneVerificationSessionId : undefined,
                 actorPassword: editForm.actorPassword.trim(),
             });
 
             setDoctor(result.doctor);
+            window.localStorage.removeItem(cooldownKey);
+            setEditOpen(false);
             setMessage(result.message);
-            closeEditModal();
         } catch (err) {
-            setEditError(err instanceof Error ? err.message : 'Не вдалося зберегти зміни');
+            setEditError(err instanceof Error ? err.message : 'Не вдалося оновити лікаря');
         } finally {
             setEditLoading(false);
         }
     }
 
     function startDrag(e: React.PointerEvent<HTMLDivElement>) {
-        if (!editorImage) return;
+        if (dragPointerIdRef.current !== null) return;
         dragPointerIdRef.current = e.pointerId;
+        e.currentTarget.setPointerCapture(e.pointerId);
         dragStartRef.current = {
             x: e.clientX,
             y: e.clientY,
             originX: editorX,
             originY: editorY,
         };
-        e.currentTarget.setPointerCapture(e.pointerId);
     }
 
     function onDrag(e: React.PointerEvent<HTMLDivElement>) {
-        if (dragPointerIdRef.current !== e.pointerId || !editorImage) return;
+        if (dragPointerIdRef.current !== e.pointerId) return;
         const dx = e.clientX - dragStartRef.current.x;
         const dy = e.clientY - dragStartRef.current.y;
         const next = clampPosition(dragStartRef.current.originX + dx, dragStartRef.current.originY + dy);
@@ -515,16 +616,13 @@ export default function DoctorDetailPage() {
 
     function endDrag(e: React.PointerEvent<HTMLDivElement>) {
         if (dragPointerIdRef.current !== e.pointerId) return;
-        dragPointerIdRef.current = null;
         e.currentTarget.releasePointerCapture(e.pointerId);
+        dragPointerIdRef.current = null;
     }
 
     function changeZoom(nextScale: number) {
-        const clampedScale = clamp(nextScale, MIN_ZOOM, MAX_ZOOM);
-        setEditorScale(clampedScale);
-        const next = clampPosition(editorX, editorY);
-        setEditorX(next.x);
-        setEditorY(next.y);
+        const scale = clamp(nextScale, MIN_ZOOM, MAX_ZOOM);
+        setEditorScale(scale);
     }
 
     function moveBy(dx: number, dy: number) {
@@ -570,19 +668,7 @@ export default function DoctorDetailPage() {
             const finalFile = new File([blob], `${doctor.id}-avatar.webp`, { type: 'image/webp' });
             const res = await uploadDoctorAvatar(token, doctor.id, finalFile);
 
-            setDoctor({
-                id: res.doctor.id,
-                userId: res.doctor.userId,
-                email: res.doctor.email,
-                lastName: res.doctor.lastName,
-                firstName: res.doctor.firstName,
-                middleName: res.doctor.middleName,
-                phone: res.doctor.phone,
-                isActive: res.doctor.isActive,
-                hasAvatar: res.doctor.hasAvatar,
-                avatarVersion: res.doctor.avatarVersion,
-            });
-
+            setDoctor(res.doctor);
             setMessage(res.message);
             closeEditor();
         } catch (err) {
@@ -600,20 +686,7 @@ export default function DoctorDetailPage() {
 
         try {
             const res = await removeDoctorAvatar(token, doctor.id);
-
-            setDoctor({
-                id: res.doctor.id,
-                userId: res.doctor.userId,
-                email: res.doctor.email,
-                lastName: res.doctor.lastName,
-                firstName: res.doctor.firstName,
-                middleName: res.doctor.middleName,
-                phone: res.doctor.phone,
-                isActive: res.doctor.isActive,
-                hasAvatar: res.doctor.hasAvatar,
-                avatarVersion: res.doctor.avatarVersion,
-            });
-
+            setDoctor(res.doctor);
             setMessage(res.message);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Не вдалося видалити аватар');
@@ -634,6 +707,14 @@ export default function DoctorDetailPage() {
             </div>
         );
     }
+
+    const doctorSpecialties = doctor
+        ? doctor.specialties && doctor.specialties.length > 0
+            ? doctor.specialties
+            : doctor.specialty
+                ? [doctor.specialty]
+                : []
+        : [];
 
     return (
         <div className="page-shell doctor-detail-page">
@@ -663,6 +744,22 @@ export default function DoctorDetailPage() {
                                 <p>{doctor.phone}</p>
                             </div>
 
+                            {doctorSpecialties.length > 0 && (
+                                <div className="doctor-detail-page__specialties-view">
+                                    {doctorSpecialties.map((name) => (
+                                        <span key={name} className="doctor-detail-page__chip-view">
+                                            {name}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            {localizedInfoBlock && (
+                                <div className="doctor-detail-page__info-block">
+                                    {localizedInfoBlock}
+                                </div>
+                            )}
+
                             <div className="doctor-detail-page__avatar-wrap">
                                 {doctor.hasAvatar ? (
                                     <img
@@ -681,7 +778,7 @@ export default function DoctorDetailPage() {
 
                             <div className="doctor-detail-page__avatar-actions">
                                 <label className="doctor-detail-page__upload">
-                                    <span>{uploading ? 'Завантаження...' : 'Завантажити/замінити фото'}</span>
+                                    <span>{uploading ? 'ЗАВАНТАЖЕННЯ...' : 'ЗАВАНТАЖИТИ/ЗАМІНИТИ ФОТО'}</span>
                                     <input
                                         ref={fileInputRef}
                                         type="file"
@@ -701,7 +798,7 @@ export default function DoctorDetailPage() {
                                     disabled={!doctor.hasAvatar || uploading || removing}
                                     onClick={openEditorFromCurrentAvatar}
                                 >
-                                    Редагувати фото
+                                    РЕДАГУВАТИ ФОТО
                                 </button>
 
                                 <button
@@ -710,11 +807,11 @@ export default function DoctorDetailPage() {
                                     disabled={!doctor.hasAvatar || removing || uploading}
                                     onClick={handleRemoveAvatar}
                                 >
-                                    {removing ? 'Видалення...' : 'Видалити фото'}
+                                    {removing ? 'ВИДАЛЕННЯ...' : 'ВИДАЛИТИ ФОТО'}
                                 </button>
 
                                 <button type="button" className="doctor-detail-page__profile-btn" onClick={openEditModal}>
-                                    Редагувати профіль
+                                    РЕДАГУВАТИ ПРОФІЛЬ
                                 </button>
                             </div>
                         </>
@@ -725,7 +822,7 @@ export default function DoctorDetailPage() {
             {editorOpen && editorImage && (
                 <div className="doctor-detail-page__modal-backdrop">
                     <div className="doctor-detail-page__modal">
-                        <h2>Редактор фото</h2>
+                        <h2>РЕДАКТОР ФОТО</h2>
 
                         <div
                             ref={frameRef}
@@ -751,10 +848,10 @@ export default function DoctorDetailPage() {
 
                         <div className="doctor-detail-page__editor-controls">
                             <button type="button" onClick={() => changeZoom(editorScale - 0.15)} disabled={editorScale <= MIN_ZOOM}>
-                                Зменшити
+                                ЗМЕНШИТИ
                             </button>
                             <button type="button" onClick={() => changeZoom(editorScale + 0.15)} disabled={editorScale >= MAX_ZOOM}>
-                                Збільшити
+                                ЗБІЛЬШИТИ
                             </button>
                             <button type="button" onClick={() => moveBy(MOVE_STEP, 0)}>←</button>
                             <button type="button" onClick={() => moveBy(-MOVE_STEP, 0)}>→</button>
@@ -768,16 +865,16 @@ export default function DoctorDetailPage() {
                                     setEditorY(0);
                                 }}
                             >
-                                Скинути
+                                СКИНУТИ
                             </button>
                         </div>
 
                         <div className="doctor-detail-page__modal-actions">
                             <button type="button" onClick={closeEditor} disabled={uploading}>
-                                Скасувати
+                                СКАСУВАТИ
                             </button>
                             <button type="button" onClick={handleUploadFromEditor} disabled={uploading}>
-                                {uploading ? 'Збереження...' : 'Зберегти фото'}
+                                {uploading ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ ФОТО'}
                             </button>
                         </div>
                     </div>
@@ -787,7 +884,7 @@ export default function DoctorDetailPage() {
             {editOpen && (
                 <div className="doctor-detail-page__modal-backdrop">
                     <form className="doctor-detail-page__modal doctor-detail-page__modal--profile" onSubmit={saveProfileEdit}>
-                        <h2>Редагування лікаря</h2>
+                        <h2>РЕДАГУВАННЯ ЛІКАРЯ</h2>
 
                         {editError && <AlertToast message={editError} variant="error" onClose={() => setEditError('')} />}
                         {editMessage && <AlertToast message={editMessage} variant="success" onClose={() => setEditMessage('')} />}
@@ -796,17 +893,100 @@ export default function DoctorDetailPage() {
                             value={editForm.lastName}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
                             placeholder="Прізвище"
+                            autoComplete="off"
                         />
                         <input
                             value={editForm.firstName}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
                             placeholder="Ім'я"
+                            autoComplete="off"
                         />
                         <input
                             value={editForm.middleName}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, middleName: e.target.value }))}
                             placeholder="По батькові"
+                            autoComplete="off"
                         />
+
+                        <div className="doctor-detail-page__specialty-section">
+                            <label>СПЕЦІАЛЬНОСТІ</label>
+
+                            <select
+                                value={specialtyPick}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    setSpecialtyPick(value);
+                                    addSelectedSpecialty(value);
+                                    setSpecialtyPick('');
+                                }}
+                                disabled={loadingSpecialties}
+                            >
+                                <option value="">Обери зі списку</option>
+                                {availableSpecialties.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                        {s.name}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <div className="doctor-detail-page__specialty-create">
+                                <input
+                                    value={newSpecialtyName}
+                                    onChange={(e) => setNewSpecialtyName(e.target.value)}
+                                    placeholder="Нова спеціальність"
+                                    autoComplete="off"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleCreateSpecialty}
+                                    disabled={creatingSpecialty || !newSpecialtyName.trim()}
+                                >
+                                    {creatingSpecialty ? '...' : 'ДОДАТИ'}
+                                </button>
+                            </div>
+
+                            <div className="doctor-detail-page__chips">
+                                {selectedSpecialties.length === 0 ? (
+                                    <span className="doctor-detail-page__chips-empty">
+            Обери або створи хоча б одну спеціальність
+        </span>
+                                ) : (
+                                    selectedSpecialties.map((specialtyId: string) => {
+                                        const specialty = availableSpecialties.find(
+                                            (s: DoctorSpecialtyItem) => s.id === specialtyId,
+                                        );
+
+                                        const label = specialty
+                                            ? pickDoctorSpecialtyByLanguage(
+                                            (specialty as any).nameI18n || specialty.name,
+                                            language,
+                                        ) || specialty.name
+                                            : specialtyId;
+
+                                        return (
+                                            <button
+                                                key={specialtyId}
+                                                type="button"
+                                                className="doctor-detail-page__chip"
+                                                onClick={() => removeSelectedSpecialty(specialtyId)}
+                                                title="Прибрати спеціальність"
+                                            >
+                                                <span>{label}</span>
+                                                <span className="doctor-detail-page__chip-x">×</span>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        <textarea
+                            value={editForm.infoBlock}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, infoBlock: e.target.value }))}
+                            placeholder={'Інфоблок лікаря\nЗ переносами рядків'}
+                            rows={5}
+                        />
+
                         <input
                             value={editForm.email}
                             onChange={(e) => {
@@ -815,11 +995,13 @@ export default function DoctorDetailPage() {
                                 setEmailCooldownUntil(readCooldownForEmail(next));
                             }}
                             placeholder="Email"
+                            autoComplete="off"
                         />
                         <input
                             value={editForm.phone}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, phone: e.target.value }))}
                             placeholder="Телефон"
+                            autoComplete="off"
                         />
 
                         <div className="doctor-detail-page__verify-row">
@@ -859,13 +1041,15 @@ export default function DoctorDetailPage() {
                             value={editForm.emailCode}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, emailCode: e.target.value }))}
                             placeholder="Код підтвердження email"
+                            autoComplete="off"
                         />
 
                         <input
                             type="password"
                             value={editForm.actorPassword}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, actorPassword: e.target.value }))}
-                            placeholder="Твій пароль SUPER_ADMIN / ADMIN"
+                            placeholder="Твій пароль ADMIN/SUPER_ADMIN"
+                            autoComplete="new-password"
                         />
 
                         <div className="doctor-detail-page__verify-status">
@@ -879,7 +1063,7 @@ export default function DoctorDetailPage() {
 
                         <div className="doctor-detail-page__modal-actions">
                             <button type="button" onClick={closeEditModal}>
-                                Скасувати
+                                СКАСУВАТИ
                             </button>
                             <button type="submit" disabled={editLoading}>
                                 {editLoading ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ'}
@@ -892,14 +1076,14 @@ export default function DoctorDetailPage() {
             {isPhoneModalOpen && telegramBotUrl && (
                 <div className="doctor-detail-page__modal-backdrop">
                     <div className="doctor-detail-page__modal doctor-detail-page__modal--phone">
-                        <h2>Підтвердження телефону</h2>
+                        <h2>ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ</h2>
                         <TelegramQrCard
                             telegramBotUrl={telegramBotUrl}
-                            title="QR для підтвердження нового телефону"
+                            title="QR ДЛЯ ПІДТВЕРДЖЕННЯ НОВОГО ТЕЛЕФОНУ"
                             subtitle="Скануй QR через Telegram або натисни кнопку переходу."
                         />
                         <button type="button" onClick={() => setIsPhoneModalOpen(false)}>
-                            Згорнути
+                            ЗГОРНУТИ
                         </button>
                     </div>
                 </div>

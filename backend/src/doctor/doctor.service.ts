@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Doctor } from './entities/doctor.entity';
+import { DoctorSpecialty } from './entities/doctor-specialty.entity';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { UserService } from '../user/user.service';
@@ -26,12 +27,19 @@ import { PatientService } from '../patient/patient.service';
 import { AdminService } from '../admin/admin.service';
 
 type AvatarSize = 'sm' | 'md' | 'lg';
-
+type DbI18nMap = {
+    ua?: string;
+    en?: string;
+    de?: string;
+    fr?: string;
+};
 @Injectable()
 export class DoctorService {
     constructor(
         @InjectRepository(Doctor)
         private readonly doctorRepository: Repository<Doctor>,
+        @InjectRepository(DoctorSpecialty)
+        private readonly specialtyRepository: Repository<DoctorSpecialty>,
         private readonly userService: UserService,
         private readonly verificationService: VerificationService,
         private readonly mailService: MailService,
@@ -47,6 +55,130 @@ export class DoctorService {
 
     private normalizeEmail(email: string) {
         return email.trim().toLowerCase();
+    }
+
+    private normalizeNullableText(value?: string) {
+        if (value === undefined) return undefined;
+        const normalized = value.trim();
+        return normalized.length > 0 ? normalized : null;
+    }
+
+    private normalizeSpecialties(values?: string[], single?: string) {
+        const source = values && values.length > 0 ? values : single ? [single] : [];
+        const prepared = source.map((v) => v.trim()).filter((v) => v.length > 0);
+        const unique: string[] = [];
+
+        for (const item of prepared) {
+            if (!unique.some((x) => x.toLowerCase() === item.toLowerCase())) {
+                unique.push(item);
+            }
+        }
+
+        return unique;
+    }
+
+
+
+    private parseDbI18n(raw: string | null | undefined): DbI18nMap | null {
+        if (!raw) return null;
+
+        try {
+            const start = raw.indexOf('{');
+            if (start === -1) return null;
+
+            const parsed = JSON.parse(raw.slice(start));
+            const data = parsed?.data;
+
+            if (data && typeof data === 'object') {
+                return data as DbI18nMap;
+            }
+
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
+    private getLocalizedDbText(raw: string | null | undefined, lang: keyof DbI18nMap = 'ua'): string {
+        const parsed = this.parseDbI18n(raw);
+        if (!parsed) {
+            return raw ?? '';
+        }
+
+        return parsed[lang] || parsed.ua || parsed.en || parsed.de || parsed.fr || raw || '';
+    }
+
+    private mapDbI18n(raw: string | null | undefined): DbI18nMap {
+        const parsed = this.parseDbI18n(raw);
+        if (!parsed) {
+            return {};
+        }
+
+        return {
+            ua: parsed.ua || '',
+            en: parsed.en || '',
+            de: parsed.de || '',
+            fr: parsed.fr || '',
+        };
+    }
+
+    private async ensureSpecialtiesExist(names: string[]) {
+        for (const name of names) {
+            const existing = await this.specialtyRepository
+                .createQueryBuilder('s')
+                .where('LOWER(s.name) = LOWER(:name)', { name })
+                .getOne();
+
+            if (!existing) {
+                throw new BadRequestException(`Спеціальність не знайдено: ${name}`);
+            }
+        }
+    }
+
+    private async resolveSpecialties(values: string[], single?: string | null): Promise<string[]> {
+        const raw = this.normalizeSpecialties(values, single ?? undefined);
+
+        if (raw.length === 0) {
+            return [];
+        }
+
+        const allSpecialties = await this.specialtyRepository.find({
+            where: { isActive: true },
+        });
+
+        const byId = new Map(allSpecialties.map((item) => [item.id, item]));
+        const byName = new Map(
+            allSpecialties.map((item) => [item.name.trim().toLowerCase(), item]),
+        );
+
+        const resolved: string[] = [];
+
+        for (const item of raw) {
+            const normalized = item.trim();
+
+            const byIdMatch = byId.get(normalized);
+            if (byIdMatch) {
+                resolved.push(byIdMatch.name);
+                continue;
+            }
+
+            const byNameMatch = byName.get(normalized.toLowerCase());
+            if (byNameMatch) {
+                resolved.push(byNameMatch.name);
+                continue;
+            }
+
+            throw new BadRequestException(`Спеціальність не знайдено: ${item}`);
+        }
+
+        const unique: string[] = [];
+        for (const item of resolved) {
+            if (!unique.some((x) => x.toLowerCase() === item.toLowerCase())) {
+                unique.push(item);
+            }
+        }
+
+        return unique;
     }
 
     private getAvatarRoot() {
@@ -67,13 +199,18 @@ export class DoctorService {
     }
 
     private mapDoctor(doctor: Doctor) {
+        const specialties = doctor.specialties || (doctor.specialty ? [doctor.specialty] : []);
+
         return {
             id: doctor.id,
-            userId: doctor.user.id,
-            email: doctor.user.email,
+            userId: doctor.user?.id ?? null,
+            email: doctor.user?.email ?? null,
             lastName: doctor.lastName,
             firstName: doctor.firstName,
             middleName: doctor.middleName,
+            specialty: doctor.specialty,
+            specialties,
+            infoBlock: doctor.infoBlock,
             phone: doctor.phone,
             isActive: doctor.isActive,
             hasAvatar: doctor.hasAvatar,
@@ -92,6 +229,12 @@ export class DoctorService {
 
     async findByUserId(userId: string): Promise<Doctor | null> {
         return this.doctorRepository.findOne({ where: { user: { id: userId } } });
+    }
+    async findById(id: string): Promise<Doctor | null> {
+        return this.doctorRepository.findOne({
+            where: { id },
+            relations: ['user'],
+        });
     }
 
     async findByPhone(phone: string): Promise<Doctor | null> {
@@ -160,6 +303,137 @@ export class DoctorService {
         return normalizedPhone;
     }
 
+    async getSpecialties(currentUserId: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const list = await this.specialtyRepository.find({
+            where: { isActive: true },
+            order: {
+                order: 'ASC',
+                name: 'ASC',
+            },
+        });
+
+        return {
+            ok: true,
+            specialties: list.map((s) => ({
+                id: s.id,
+                name: this.getLocalizedDbText(s.name, 'ua'),
+                nameI18n: this.mapDbI18n(s.name),
+                order: s.order,
+            })),
+        };
+    }
+
+    async createSpecialty(currentUserId: string, name: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const normalizedName = name.trim();
+        if (!normalizedName) {
+            throw new BadRequestException('Назва спеціальності обов’язкова');
+        }
+
+        const existing = await this.specialtyRepository
+            .createQueryBuilder('s')
+            .where('LOWER(s.name) = LOWER(:name)', { name: normalizedName })
+            .getOne();
+
+        if (existing) {
+            return {
+                ok: true,
+                specialty: {
+                    id: existing.id,
+                    name: existing.name,
+                    order: existing.order,
+                },
+            };
+        }
+
+        const maxOrder = await this.specialtyRepository
+            .createQueryBuilder('s')
+            .select('MAX(s.order)', 'max')
+            .getRawOne<{ max: string | null }>();
+
+        const specialty = this.specialtyRepository.create({
+            name: normalizedName,
+            isActive: true,
+            order: Number(maxOrder?.max || 0) + 1,
+        });
+
+        const saved = await this.specialtyRepository.save(specialty);
+
+        return {
+            ok: true,
+            specialty: {
+                id: saved.id,
+                name: saved.name,
+                order: saved.order,
+            },
+        };
+    }
+
+    async updateSpecialty(currentUserId: string, specialtyId: string, name: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const normalizedName = name.trim();
+        if (!normalizedName) {
+            throw new BadRequestException('Назва спеціальності обов’язкова');
+        }
+
+        const specialty = await this.specialtyRepository.findOne({ where: { id: specialtyId } });
+        if (!specialty) {
+            throw new NotFoundException('Спеціальність не знайдено');
+        }
+
+        const duplicate = await this.specialtyRepository
+            .createQueryBuilder('s')
+            .where('LOWER(s.name) = LOWER(:name)', { name: normalizedName })
+            .andWhere('s.id != :id', { id: specialtyId })
+            .getOne();
+
+        if (duplicate) {
+            throw new BadRequestException('Така спеціальність вже існує');
+        }
+
+        specialty.name = normalizedName;
+        const saved = await this.specialtyRepository.save(specialty);
+
+        return {
+            ok: true,
+            specialty: {
+                id: saved.id,
+                name: saved.name,
+                order: saved.order,
+            },
+        };
+    }
+
+    async deleteSpecialty(currentUserId: string, specialtyId: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const specialty = await this.specialtyRepository.findOne({ where: { id: specialtyId } });
+        if (!specialty) {
+            throw new NotFoundException('Спеціальність не знайдено');
+        }
+
+        const doctors = await this.doctorRepository.find();
+        const usedByDoctors = doctors.some((doctor) => {
+            const list = doctor.specialties || (doctor.specialty ? [doctor.specialty] : []);
+            return list.some((item) => item.trim().toLowerCase() === specialty.name.trim().toLowerCase());
+        });
+
+        if (usedByDoctors) {
+            throw new BadRequestException('Спеціальність використовується у профілях лікарів');
+        }
+
+        await this.specialtyRepository.remove(specialty);
+
+        return {
+            ok: true,
+            message: 'Спеціальність видалено',
+        };
+    }
+
     async requestEmailVerification(currentUserId: string, email: string) {
         await this.ensureManagerAccess(currentUserId);
 
@@ -189,21 +463,10 @@ export class DoctorService {
         const normalizedEmail = this.normalizeEmail(dto.email);
         const normalizedPhone = await this.ensurePhoneAvailable(dto.phone);
 
-        const existingUser = await this.userService.findByEmail(normalizedEmail);
-        if (existingUser) {
-            throw new BadRequestException('Користувач з такою поштою вже існує');
+        const specialties = await this.resolveSpecialties(dto.specialties || [], dto.specialty);
+        if (specialties.length === 0) {
+            throw new BadRequestException('Оберіть хоча б одну спеціальність');
         }
-
-        await this.verificationService.verifyCode(
-            normalizedEmail,
-            VerificationType.EMAIL_VERIFY,
-            dto.emailCode,
-        );
-
-        await this.phoneVerificationService.ensureVerified(
-            dto.phoneVerificationSessionId,
-            normalizedPhone,
-        );
 
         const passwordHash = await argon2.hash(dto.password, {
             type: argon2.argon2id,
@@ -221,9 +484,12 @@ export class DoctorService {
 
         const doctor = this.doctorRepository.create({
             user,
-            lastName: dto.lastName,
-            firstName: dto.firstName,
-            middleName: dto.middleName || null,
+            lastName: dto.lastName.trim(),
+            firstName: dto.firstName.trim(),
+            middleName: this.normalizeNullableText(dto.middleName) ?? null,
+            specialty: specialties[0] ?? null,
+            specialties,
+            infoBlock: this.normalizeNullableText(dto.infoBlock) ?? null,
             phone: normalizedPhone,
             phoneVerified: true,
             isActive: true,
@@ -272,10 +538,18 @@ export class DoctorService {
             ok: true,
             doctors: doctors.map((doctor) => ({
                 id: doctor.id,
-                userId: doctor.user.id,
+                userId: doctor.user?.id ?? null,
                 lastName: doctor.lastName,
                 firstName: doctor.firstName,
                 middleName: doctor.middleName,
+                specialty: this.getLocalizedDbText(doctor.specialty, 'ua'),
+                specialtyI18n: this.mapDbI18n(doctor.specialty),
+                specialties: (doctor.specialties || (doctor.specialty ? [doctor.specialty] : [])).map((item) => ({
+                    value: this.getLocalizedDbText(item, 'ua'),
+                    i18n: this.mapDbI18n(item),
+                })),
+                infoBlock: this.getLocalizedDbText(doctor.infoBlock, 'ua'),
+                infoBlockI18n: this.mapDbI18n(doctor.infoBlock),
                 hasAvatar: doctor.hasAvatar,
                 avatarVersion: doctor.avatarVersion,
                 avatar: doctor.hasAvatar
@@ -369,7 +643,7 @@ export class DoctorService {
 
             if (phoneChanged) {
                 if (!dto.phoneVerificationSessionId?.trim()) {
-                    throw new BadRequestException('Для зміни телефону потрібна верифікація телефону');
+                    throw new BadRequestException('Для зміни телефону потрібна верифікація');
                 }
 
                 await this.phoneVerificationService.ensureVerified(
@@ -386,17 +660,33 @@ export class DoctorService {
         }
 
         if (dto.lastName !== undefined) {
-            doctor.lastName = dto.lastName;
+            doctor.lastName = dto.lastName.trim();
             hasChanges = true;
         }
 
         if (dto.firstName !== undefined) {
-            doctor.firstName = dto.firstName;
+            doctor.firstName = dto.firstName.trim();
             hasChanges = true;
         }
 
         if (dto.middleName !== undefined) {
-            doctor.middleName = dto.middleName || null;
+            doctor.middleName = this.normalizeNullableText(dto.middleName) ?? null;
+            hasChanges = true;
+        }
+
+        if (dto.specialties !== undefined || dto.specialty !== undefined) {
+            const specialties = this.normalizeSpecialties(dto.specialties, dto.specialty);
+            if (specialties.length === 0) {
+                throw new BadRequestException('Оберіть хоча б одну спеціальність');
+            }
+            await this.ensureSpecialtiesExist(specialties);
+            doctor.specialties = specialties;
+            doctor.specialty = specialties[0] ?? null;
+            hasChanges = true;
+        }
+
+        if (dto.infoBlock !== undefined) {
+            doctor.infoBlock = this.normalizeNullableText(dto.infoBlock) ?? null;
             hasChanges = true;
         }
 
@@ -490,7 +780,8 @@ export class DoctorService {
                 if (fs.existsSync(filePath)) {
                     fs.unlinkSync(filePath);
                 }
-            } catch {}
+            } catch {
+            }
         }
 
         const doctorDir = path.join(this.getAvatarRoot(), doctor.id);
@@ -498,7 +789,8 @@ export class DoctorService {
             if (fs.existsSync(doctorDir) && fs.readdirSync(doctorDir).length === 0) {
                 fs.rmdirSync(doctorDir);
             }
-        } catch {}
+        } catch {
+        }
 
         doctor.hasAvatar = false;
         doctor.avatarVersion = (doctor.avatarVersion || 1) + 1;
@@ -550,11 +842,22 @@ export class DoctorService {
         });
 
         return doctors.map((doctor) => ({
-            id: doctor.user.id,
-            email: doctor.user.email,
+            id: doctor.id,
+            userId: doctor.user?.id ?? null,
+            email: doctor.user?.email ?? null,
             fullName: `${doctor.lastName} ${doctor.firstName}${doctor.middleName ? ` ${doctor.middleName}` : ''}`,
             hasAvatar: doctor.hasAvatar,
             avatarVersion: doctor.avatarVersion,
+            avatar: doctor.hasAvatar
+                ? {
+                    sm: this.buildAvatarUrl(doctor.id, 'sm', doctor.avatarVersion),
+                    md: this.buildAvatarUrl(doctor.id, 'md', doctor.avatarVersion),
+                    lg: this.buildAvatarUrl(doctor.id, 'lg', doctor.avatarVersion),
+                }
+                : null,
         }));
     }
+
+
+
 }

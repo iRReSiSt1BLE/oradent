@@ -15,6 +15,7 @@ import { ProfileModule } from './profile/profile.module';
 import { AdminModule } from './admin/admin.module';
 import { ServicesModule } from './services/services.module';
 import { DoctorModule } from './doctor/doctor.module';
+import { DoctorScheduleModule } from './doctor-schedule/doctor-schedule.module';
 
 @Module({
     imports: [
@@ -49,6 +50,7 @@ import { DoctorModule } from './doctor/doctor.module';
         AdminModule,
         DoctorModule,
         ServicesModule,
+        DoctorScheduleModule,
     ],
     controllers: [],
     providers: [],

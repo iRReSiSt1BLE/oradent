@@ -1,4 +1,6 @@
 import {
+    ArrayMinSize,
+    IsArray,
     IsEmail,
     IsNotEmpty,
     IsOptional,
@@ -22,6 +24,23 @@ export class CreateDoctorDto {
     @IsString()
     @Length(1, 100)
     middleName?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 140)
+    specialty?: string;
+
+    @IsOptional()
+    @IsArray()
+    @ArrayMinSize(1)
+    @IsString({ each: true })
+    @Length(1, 140, { each: true })
+    specialties?: string[];
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 4000)
+    infoBlock?: string;
 
     @IsString()
     @IsNotEmpty()

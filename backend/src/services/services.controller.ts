@@ -36,12 +36,6 @@ export class ServicesController {
     }
 
     @UseGuards(JwtAuthGuard)
-    @Get('pricing/meta')
-    getPricingMeta(@Req() req: { user: { id: string } }) {
-        return this.servicesService.getPricingMeta();
-    }
-
-    @UseGuards(JwtAuthGuard)
     @Get('categories')
     getCategoriesForAdmin(@Req() req: { user: { id: string } }) {
         return this.servicesService.getCategoriesForAdmin(req.user.id);
@@ -76,9 +70,9 @@ export class ServicesController {
     }
 
     @UseGuards(JwtAuthGuard)
-    @Get('doctors/options')
-    getDoctorsForAssignment(@Req() req: { user: { id: string } }) {
-        return this.servicesService.getDoctorsForAssignment(req.user.id);
+    @Get('specialties/options')
+    getSpecialtiesForAssignment(@Req() req: { user: { id: string } }) {
+        return this.servicesService.getSpecialtiesForAssignment(req.user.id);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -113,11 +107,5 @@ export class ServicesController {
         @Param('id', new ParseUUIDPipe()) id: string,
     ) {
         return this.servicesService.toggleActive(req.user.id, id);
-    }
-
-    @UseGuards(JwtAuthGuard)
-    @Post('reprice')
-    refreshPrices(@Req() req: { user: { id: string } }) {
-        return this.servicesService.refreshPrices(req.user.id);
     }
 }

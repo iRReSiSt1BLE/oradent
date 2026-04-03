@@ -1,667 +1,346 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createAuthenticatedAppointment, createGuestAppointment } from '../../shared/api/appointmentApi';
-import { getPhoneVerificationStatus, startPhoneVerification } from '../../shared/api/phoneVerificationApi';
-import { getMyPatient, verifyAndLinkPhone } from '../../shared/api/patientApi';
-import { getToken } from '../../shared/utils/authStorage';
+import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
-import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
-import { getActivePublicServices } from '../../shared/api/servicesApi';
-import type { ClinicService, ServiceDoctor } from '../../shared/api/servicesApi';
-import { buildDoctorAvatarUrl } from '../../shared/api/doctorApi';
+import { createAuthenticatedAppointment, createGuestAppointment } from '../../shared/api/appointmentApi';
+import { getPublicDoctors, type PublicDoctorItem } from '../../shared/api/doctorApi';
+import { getActivePublicServices, type ClinicService } from '../../shared/api/servicesApi';
+import { getToken } from '../../shared/utils/authStorage';
 import './AppointmentPage.scss';
 
 type Mode = 'guest' | 'authenticated';
 
-type Patient = {
-    id: string;
-    lastName: string;
-    firstName: string;
-    middleName: string | null;
-    phone: string | null;
-    email: string | null;
-    phoneVerified: boolean;
+type AlertState = {
+    variant: 'success' | 'error' | 'info';
+    message: string;
 } | null;
 
-type GuestForm = {
-    lastName: string;
-    firstName: string;
-    middleName: string;
-    phone: string;
-    doctorId: string;
-    serviceId: string;
-    appointmentDate: string;
-};
-
-type AuthForm = {
-    phone: string;
-    doctorId: string;
-    serviceId: string;
-    appointmentDate: string;
-};
-
-const EMPTY_GUEST_FORM: GuestForm = {
-    lastName: '',
-    firstName: '',
-    middleName: '',
-    phone: '',
-    doctorId: '',
-    serviceId: '',
-    appointmentDate: '',
-};
-
-const EMPTY_AUTH_FORM: AuthForm = {
-    phone: '',
-    doctorId: '',
-    serviceId: '',
-    appointmentDate: '',
-};
-
-function detectPreferredSize(): 'sm' | 'md' | 'lg' {
-    const dpr = window.devicePixelRatio || 1;
-    const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
-    const effectiveType = connection?.effectiveType || '';
-
-    if (effectiveType === 'slow-2g' || effectiveType === '2g') return 'sm';
-    if (effectiveType === '3g') return 'md';
-    if (dpr >= 2) return 'lg';
-    return 'md';
+function fullDoctorName(d: PublicDoctorItem | null): string {
+    if (!d) return '';
+    return `${d.lastName ?? ''} ${d.firstName ?? ''} ${d.middleName ?? ''}`.replace(/\s+/g, ' ').trim();
 }
 
-function buildAvatarSrcSet(doctorId: string, avatarVersion?: number) {
-    const sm = buildDoctorAvatarUrl(doctorId, 'sm', avatarVersion);
-    const md = buildDoctorAvatarUrl(doctorId, 'md', avatarVersion);
-    const lg = buildDoctorAvatarUrl(doctorId, 'lg', avatarVersion);
-    return `${sm} 160w, ${md} 320w, ${lg} 640w`;
+function normalizeScheduleDateTime(date: string, time: string): string {
+    if (!date || !time) return '';
+    return `${date}T${time.slice(0, 5)}`;
 }
 
-function doctorDisplayName(doctor: ServiceDoctor) {
-    if (doctor.fullName?.trim()) return doctor.fullName.trim();
-    const fallback = [doctor.lastName, doctor.firstName, doctor.middleName].filter(Boolean).join(' ').trim();
-    if (fallback) return fallback;
-    return doctor.email;
+function toIso(dateTimeLocal: string): string {
+    if (!dateTimeLocal) return '';
+    return new Date(dateTimeLocal).toISOString();
+}
+
+function resolveDoctorByAnyId(id: string, doctors: PublicDoctorItem[]): PublicDoctorItem | null {
+    if (!id) return null;
+    return doctors.find((d) => d.id === id || d.userId === id) ?? null;
 }
 
 export default function AppointmentPage() {
     const token = getToken();
+    const location = useLocation();
+    const params = new URLSearchParams(location.search);
+
+    const paramDoctorId = (params.get('doctorId') || '').trim();
+    const paramDoctorUserId = (params.get('doctorUserId') || '').trim();
+    const paramDate = (params.get('date') || '').trim();
+    const paramTime = (params.get('time') || '').trim();
+    const paramDoctorName = (params.get('doctorName') || '').trim();
+
+    const isFromSchedule = Boolean((paramDoctorId || paramDoctorUserId) && paramDate && paramTime);
 
     const [mode, setMode] = useState<Mode>(token ? 'authenticated' : 'guest');
-    const [patient, setPatient] = useState<Patient>(null);
 
-    const [guestForm, setGuestForm] = useState<GuestForm>(EMPTY_GUEST_FORM);
-    const [authForm, setAuthForm] = useState<AuthForm>(EMPTY_AUTH_FORM);
+    const [lastName, setLastName] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [middleName, setMiddleName] = useState('');
+    const [phone, setPhone] = useState('');
 
+    const [doctorId, setDoctorId] = useState(paramDoctorId || paramDoctorUserId);
+    const [serviceId, setServiceId] = useState('');
+    const [dateTime, setDateTime] = useState('');
+
+    const [doctors, setDoctors] = useState<PublicDoctorItem[]>([]);
     const [services, setServices] = useState<ClinicService[]>([]);
-    const [servicesLoading, setServicesLoading] = useState(true);
 
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [alert, setAlert] = useState<AlertState>(null);
 
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
-    const [verificationLoadingText, setVerificationLoadingText] = useState('');
-    const [telegramBotUrl, setTelegramBotUrl] = useState('');
+    const selectedDoctor = useMemo(() => {
+        const ref = isFromSchedule ? (paramDoctorId || paramDoctorUserId) : doctorId;
+        return resolveDoctorByAnyId(ref, doctors);
+    }, [doctors, doctorId, isFromSchedule, paramDoctorId, paramDoctorUserId]);
 
-    const [preferredSize, setPreferredSize] = useState<'sm' | 'md' | 'lg'>('md');
+    const bookingDoctorId = useMemo(() => {
+        if (selectedDoctor?.id) return selectedDoctor.id;
+        return paramDoctorId || doctorId || '';
+    }, [selectedDoctor, paramDoctorId, doctorId]);
 
-    const pendingGuestFormRef = useRef<GuestForm | null>(null);
-    const pendingAuthFormRef = useRef<AuthForm | null>(null);
-    const pollingRef = useRef<number | null>(null);
-    const completeRef = useRef(false);
+    const filteredServices = useMemo(() => {
+        if (!selectedDoctor) return services;
 
-    const authNeedsPhone = useMemo(() => !!token && patient && !patient.phoneVerified, [token, patient]);
+        const doctorSpecialties = Array.isArray(selectedDoctor.specialties)
+            ? selectedDoctor.specialties.map((s) => s.trim().toLowerCase())
+            : selectedDoctor.specialty
+                ? [selectedDoctor.specialty.trim().toLowerCase()]
+                : [];
 
-    const guestSelectedService = useMemo(
-        () => services.find((s) => s.id === guestForm.serviceId) || null,
-        [services, guestForm.serviceId],
-    );
+        if (!doctorSpecialties.length) return services;
 
-    const authSelectedService = useMemo(
-        () => services.find((s) => s.id === authForm.serviceId) || null,
-        [services, authForm.serviceId],
-    );
+        const matched = services.filter((service) => {
+            if (!service.specialties?.length) return true;
 
-    const guestDoctors: ServiceDoctor[] = guestSelectedService?.doctors || [];
-    const authDoctors: ServiceDoctor[] = authSelectedService?.doctors || [];
+            return service.specialties.some((specialty) =>
+                doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
+            );
+        });
 
-    const hasBookableServices = useMemo(() => services.some((service) => service.doctors.length > 0), [services]);
+        return matched.length > 0 ? matched : services;
+    }, [services, selectedDoctor]);
 
-    useEffect(() => {
-        setPreferredSize(detectPreferredSize());
-        const onResize = () => setPreferredSize(detectPreferredSize());
-        window.addEventListener('resize', onResize);
-        return () => window.removeEventListener('resize', onResize);
-    }, []);
+    const lockedDoctorLabel = useMemo(() => {
+        if (selectedDoctor) return fullDoctorName(selectedDoctor);
+        if (paramDoctorName) return paramDoctorName;
+        if (paramDoctorId) return paramDoctorId;
+        if (paramDoctorUserId) return paramDoctorUserId;
+        return 'Обраний лікар';
+    }, [selectedDoctor, paramDoctorName, paramDoctorId, paramDoctorUserId]);
 
-    useEffect(() => {
-        async function loadPatient() {
-            if (!token) return;
-            try {
-                const result = await getMyPatient(token);
-                setPatient(result.patient);
-            } catch {}
-        }
+    function showError(message: string) {
+        setAlert({ variant: 'error', message });
+    }
 
-        async function loadServices() {
-            setServicesLoading(true);
-            try {
-                const result = await getActivePublicServices();
-                setServices(result.services);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Не вдалося завантажити послуги');
-            } finally {
-                setServicesLoading(false);
+    function showSuccess(message: string) {
+        setAlert({ variant: 'success', message });
+    }
+
+    async function loadInitialData() {
+        try {
+            setLoading(true);
+
+            const [doctorsRes, servicesRes] = await Promise.all([
+                getPublicDoctors(),
+                getActivePublicServices(),
+            ]);
+
+            const doctorsList = Array.isArray(doctorsRes?.doctors) ? doctorsRes.doctors : [];
+            const servicesList = Array.isArray(servicesRes?.services) ? servicesRes.services : [];
+
+            setDoctors(doctorsList);
+            setServices(servicesList);
+
+            if (isFromSchedule) {
+                const match = resolveDoctorByAnyId(paramDoctorId || paramDoctorUserId, doctorsList);
+                setDoctorId(match?.id || paramDoctorId || paramDoctorUserId);
+                setDateTime(normalizeScheduleDateTime(paramDate, paramTime));
+            } else if (!doctorId && doctorsList.length > 0) {
+                setDoctorId(doctorsList[0].id);
             }
+        } catch {
+            showError('Не вдалося завантажити дані для запису');
+        } finally {
+            setLoading(false);
         }
-
-        void loadPatient();
-        void loadServices();
-    }, [token]);
+    }
 
     useEffect(() => {
-        return () => {
-            if (pollingRef.current) window.clearInterval(pollingRef.current);
-        };
+        void loadInitialData();
     }, []);
 
-    function resetVerificationState() {
-        if (pollingRef.current) {
-            window.clearInterval(pollingRef.current);
-            pollingRef.current = null;
+    useEffect(() => {
+        if (!serviceId) return;
+        if (!filteredServices.some((s) => s.id === serviceId)) {
+            setServiceId('');
         }
-        setIsVerificationModalOpen(false);
-        setVerificationLoadingText('');
-        setTelegramBotUrl('');
-    }
+    }, [filteredServices, serviceId]);
 
-    function clearGuestForm() {
-        setGuestForm(EMPTY_GUEST_FORM);
-    }
+    async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+        e.preventDefault();
 
-    function clearAuthForm() {
-        setAuthForm(EMPTY_AUTH_FORM);
-    }
+        const finalDateTime = isFromSchedule
+            ? normalizeScheduleDateTime(paramDate, paramTime)
+            : dateTime;
 
-    function validateBookingPayload(serviceId: string, doctorId: string, appointmentDate: string) {
-        if (!serviceId) throw new Error('Оберіть послугу');
-        if (!doctorId) throw new Error('Оберіть лікаря');
-        if (!appointmentDate) throw new Error('Оберіть дату та час');
-    }
+        if (!bookingDoctorId) {
+            showError('Оберіть лікаря');
+            return;
+        }
 
-    async function startAutomaticVerificationFlow(phone: string, currentMode: Mode) {
-        completeRef.current = false;
-        const verification = await startPhoneVerification(phone);
+        if (!serviceId) {
+            showError('Оберіть послугу');
+            return;
+        }
 
-        setTelegramBotUrl(verification.telegramBotUrl);
-        setIsVerificationModalOpen(true);
-        setVerificationLoadingText('Очікуємо підтвердження номера телефону в Telegram...');
+        if (!finalDateTime) {
+            showError('Оберіть дату та час');
+            return;
+        }
 
-        if (pollingRef.current) window.clearInterval(pollingRef.current);
+        try {
+            setSubmitting(true);
 
-        pollingRef.current = window.setInterval(async () => {
-            try {
-                const statusResult = await getPhoneVerificationStatus(verification.sessionId);
-
-                if (statusResult.status === 'VERIFIED') {
-                    if (pollingRef.current) {
-                        window.clearInterval(pollingRef.current);
-                        pollingRef.current = null;
-                    }
-
-                    setVerificationLoadingText('Номер підтверджено. Завершуємо запис...');
-
-                    if (currentMode === 'guest' && pendingGuestFormRef.current) {
-                        const form = pendingGuestFormRef.current;
-
-                        validateBookingPayload(form.serviceId, form.doctorId, form.appointmentDate);
-
-                        await createGuestAppointment({
-                            lastName: form.lastName,
-                            firstName: form.firstName,
-                            middleName: form.middleName || undefined,
-                            phone: form.phone,
-                            phoneVerificationSessionId: verification.sessionId,
-                            doctorId: form.doctorId,
-                            serviceId: form.serviceId,
-                            appointmentDate: form.appointmentDate,
-                        });
-
-                        clearGuestForm();
-                        pendingGuestFormRef.current = null;
-                        setMessage('Гостьовий запис успішно створено');
-                    }
-
-                    if (currentMode === 'authenticated' && pendingAuthFormRef.current && token) {
-                        const form = pendingAuthFormRef.current;
-
-                        validateBookingPayload(form.serviceId, form.doctorId, form.appointmentDate);
-
-                        await verifyAndLinkPhone(token, form.phone, verification.sessionId);
-
-                        const appointmentResult = await createAuthenticatedAppointment(token, {
-                            doctorId: form.doctorId,
-                            serviceId: form.serviceId,
-                            appointmentDate: form.appointmentDate,
-                        });
-
-                        const me = await getMyPatient(token);
-                        setPatient(me.patient);
-
-                        clearAuthForm();
-                        pendingAuthFormRef.current = null;
-                        setMessage((appointmentResult as { message?: string }).message || 'Запис успішно створено');
-                    }
-
-                    completeRef.current = true;
-                    resetVerificationState();
-                    setIsSubmitting(false);
+            if (mode === 'authenticated') {
+                if (!token) {
+                    showError('Потрібна авторизація');
                     return;
                 }
 
-                if (statusResult.status === 'FAILED' || statusResult.status === 'EXPIRED') {
-                    if (pollingRef.current) {
-                        window.clearInterval(pollingRef.current);
-                        pollingRef.current = null;
-                    }
-                    resetVerificationState();
-                    setIsSubmitting(false);
-                    setError('Підтвердження телефону не завершено');
-                }
-            } catch (err) {
-                if (completeRef.current) return;
-
-                if (pollingRef.current) {
-                    window.clearInterval(pollingRef.current);
-                    pollingRef.current = null;
-                }
-
-                resetVerificationState();
-                setIsSubmitting(false);
-                setError(err instanceof Error ? err.message : 'Помилка під час підтвердження');
-            }
-        }, 2000);
-    }
-
-    async function handleGuestSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setMessage('');
-        setError('');
-
-        if (!hasBookableServices) {
-            setError('Поки немає лікарів для активних послуг. Звернись до адміністратора.');
-            return;
-        }
-
-        try {
-            validateBookingPayload(guestForm.serviceId, guestForm.doctorId, guestForm.appointmentDate);
-
-            if (!guestForm.lastName.trim() || !guestForm.firstName.trim() || !guestForm.middleName.trim()) {
-                throw new Error('Заповни ПІБ повністю');
-            }
-
-            if (!guestForm.phone.trim()) throw new Error('Вкажи телефон');
-
-            setIsSubmitting(true);
-            pendingGuestFormRef.current = guestForm;
-            await startAutomaticVerificationFlow(guestForm.phone, 'guest');
-        } catch (err) {
-            setIsSubmitting(false);
-            setError(err instanceof Error ? err.message : 'Помилка створення запису');
-        }
-    }
-
-    async function handleAuthenticatedSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setMessage('');
-        setError('');
-
-        if (!hasBookableServices) {
-            setError('Поки немає лікарів для активних послуг. Звернись до адміністратора.');
-            return;
-        }
-
-        try {
-            if (!token) throw new Error('Спочатку увійди в систему');
-
-            validateBookingPayload(authForm.serviceId, authForm.doctorId, authForm.appointmentDate);
-
-            setIsSubmitting(true);
-
-            if (patient?.phoneVerified) {
-                const result = await createAuthenticatedAppointment(token, {
-                    doctorId: authForm.doctorId,
-                    serviceId: authForm.serviceId,
-                    appointmentDate: authForm.appointmentDate,
+                await createAuthenticatedAppointment(token, {
+                    doctorId: bookingDoctorId,
+                    serviceId,
+                    appointmentDate: toIso(finalDateTime),
                 });
+            } else {
+                if (!lastName.trim() || !firstName.trim() || !phone.trim()) {
+                    showError('Заповніть ПІБ і телефон');
+                    return;
+                }
 
-                clearAuthForm();
-                setMessage((result as { message?: string }).message || 'Запис успішно створено');
-                setIsSubmitting(false);
-                return;
+                await createGuestAppointment({
+                    lastName: lastName.trim(),
+                    firstName: firstName.trim(),
+                    middleName: middleName.trim() || undefined,
+                    phone: phone.trim(),
+                    doctorId: bookingDoctorId,
+                    serviceId,
+                    appointmentDate: toIso(finalDateTime),
+                    phoneVerificationSessionId: undefined as unknown as string,
+                });
             }
 
-            if (!authForm.phone.trim()) throw new Error('Вкажи телефон для підтвердження');
-
-            pendingAuthFormRef.current = authForm;
-            await startAutomaticVerificationFlow(authForm.phone, 'authenticated');
-        } catch (err) {
-            setIsSubmitting(false);
-            setError(err instanceof Error ? err.message : 'Помилка створення запису');
+            showSuccess('Ви успішно записались на прийом');
+        } catch (err: any) {
+            showError(err?.message || 'Не вдалося створити запис');
+        } finally {
+            setSubmitting(false);
         }
-    }
-
-    function onGuestServiceChange(serviceId: string) {
-        const service = services.find((s) => s.id === serviceId) || null;
-        setGuestForm((prev) => ({
-            ...prev,
-            serviceId,
-            doctorId: service && service.doctors.some((d) => d.id === prev.doctorId) ? prev.doctorId : '',
-        }));
-    }
-
-    function onAuthServiceChange(serviceId: string) {
-        const service = services.find((s) => s.id === serviceId) || null;
-        setAuthForm((prev) => ({
-            ...prev,
-            serviceId,
-            doctorId: service && service.doctors.some((d) => d.id === prev.doctorId) ? prev.doctorId : '',
-        }));
-    }
-
-    function renderDoctorPicker(
-        doctors: ServiceDoctor[],
-        selectedDoctorId: string,
-        onSelect: (doctorId: string) => void,
-        disabled: boolean,
-        emptyLabel: string,
-    ) {
-        if (disabled) {
-            return <div className="appointment-retro__doctor-empty">{emptyLabel}</div>;
-        }
-
-        return (
-            <div className="appointment-retro__doctor-list">
-                {doctors.map((doctor) => {
-                    const isActive = selectedDoctorId === doctor.id;
-                    const hasAvatar = Boolean(doctor.hasAvatar || doctor.avatarVersion);
-                    const src = buildDoctorAvatarUrl(doctor.id, preferredSize, doctor.avatarVersion);
-                    const srcSet = buildAvatarSrcSet(doctor.id, doctor.avatarVersion);
-
-                    return (
-                        <button
-                            key={doctor.id}
-                            type="button"
-                            className={`appointment-retro__doctor-item ${isActive ? 'is-active' : ''}`}
-                            onClick={() => onSelect(doctor.id)}
-                        >
-                            <div className="appointment-retro__doctor-avatar-wrap">
-                                {hasAvatar ? (
-                                    <img
-                                        className="appointment-retro__doctor-avatar"
-                                        src={src}
-                                        srcSet={srcSet}
-                                        sizes="44px"
-                                        alt=""
-                                        loading="lazy"
-                                        decoding="async"
-                                    />
-                                ) : (
-                                    <div className="appointment-retro__doctor-avatar-placeholder">
-                                        {doctorDisplayName(doctor).trim().charAt(0).toUpperCase() || 'Л'}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="appointment-retro__doctor-text">
-                                <strong>{doctorDisplayName(doctor)}</strong>
-                                <span>{doctor.email}</span>
-                            </div>
-                        </button>
-                    );
-                })}
-            </div>
-        );
     }
 
     return (
-        <div className="page-shell appointment-retro">
-            <div className="container appointment-retro__container">
-                <div className="appointment-retro__card">
-                    <div className="appointment-retro__header">
-                        <h1 className="appointment-retro__title">ЗАПИС НА ПРИЙОМ</h1>
-
-                        <div className="appointment-retro__modes">
-                            <button
-                                className={`appointment-retro__mode ${mode === 'guest' ? 'appointment-retro__mode--active' : ''}`}
-                                onClick={() => setMode('guest')}
-                                type="button"
-                            >
-                                ГІСТЬ
-                            </button>
-
-                            <button
-                                className={`appointment-retro__mode ${mode === 'authenticated' ? 'appointment-retro__mode--active' : ''}`}
-                                onClick={() => setMode('authenticated')}
-                                type="button"
-                            >
-                                АВТОРИЗОВАНИЙ
-                            </button>
-                        </div>
-                    </div>
-
-                    <p className="appointment-retro__subtitle">
-                        Гість підтверджує номер кожного разу. Авторизований користувач — тільки під час першого запису.
-                    </p>
-
-                    {servicesLoading && <div className="status-box appointment-retro__full-row">Завантаження послуг...</div>}
-
-                    {!servicesLoading && services.length === 0 && (
-                        <div className="status-box status-box--error appointment-retro__full-row">
-                            Поки немає активних послуг для запису.
-                        </div>
-                    )}
-
-                    {!servicesLoading && services.length > 0 && !hasBookableServices && (
-                        <div className="status-box status-box--error appointment-retro__full-row">
-                            Активні послуги є, але лікарів ще не призначено.
-                        </div>
-                    )}
-
-                    {error && <AlertToast message={error} variant="error" onClose={() => setError('')} />}
-                    {message && <AlertToast message={message} variant="success" onClose={() => setMessage('')} />}
-
-                    {mode === 'guest' ? (
-                        <form className="appointment-retro__form appointment-retro__form--guest" onSubmit={handleGuestSubmit}>
-                            <div className="appointment-retro__field">
-                                <label htmlFor="guest-lastName">ПРІЗВИЩЕ</label>
-                                <input
-                                    id="guest-lastName"
-                                    className="appointment-retro__input"
-                                    placeholder="Прізвище"
-                                    value={guestForm.lastName}
-                                    onChange={(e) => setGuestForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                                />
-                            </div>
-
-                            <div className="appointment-retro__field">
-                                <label htmlFor="guest-firstName">ІМ&apos;Я</label>
-                                <input
-                                    id="guest-firstName"
-                                    className="appointment-retro__input"
-                                    placeholder="Ім&apos;я"
-                                    value={guestForm.firstName}
-                                    onChange={(e) => setGuestForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                                />
-                            </div>
-
-                            <div className="appointment-retro__field appointment-retro__field--full">
-                                <label htmlFor="guest-middleName">ПО БАТЬКОВІ</label>
-                                <input
-                                    id="guest-middleName"
-                                    className="appointment-retro__input"
-                                    placeholder="По батькові"
-                                    value={guestForm.middleName}
-                                    onChange={(e) => setGuestForm((prev) => ({ ...prev, middleName: e.target.value }))}
-                                />
-                            </div>
-
-                            <div className="appointment-retro__field appointment-retro__field--full">
-                                <label htmlFor="guest-phone">ТЕЛЕФОН</label>
-                                <input
-                                    id="guest-phone"
-                                    className="appointment-retro__input"
-                                    placeholder="+380..."
-                                    value={guestForm.phone}
-                                    onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
-                                />
-                            </div>
-
-                            <div className="appointment-retro__field">
-                                <label htmlFor="guest-serviceId">ПОСЛУГА</label>
-                                <select
-                                    id="guest-serviceId"
-                                    className="appointment-retro__select"
-                                    value={guestForm.serviceId}
-                                    onChange={(e) => onGuestServiceChange(e.target.value)}
-                                >
-                                    <option value="">Оберіть послугу</option>
-                                    {services.map((service) => (
-                                        <option key={service.id} value={service.id}>
-                                            {service.name} ({service.durationMinutes} хв)
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="appointment-retro__field">
-                                <label>ЛІКАР</label>
-                                {renderDoctorPicker(
-                                    guestDoctors,
-                                    guestForm.doctorId,
-                                    (doctorId) => setGuestForm((prev) => ({ ...prev, doctorId })),
-                                    !guestForm.serviceId || guestDoctors.length === 0,
-                                    !guestForm.serviceId
-                                        ? 'Спочатку обери послугу'
-                                        : 'Для цієї послуги лікарі не призначені',
-                                )}
-                            </div>
-
-                            <div className="appointment-retro__field appointment-retro__field--full">
-                                <label htmlFor="guest-date">ДАТА ТА ЧАС</label>
-                                <input
-                                    id="guest-date"
-                                    className="appointment-retro__input"
-                                    type="datetime-local"
-                                    value={guestForm.appointmentDate}
-                                    onChange={(e) => setGuestForm((prev) => ({ ...prev, appointmentDate: e.target.value }))}
-                                />
-                            </div>
-
-                            <button
-                                className="appointment-retro__submit appointment-retro__submit--full"
-                                type="submit"
-                                disabled={isSubmitting || servicesLoading || !hasBookableServices}
-                            >
-                                {isSubmitting ? 'ОБРОБКА...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
-                            </button>
-                        </form>
-                    ) : (
-                        <form className="appointment-retro__form appointment-retro__form--auth" onSubmit={handleAuthenticatedSubmit}>
-                            {!token && (
-                                <div className="status-box status-box--error appointment-retro__full-row">
-                                    Для авторизованого запису потрібно спочатку увійти в систему.
-                                </div>
-                            )}
-
-                            {!!token && authNeedsPhone && (
-                                <div className="appointment-retro__field appointment-retro__field--full">
-                                    <label htmlFor="auth-phone">ТЕЛЕФОН</label>
-                                    <input
-                                        id="auth-phone"
-                                        className="appointment-retro__input"
-                                        placeholder="Номер телефону"
-                                        value={authForm.phone}
-                                        onChange={(e) => setAuthForm((prev) => ({ ...prev, phone: e.target.value }))}
-                                    />
-                                </div>
-                            )}
-
-                            <div className="appointment-retro__field">
-                                <label htmlFor="auth-serviceId">ПОСЛУГА</label>
-                                <select
-                                    id="auth-serviceId"
-                                    className="appointment-retro__select"
-                                    value={authForm.serviceId}
-                                    onChange={(e) => onAuthServiceChange(e.target.value)}
-                                >
-                                    <option value="">Оберіть послугу</option>
-                                    {services.map((service) => (
-                                        <option key={service.id} value={service.id}>
-                                            {service.name} ({service.durationMinutes} хв)
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="appointment-retro__field">
-                                <label>ЛІКАР</label>
-                                {renderDoctorPicker(
-                                    authDoctors,
-                                    authForm.doctorId,
-                                    (doctorId) => setAuthForm((prev) => ({ ...prev, doctorId })),
-                                    !authForm.serviceId || authDoctors.length === 0,
-                                    !authForm.serviceId
-                                        ? 'Спочатку обери послугу'
-                                        : 'Для цієї послуги лікарі не призначені',
-                                )}
-                            </div>
-
-                            <div className="appointment-retro__field appointment-retro__field--full">
-                                <label htmlFor="auth-date">ДАТА ТА ЧАС</label>
-                                <input
-                                    id="auth-date"
-                                    className="appointment-retro__input"
-                                    type="datetime-local"
-                                    value={authForm.appointmentDate}
-                                    onChange={(e) => setAuthForm((prev) => ({ ...prev, appointmentDate: e.target.value }))}
-                                />
-                            </div>
-
-                            <button
-                                className="appointment-retro__submit appointment-retro__submit--full"
-                                type="submit"
-                                disabled={isSubmitting || !token || servicesLoading || !hasBookableServices}
-                            >
-                                {isSubmitting ? 'ОБРОБКА...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
-                            </button>
-                        </form>
-                    )}
-                </div>
-            </div>
-
-            {isVerificationModalOpen && (
-                <div className="appointment-retro__modal-backdrop">
-                    <div className="appointment-retro__modal">
-                        <h2 className="appointment-retro__modal-title">ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ</h2>
-
-                        <p className="appointment-retro__modal-text">
-                            Потрібно один раз підтвердити номер у Telegram. Після цього запис завершиться автоматично.
-                        </p>
-
-                        {telegramBotUrl && (
-                            <TelegramQrCard
-                                telegramBotUrl={telegramBotUrl}
-                                title="QR ДЛЯ ПІДТВЕРДЖЕННЯ ТЕЛЕФОНУ"
-                                subtitle="Скануй QR через Telegram або натисни кнопку для переходу в Telegram."
-                            />
-                        )}
-
-                        <div className="appointment-retro__loader-block">
-                            <div className="appointment-retro__spinner" />
-                            <span>{verificationLoadingText}</span>
-                        </div>
-                    </div>
-                </div>
+        <section className="appointment-page">
+            {alert && (
+                <AlertToast
+                    variant={alert.variant}
+                    message={alert.message}
+                    onClose={() => setAlert(null)}
+                />
             )}
-        </div>
+
+            <div className="appointment-page__card">
+                <div className="appointment-page__header">
+                    <div>
+                        <h1 className="appointment-page__title">ЗАПИС НА ПРИЙОМ</h1>
+                        <p className="appointment-page__subtitle">
+                            Оберіть послугу та час. Якщо Ви прийшли зі сторінки графіка, лікар і дата вже будуть підставлені.
+                        </p>
+                    </div>
+
+                    <div className="appointment-page__modes">
+                        <button
+                            type="button"
+                            className={`appointment-page__mode ${mode === 'guest' ? 'is-active' : ''}`}
+                            onClick={() => setMode('guest')}
+                        >
+                            ГІСТЬ
+                        </button>
+                        <button
+                            type="button"
+                            className={`appointment-page__mode ${mode === 'authenticated' ? 'is-active' : ''}`}
+                            onClick={() => setMode('authenticated')}
+                        >
+                            АВТОРИЗОВАНИЙ
+                        </button>
+                    </div>
+                </div>
+
+                {isFromSchedule && (
+                    <div className="appointment-page__locked">
+                        <h3>ВИБРАНО ІЗ ГРАФІКА ЛІКАРЯ</h3>
+                        <p><strong>Лікар:</strong> {lockedDoctorLabel}</p>
+                        <p><strong>Дата та час:</strong> {paramDate} {paramTime.slice(0, 5)}</p>
+                    </div>
+                )}
+
+                <form className="appointment-page__form" onSubmit={handleSubmit}>
+                    {mode === 'guest' && (
+                        <div className="appointment-page__grid">
+                            <label className="appointment-page__field">
+                                <span>ПРІЗВИЩЕ</span>
+                                <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Прізвище" />
+                            </label>
+
+                            <label className="appointment-page__field">
+                                <span>ІМ'Я</span>
+                                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ім'я" />
+                            </label>
+
+                            <label className="appointment-page__field appointment-page__field--full">
+                                <span>ПО БАТЬКОВІ</span>
+                                <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} placeholder="По батькові" />
+                            </label>
+
+                            <label className="appointment-page__field appointment-page__field--full">
+                                <span>ТЕЛЕФОН</span>
+                                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." />
+                            </label>
+                        </div>
+                    )}
+
+                    {!isFromSchedule && (
+                        <div className="appointment-page__grid appointment-page__grid--selectors">
+                            <label className="appointment-page__field">
+                                <span>ЛІКАР</span>
+                                <select
+                                    className="appointment-page__select"
+                                    value={doctorId}
+                                    onChange={(e) => setDoctorId(e.target.value)}
+                                    disabled={loading}
+                                >
+                                    <option value="">Оберіть лікаря</option>
+                                    {doctors.map((d) => (
+                                        <option key={d.id} value={d.id}>
+                                            {fullDoctorName(d)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <label className="appointment-page__field">
+                                <span>ДАТА ТА ЧАС</span>
+                                <input
+                                    className="appointment-page__input"
+                                    type="datetime-local"
+                                    value={dateTime}
+                                    onChange={(e) => setDateTime(e.target.value)}
+                                />
+                            </label>
+                        </div>
+                    )}
+
+                    <div className="appointment-page__grid appointment-page__grid--selectors">
+                        <label className="appointment-page__field appointment-page__field--full">
+                            <span>ПОСЛУГА</span>
+                            <select
+                                className="appointment-page__select"
+                                value={serviceId}
+                                onChange={(e) => setServiceId(e.target.value)}
+                                disabled={loading}
+                            >
+                                <option value="">Оберіть послугу</option>
+                                {filteredServices.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name} ({s.durationMinutes} хв, {s.priceUah} грн)
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
+
+                    <button className="appointment-page__submit" type="submit" disabled={submitting || loading}>
+                        {submitting ? 'ЗАПИС...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
+                    </button>
+                </form>
+            </div>
+        </section>
     );
 }

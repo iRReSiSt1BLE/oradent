@@ -4,34 +4,30 @@ import {
     Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ClinicServiceEntity } from './entities/clinic-service.entity';
 import { CreateClinicServiceDto } from './dto/create-clinic-service.dto';
 import { UpdateClinicServiceDto } from './dto/update-clinic-service.dto';
 import { UserService } from '../user/user.service';
 import { AdminService } from '../admin/admin.service';
 import { UserRole } from '../common/enums/user-role.enum';
-import { User } from '../user/entities/user.entity';
 import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
-import { ConfigService } from '@nestjs/config';
+import { DoctorSpecialty } from '../doctor/entities/doctor-specialty.entity';
 import { DoctorService } from '../doctor/doctor.service';
-
-type RateSource = 'live' | 'cache' | 'fallback';
 
 @Injectable()
 export class ServicesService {
-    private rateCache: { rate: number; fetchedAt: number } | null = null;
-
     constructor(
         @InjectRepository(ClinicServiceEntity)
         private readonly clinicServiceRepository: Repository<ClinicServiceEntity>,
         @InjectRepository(ServiceCategoryEntity)
         private readonly categoryRepository: Repository<ServiceCategoryEntity>,
+        @InjectRepository(DoctorSpecialty)
+        private readonly specialtyRepository: Repository<DoctorSpecialty>,
         private readonly userService: UserService,
         private readonly adminService: AdminService,
-        private readonly configService: ConfigService,
         private readonly doctorService: DoctorService,
     ) {}
 
@@ -47,12 +43,8 @@ export class ServicesService {
         return normalized.length ? normalized : null;
     }
 
-    private normalizeUsd(value: number): number {
-        return Math.round(value * 100) / 100;
-    }
-
-    private roundUahTo10(value: number): number {
-        return Math.round(value / 10) * 10;
+    private normalizePriceUah(value: number): number {
+        return Math.round(Number(value) * 100) / 100;
     }
 
     private async ensureManagerAccess(currentUserId: string): Promise<void> {
@@ -105,34 +97,30 @@ export class ServicesService {
         }
     }
 
-    private async resolveDoctorUsers(doctorIds?: string[]): Promise<User[]> {
-        if (!doctorIds || !doctorIds.length) {
+    private async resolveSpecialties(specialtyIds?: string[]): Promise<DoctorSpecialty[]> {
+        if (!specialtyIds || !specialtyIds.length) {
             return [];
         }
 
-        const doctors = await this.userService.findByIds(doctorIds);
+        const uniqueIds = Array.from(new Set(specialtyIds));
+        const specialties = await this.specialtyRepository.find({
+            where: { id: In(uniqueIds) },
+        });
 
-        if (doctors.length !== doctorIds.length) {
-            const foundIds = new Set(doctors.map((d) => d.id));
-            const missing = doctorIds.filter((id) => !foundIds.has(id));
-            throw new BadRequestException(`Не знайдено лікарів: ${missing.join(', ')}`);
+        if (specialties.length !== uniqueIds.length) {
+            const foundIds = new Set(specialties.map((s) => s.id));
+            const missing = uniqueIds.filter((id) => !foundIds.has(id));
+            throw new BadRequestException(`Не знайдено спеціальності: ${missing.join(', ')}`);
         }
 
-        const notDoctors = doctors.filter((d) => d.role !== UserRole.DOCTOR);
-        if (notDoctors.length) {
+        const inactive = specialties.filter((s) => !s.isActive);
+        if (inactive.length) {
             throw new BadRequestException(
-                `Користувачі не є лікарями: ${notDoctors.map((u) => u.id).join(', ')}`,
+                `Деякі спеціальності неактивні: ${inactive.map((s) => s.name).join(', ')}`,
             );
         }
 
-        for (const doctorUser of doctors) {
-            const doctorProfile = await this.doctorService.findByUserId(doctorUser.id);
-            if (!doctorProfile || !doctorProfile.isActive) {
-                throw new BadRequestException(`Лікар деактивований або не має профілю: ${doctorUser.email}`);
-            }
-        }
-
-        return doctors;
+        return specialties.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
     }
 
     private async getCategoryOrThrow(categoryId: string): Promise<ServiceCategoryEntity> {
@@ -157,101 +145,33 @@ export class ServicesService {
         };
     }
 
+    private mapSpecialty(specialty: DoctorSpecialty) {
+        return {
+            id: specialty.id,
+            name: specialty.name,
+            order: specialty.order,
+            isActive: specialty.isActive,
+        };
+    }
+
     private mapService(service: ClinicServiceEntity) {
         return {
             id: service.id,
             name: service.name,
             description: service.description,
             durationMinutes: service.durationMinutes,
-            priceUsd: Number(service.priceUsd),
             priceUah: Number(service.priceUah),
-            usdBuyRate: Number(service.usdBuyRate),
-            priceUpdatedAt: service.priceUpdatedAt,
             isActive: service.isActive,
             categoryId: service.categoryId,
             category: service.category ? this.mapCategory(service.category) : null,
-            doctorIds: service.doctorUsers.map((d) => d.id),
-            doctors: service.doctorUsers.map((d) => ({
-                id: d.id,
-                email: d.email,
-            })),
+            specialtyIds: Array.isArray(service.specialties)
+                ? service.specialties.map((s) => s.id)
+                : [],
+            specialties: Array.isArray(service.specialties)
+                ? service.specialties.map((s) => this.mapSpecialty(s))
+                : [],
             createdAt: service.createdAt,
             updatedAt: service.updatedAt,
-        };
-    }
-
-    private async resolveUsdBuyRate(): Promise<{ rate: number; source: RateSource }> {
-        const cacheTtlMs = 10 * 60 * 1000;
-        const now = Date.now();
-
-        if (this.rateCache && now - this.rateCache.fetchedAt < cacheTtlMs) {
-            return { rate: this.rateCache.rate, source: 'cache' };
-        }
-
-        try {
-            const response = await fetch('https://api.monobank.ua/bank/currency');
-            if (!response.ok) {
-                throw new Error('monobank non-200');
-            }
-
-            const data = (await response.json()) as Array<{
-                currencyCodeA: number;
-                currencyCodeB: number;
-                rateBuy?: number;
-                rateSell?: number;
-                rateCross?: number;
-            }>;
-
-            const usdUah = data.find(
-                (item) => item.currencyCodeA === 840 && item.currencyCodeB === 980,
-            );
-
-            const liveRate = Number(usdUah?.rateBuy ?? usdUah?.rateCross);
-
-            if (!Number.isFinite(liveRate) || liveRate <= 0) {
-                throw new Error('monobank missing buy rate');
-            }
-
-            this.rateCache = { rate: liveRate, fetchedAt: now };
-            return { rate: liveRate, source: 'live' };
-        } catch {
-            if (this.rateCache) {
-                return { rate: this.rateCache.rate, source: 'cache' };
-            }
-
-            const fallback = Number(this.configService.get<string>('USD_BUY_FALLBACK', '0'));
-            if (Number.isFinite(fallback) && fallback > 0) {
-                return { rate: fallback, source: 'fallback' };
-            }
-
-            throw new BadRequestException('Не вдалося отримати курс USD/UAH з Monobank');
-        }
-    }
-
-    private async buildPricing(priceUsd: number) {
-        const normalizedUsd = this.normalizeUsd(priceUsd);
-        const { rate, source } = await this.resolveUsdBuyRate();
-        const priceUahRaw = normalizedUsd * rate;
-        const priceUahRounded = this.roundUahTo10(priceUahRaw);
-
-        return {
-            priceUsd: normalizedUsd,
-            rate: this.normalizeUsd(rate),
-            source,
-            priceUah: this.normalizeUsd(priceUahRounded),
-        };
-    }
-
-    async getPricingMeta() {
-        const { rate, source } = await this.resolveUsdBuyRate();
-        return {
-            ok: true,
-            pricing: {
-                usdBuyRate: this.normalizeUsd(rate),
-                source,
-                roundedTo: 10,
-                currency: 'UAH',
-            },
         };
     }
 
@@ -261,10 +181,20 @@ export class ServicesService {
         const name = this.normalizeName(dto.name);
         await this.ensureCategoryNameUnique(name);
 
+        let sortOrder = dto.sortOrder;
+        if (!sortOrder) {
+            const maxOrder = await this.categoryRepository
+                .createQueryBuilder('category')
+                .select('MAX(category.sortOrder)', 'max')
+                .getRawOne<{ max: string | null }>();
+
+            sortOrder = Number(maxOrder?.max || 0) + 1;
+        }
+
         const category = this.categoryRepository.create({
             name,
             description: this.normalizeDescription(dto.description),
-            sortOrder: dto.sortOrder ?? 0,
+            sortOrder,
             isActive: dto.isActive ?? true,
         });
 
@@ -356,6 +286,20 @@ export class ServicesService {
         };
     }
 
+    async getSpecialtiesForAssignment(currentUserId: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const specialties = await this.specialtyRepository.find({
+            where: { isActive: true },
+            order: { order: 'ASC', name: 'ASC' },
+        });
+
+        return {
+            ok: true,
+            specialties: specialties.map((s) => this.mapSpecialty(s)),
+        };
+    }
+
     async create(currentUserId: string, dto: CreateClinicServiceDto) {
         await this.ensureManagerAccess(currentUserId);
 
@@ -363,21 +307,17 @@ export class ServicesService {
         await this.ensureServiceNameUnique(name);
 
         const category = await this.getCategoryOrThrow(dto.categoryId);
-        const doctors = await this.resolveDoctorUsers(dto.doctorIds);
-        const pricing = await this.buildPricing(dto.priceUsd);
+        const specialties = await this.resolveSpecialties(dto.specialtyIds);
 
         const service = this.clinicServiceRepository.create({
             name,
             description: this.normalizeDescription(dto.description),
             durationMinutes: dto.durationMinutes,
-            priceUsd: pricing.priceUsd,
-            priceUah: pricing.priceUah,
-            usdBuyRate: pricing.rate,
-            priceUpdatedAt: new Date(),
+            priceUah: this.normalizePriceUah(Number(dto.priceUah)),
             isActive: dto.isActive ?? true,
             categoryId: category.id,
             category,
-            doctorUsers: doctors,
+            specialties,
         });
 
         const saved = await this.clinicServiceRepository.save(service);
@@ -386,10 +326,6 @@ export class ServicesService {
             ok: true,
             message: 'Послугу створено',
             service: this.mapService(saved),
-            pricing: {
-                source: pricing.source,
-                roundedTo: 10,
-            },
         };
     }
 
@@ -400,16 +336,9 @@ export class ServicesService {
             order: { name: 'ASC' },
         });
 
-        const { rate, source } = await this.resolveUsdBuyRate();
-
         return {
             ok: true,
             services: services.map((s) => this.mapService(s)),
-            pricing: {
-                usdBuyRate: this.normalizeUsd(rate),
-                source,
-                roundedTo: 10,
-            },
         };
     }
 
@@ -433,16 +362,9 @@ export class ServicesService {
             }))
             .filter((category) => category.services.length > 0);
 
-        const { rate, source } = await this.resolveUsdBuyRate();
-
         return {
             ok: true,
             categories: grouped,
-            pricing: {
-                usdBuyRate: this.normalizeUsd(rate),
-                source,
-                roundedTo: 10,
-            },
         };
     }
 
@@ -467,30 +389,9 @@ export class ServicesService {
             throw new BadRequestException('Послугу не знайдено');
         }
 
-        const { rate, source } = await this.resolveUsdBuyRate();
-
         return {
             ok: true,
             service: this.mapService(service),
-            pricing: {
-                usdBuyRate: this.normalizeUsd(rate),
-                source,
-                roundedTo: 10,
-            },
-        };
-    }
-
-    async getDoctorsForAssignment(currentUserId: string) {
-        await this.ensureManagerAccess(currentUserId);
-
-        const doctors = await this.doctorService.getDoctorsForOptions();
-
-        return {
-            ok: true,
-            doctors: doctors.map((d) => ({
-                id: d.id,
-                email: d.email,
-            })),
         };
     }
 
@@ -529,14 +430,10 @@ export class ServicesService {
             hasChanges = true;
         }
 
-        if (dto.priceUsd !== undefined) {
-            const pricing = await this.buildPricing(dto.priceUsd);
-
-            if (pricing.priceUsd !== Number(service.priceUsd)) {
-                service.priceUsd = pricing.priceUsd;
-                service.priceUah = pricing.priceUah;
-                service.usdBuyRate = pricing.rate;
-                service.priceUpdatedAt = new Date();
+        if (dto.priceUah !== undefined) {
+            const nextPrice = this.normalizePriceUah(Number(dto.priceUah));
+            if (nextPrice !== Number(service.priceUah)) {
+                service.priceUah = nextPrice;
                 hasChanges = true;
             }
         }
@@ -553,13 +450,13 @@ export class ServicesService {
             hasChanges = true;
         }
 
-        if (dto.doctorIds !== undefined) {
-            const doctors = await this.resolveDoctorUsers(dto.doctorIds);
-            const currentIds = service.doctorUsers.map((d) => d.id).sort();
-            const nextIds = doctors.map((d) => d.id).sort();
+        if (dto.specialtyIds !== undefined) {
+            const specialties = await this.resolveSpecialties(dto.specialtyIds);
+            const currentIds = (service.specialties || []).map((s) => s.id).sort();
+            const nextIds = specialties.map((s) => s.id).sort();
 
             if (JSON.stringify(currentIds) !== JSON.stringify(nextIds)) {
-                service.doctorUsers = doctors;
+                service.specialties = specialties;
                 hasChanges = true;
             }
         }
@@ -598,36 +495,10 @@ export class ServicesService {
         };
     }
 
-    async refreshPrices(currentUserId: string) {
-        await this.ensureManagerAccess(currentUserId);
-
-        const { rate, source } = await this.resolveUsdBuyRate();
-
-        const services = await this.clinicServiceRepository.find();
-        const now = new Date();
-
-        for (const service of services) {
-            service.usdBuyRate = this.normalizeUsd(rate);
-            service.priceUah = this.normalizeUsd(this.roundUahTo10(Number(service.priceUsd) * rate));
-            service.priceUpdatedAt = now;
-        }
-
-        await this.clinicServiceRepository.save(services);
-
-        return {
-            ok: true,
-            message: 'Ціни оновлено за поточним курсом Monobank',
-            pricing: {
-                usdBuyRate: this.normalizeUsd(rate),
-                source,
-                roundedTo: 10,
-            },
-        };
-    }
-
     async ensureBookable(serviceId: string, doctorId: string): Promise<void> {
         const service = await this.clinicServiceRepository.findOne({
             where: { id: serviceId },
+            relations: ['category', 'specialties'],
         });
 
         if (!service) {
@@ -642,21 +513,27 @@ export class ServicesService {
             throw new BadRequestException('Категорія послуги деактивована');
         }
 
-        const doctorUser = await this.userService.findById(doctorId);
-        if (!doctorUser || doctorUser.role !== UserRole.DOCTOR) {
+        const doctor = await this.doctorService.findById(doctorId);
+        if (!doctor || !doctor.isActive) {
             throw new BadRequestException('Лікаря не знайдено');
         }
 
-        const doctorProfile = await this.doctorService.findByUserId(doctorUser.id);
-        if (!doctorProfile || !doctorProfile.isActive) {
-            throw new BadRequestException('Лікаря деактивовано');
+        const doctorSpecialties = Array.isArray(doctor.specialties)
+            ? doctor.specialties.map((s) => s.trim().toLowerCase())
+            : doctor.specialty
+                ? [doctor.specialty.trim().toLowerCase()]
+                : [];
+
+        if (!service.specialties?.length) {
+            return;
         }
 
-        if (service.doctorUsers.length > 0) {
-            const allowed = service.doctorUsers.some((d) => d.id === doctorId);
-            if (!allowed) {
-                throw new BadRequestException('Цей лікар не призначений на вибрану послугу');
-            }
+        const allowed = service.specialties.some((specialty) =>
+            doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
+        );
+
+        if (!allowed) {
+            throw new BadRequestException('Цей лікар не може надавати вибрану послугу');
         }
     }
 }

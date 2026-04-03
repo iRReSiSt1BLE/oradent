@@ -19,7 +19,7 @@ export class ServiceCategoryEntity {
     @Column({ type: 'text', nullable: true })
     description: string | null;
 
-    @Column({ type: 'int', default: 0 })
+    @Column({ type: 'int', default: 1 })
     sortOrder: number;
 
     @Column({ type: 'boolean', default: true })

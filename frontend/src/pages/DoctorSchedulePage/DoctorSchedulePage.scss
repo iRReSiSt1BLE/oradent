@@ -1,0 +1,300 @@
+.doctor-schedule-view {
+  &__container {
+    display: flex;
+    justify-content: center;
+  }
+
+  &__top-alert {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    width: min(360px, calc(100vw - 28px));
+    z-index: 3000;
+  }
+
+  &__card {
+    width: 100%;
+    max-width: 1200px;
+    background: #f8f8f8;
+    border: 1.5px solid #111;
+    border-radius: 16px;
+    box-shadow: 10px 10px 0 #111;
+    padding: 24px;
+    display: grid;
+    gap: 20px;
+  }
+
+  &__loading,
+  &__state,
+  &__hint {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  &__loading {
+    color: #44505d;
+    text-align: center;
+    font-size: 18px;
+  }
+
+  &__doctor {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 16px;
+    align-items: center;
+
+    img,
+    .doctor-schedule-view__placeholder {
+      width: 120px;
+      height: 120px;
+      border-radius: 0;
+      object-fit: cover;
+      border: 1.5px solid #111;
+      background: #e7edf5;
+    }
+
+    h1,
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    h1 {
+      font-size: clamp(22px, 3vw, 34px);
+      color: #111;
+      line-height: 1.2;
+    }
+
+    p {
+      margin-top: 8px;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #5a6472;
+    }
+  }
+
+  &__placeholder {
+    display: grid;
+    place-items: center;
+    font-size: 44px;
+    font-weight: 700;
+    color: #6c7a8b;
+  }
+
+  &__layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  &__calendar,
+  &__times {
+    border: 1.5px solid #111;
+    border-radius: 0;
+    background: #fff;
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+
+  &__calendar-head,
+  &__times-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__calendar-head h2,
+  &__times-head h2 {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 20px;
+    color: #111;
+  }
+
+  &__calendar-head input {
+    width: 100%;
+    max-width: 210px;
+    min-height: 44px;
+    border: 2px solid #111;
+    border-radius: 0;
+    background: #fff;
+    padding: 8px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: #111;
+    outline: none;
+  }
+
+  &__calendar-head input:focus {
+    box-shadow: 4px 4px 0 #111;
+  }
+
+  &__month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  &__day {
+    border: 1.5px solid #111;
+    min-height: 72px;
+    padding: 8px 6px;
+    display: grid;
+    align-content: space-between;
+    justify-items: center;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    background: #fff;
+
+    span {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111;
+    }
+
+    small {
+      font-size: 12px;
+      color: #465364;
+    }
+  }
+
+  &__day.is-selected {
+    background: #84d8ce;
+    box-shadow: inset 0 0 0 2px #111;
+  }
+
+  &__day.is-off {
+    background: #eceff4;
+    opacity: 0.9;
+  }
+
+  &__day.is-busy {
+    background: #eef3f1;
+  }
+
+  &__day.is-free {
+    background: #eef8f6;
+  }
+
+  &__back-day {
+    min-height: 42px;
+    border: 2px solid #111;
+    background: #fff;
+    color: #111;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 12px;
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  &__state {
+    border: 1.5px dashed #4d5969;
+    border-radius: 0;
+    padding: 14px;
+    color: #4d5969;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  &__slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 8px;
+  }
+
+  &__slot {
+    border: 1.5px solid #111;
+    border-radius: 0;
+    text-align: center;
+    padding: 10px 4px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+    background: #84d8ce;
+    color: #111;
+  }
+
+  &__hint {
+    margin: 0;
+    color: #5a6472;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 980px) {
+  .doctor-schedule-view {
+    &__layout {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (max-width: 700px) {
+  .doctor-schedule-view {
+    &__card {
+      padding: 16px 12px;
+      border-radius: 12px;
+      box-shadow: 6px 6px 0 #111;
+    }
+
+    &__doctor {
+      grid-template-columns: 84px 1fr;
+
+      img,
+      .doctor-schedule-view__placeholder {
+        width: 84px;
+        height: 84px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      p {
+        font-size: 13px;
+      }
+    }
+
+    &__month-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    &__calendar-head,
+    &__times-head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    &__calendar-head input,
+    &__back-day {
+      max-width: none;
+      width: 100%;
+    }
+  }
+}
+
+@media (max-width: 360px) {
+  .doctor-schedule-view {
+    &__card {
+      padding: 12px 10px;
+    }
+
+    &__month-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    &__slots {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    &__day {
+      min-height: 64px;
+    }
+  }
+}

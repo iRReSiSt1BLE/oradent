@@ -31,7 +31,7 @@ function formatDate(value: string | null) {
     if (!value) return 'Дата не вказана';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
-    return d.toLocaleString('uk-UA');
+    return d.toLocaleString('ua-UA');
 }
 
 function pickSupportedMimeType() {
@@ -564,7 +564,7 @@ export default function DoctorAppointmentDetailPage() {
                                             {videos.map((v) => (
                                                 <div key={v.id} className="doctor-appointment-detail__video-item">
                                                     <div className="doctor-appointment-detail__video-item-head">
-                                                        <strong>{new Date(v.createdAt).toLocaleString('uk-UA')}</strong>
+                                                        <strong>{new Date(v.createdAt).toLocaleString('ua-UA')}</strong>
                                                         <button type="button" onClick={() => openDecryptedVideo(v.id)}>
                                                             Відкрити
                                                         </button>

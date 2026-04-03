@@ -23,6 +23,8 @@ import { DoctorService } from './doctor.service';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { RequestDoctorEmailVerificationDto } from './dto/request-doctor-email-verification.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
+import { CreateDoctorSpecialtyDto } from './dto/create-doctor-specialty.dto';
+import { UpdateDoctorSpecialtyDto } from './dto/update-doctor-specialty.dto';
 
 @Controller('doctors')
 export class DoctorController {
@@ -31,6 +33,40 @@ export class DoctorController {
     @Get('public')
     getPublic() {
         return this.doctorService.getPublicDoctors();
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get('specialties')
+    getSpecialties(@Req() req: { user: { id: string } }) {
+        return this.doctorService.getSpecialties(req.user.id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post('specialties')
+    createSpecialty(
+        @Req() req: { user: { id: string } },
+        @Body() dto: CreateDoctorSpecialtyDto,
+    ) {
+        return this.doctorService.createSpecialty(req.user.id, dto.name);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Patch('specialties/:id')
+    updateSpecialty(
+        @Req() req: { user: { id: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+        @Body() dto: UpdateDoctorSpecialtyDto,
+    ) {
+        return this.doctorService.updateSpecialty(req.user.id, id, dto.name);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Delete('specialties/:id')
+    deleteSpecialty(
+        @Req() req: { user: { id: string } },
+        @Param('id', new ParseUUIDPipe()) id: string,
+    ) {
+        return this.doctorService.deleteSpecialty(req.user.id, id);
     }
 
     @UseGuards(JwtAuthGuard)
