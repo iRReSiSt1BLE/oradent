@@ -12,6 +12,66 @@ type Props = {
     onBook: () => void;
 };
 
+function parseDbI18nValue(raw: any, language: string): string {
+    if (!raw) return '';
+
+    if (typeof raw === 'object' && raw !== null) {
+        if ('ua' in raw || 'en' in raw || 'de' in raw || 'fr' in raw) {
+            return raw[language] || raw.ua || raw.en || raw.de || raw.fr || '';
+        }
+
+        if ('i18n' in raw && raw.i18n) {
+            const map = raw.i18n as Record<string, string>;
+            return map[language] || map.ua || map.en || map.de || map.fr || '';
+        }
+
+        if ('value' in raw && typeof raw.value === 'string') {
+            return raw.value;
+        }
+
+        if ('name' in raw) {
+            return parseDbI18nValue(raw.name, language);
+        }
+
+        if ('data' in raw && raw.data && typeof raw.data === 'object') {
+            return (
+                raw.data[language] ||
+                raw.data.ua ||
+                raw.data.en ||
+                raw.data.de ||
+                raw.data.fr ||
+                ''
+            );
+        }
+
+        return '';
+    }
+
+    if (typeof raw === 'string') {
+        if (!raw.includes('__ORADENT_I18N__')) {
+            return raw;
+        }
+
+        try {
+            const start = raw.indexOf('{');
+            if (start === -1) return raw;
+
+            const parsed = JSON.parse(raw.slice(start));
+            const data = parsed?.data;
+
+            if (data && typeof data === 'object') {
+                return data[language] || data.ua || data.en || data.de || data.fr || raw;
+            }
+
+            return raw;
+        } catch {
+            return raw;
+        }
+    }
+
+    return String(raw);
+}
+
 export default function CartDrawer({
                                        isOpen,
                                        items,
@@ -21,7 +81,7 @@ export default function CartDrawer({
                                        onClear,
                                        onBook,
                                    }: Props) {
-    const { t } = useI18n();
+    const { t, language } = useI18n();
 
     const tx = (key: string, fallback: string) => {
         const value = t(key);
@@ -62,33 +122,38 @@ export default function CartDrawer({
                         </div>
                     ) : (
                         <div className="cart-drawer__list">
-                            {items.map((item) => (
-                                <div key={item.serviceId} className="cart-drawer__item">
-                                    <div className="cart-drawer__item-main">
-                                        <strong>{item.name}</strong>
+                            {items.map((item) => {
+                                const serviceName = parseDbI18nValue(item.name, language);
+                                const categoryName = parseDbI18nValue(item.categoryName, language);
 
-                                        {item.categoryName && (
+                                return (
+                                    <div key={item.serviceId} className="cart-drawer__item">
+                                        <div className="cart-drawer__item-main">
+                                            <strong>{serviceName || tx('cart.service', 'Послуга')}</strong>
+
+                                            {categoryName ? (
+                                                <p>
+                                                    {tx('cart.category', 'Категорія')}: {categoryName}
+                                                </p>
+                                            ) : null}
+
                                             <p>
-                                                {tx('cart.category', 'Категорія')}: {item.categoryName}
+                                                {item.durationMinutes} {tx('cart.minutes', 'хв')} · {item.priceUah} грн
                                             </p>
-                                        )}
+                                        </div>
 
-                                        <p>
-                                            {item.durationMinutes} {tx('cart.minutes', 'хв')} · {item.priceUah} грн
-                                        </p>
+                                        <div className="cart-drawer__item-actions">
+                                            <button
+                                                type="button"
+                                                className="cart-drawer__remove"
+                                                onClick={() => onRemove(item.serviceId)}
+                                            >
+                                                {tx('cart.remove', 'Видалити')}
+                                            </button>
+                                        </div>
                                     </div>
-
-                                    <div className="cart-drawer__item-actions">
-                                        <button
-                                            type="button"
-                                            className="cart-drawer__remove"
-                                            onClick={() => onRemove(item.serviceId)}
-                                        >
-                                            {tx('cart.remove', 'Видалити')}
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>

@@ -22,11 +22,14 @@ export class ClinicServiceEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ type: 'varchar', length: 120, unique: true })
+    @Column({ type: 'varchar', length: 700, unique: true })
     name: string;
 
     @Column({ type: 'text', nullable: true })
     description: string | null;
+
+    @Column({ type: 'int', default: 0 })
+    sortOrder: number;
 
     @Column({ type: 'int', default: 30 })
     durationMinutes: number;

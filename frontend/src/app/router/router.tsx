@@ -9,8 +9,7 @@ import DoctorProfilePage from '../../pages/DoctorProfilePage/DoctorProfilePage';
 import AppointmentPage from '../../pages/AppointmentPage/AppointmentPage';
 import AdminCreatePage from '../../pages/AdminCreatePage/AdminCreatePage';
 import AdminListPage from '../../pages/AdminListPage/AdminListPage';
-import ServiceCreatePage from '../../pages/ServiceCreatePage/ServiceCreatePage';
-import ServiceListPage from '../../pages/ServiceListPage/ServiceListPage';
+import ServicesAdminPage from "../../pages/ServicesAdminPage/ServicesAdminPage.tsx";
 import ServiceDetailPage from '../../pages/ServiceDetailPage/ServiceDetailPage';
 import DoctorListPage from '../../pages/DoctorListPage/DoctorListPage';
 import DoctorDetailPage from '../../pages/DoctorDetailPage/DoctorDetailPage';
@@ -76,8 +75,7 @@ export const router = createBrowserRouter([
             {
                 element: <AdminPanelOnly />,
                 children: [
-                    { path: 'admin/services/create', element: <ServiceCreatePage /> },
-                    { path: 'admin/services/list', element: <ServiceListPage /> },
+                    { path: 'admin/services', element: <ServicesAdminPage /> },
                     { path: 'admin/doctors/list', element: <DoctorListPage /> },
                     { path: 'admin/doctors/schedule', element: <DoctorScheduleAdminPage /> },
                     { path: 'admin/doctors/:doctorId', element: <DoctorDetailPage /> },

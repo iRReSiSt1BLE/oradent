@@ -7,21 +7,23 @@ import {
     Max,
     Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateServiceCategoryDto {
     @IsOptional()
     @IsString()
-    @Length(1, 120)
+    @Length(1, 700)
     name?: string;
 
     @IsOptional()
     @IsString()
-    @Length(1, 4000)
+    @Length(0, 12000)
     description?: string;
 
     @IsOptional()
+    @Type(() => Number)
     @IsInt()
-    @Min(1)
+    @Min(0)
     @Max(9999)
     sortOrder?: number;
 

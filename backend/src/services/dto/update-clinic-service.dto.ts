@@ -1,40 +1,51 @@
 import {
-    ArrayMinSize,
+    ArrayUnique,
     IsArray,
     IsBoolean,
     IsInt,
+    IsNumber,
     IsOptional,
     IsString,
     IsUUID,
     Length,
-    Matches,
     Max,
     Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateClinicServiceDto {
     @IsOptional()
     @IsString()
-    @Length(1, 120)
+    @Length(1, 700)
     name?: string;
 
     @IsOptional()
     @IsString()
-    @Length(1, 4000)
+    @Length(0, 12000)
     description?: string;
 
     @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    @Max(9999)
+    sortOrder?: number;
+
+    @IsOptional()
+    @Type(() => Number)
     @IsInt()
     @Min(5)
-    @Max(1440)
+    @Max(480)
     durationMinutes?: number;
 
     @IsOptional()
-    @Matches(/^\d+(\.\d{1,2})?$/)
+    @Type(() => Number)
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(1)
     priceUah?: number;
 
     @IsOptional()
-    @IsUUID()
+    @IsUUID('4')
     categoryId?: string;
 
     @IsOptional()
@@ -43,7 +54,7 @@ export class UpdateClinicServiceDto {
 
     @IsOptional()
     @IsArray()
-    @ArrayMinSize(1)
+    @ArrayUnique()
     @IsUUID('4', { each: true })
     specialtyIds?: string[];
 }

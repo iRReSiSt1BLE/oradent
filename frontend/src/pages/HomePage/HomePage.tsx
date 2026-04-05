@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addServiceToCart } from '../../shared/cart/cartStore';
+import { addServiceToCart } from '../../shared/utils/cartStorage';
 import {
     getPublicDoctors,
     type PublicDoctorItem,
@@ -38,10 +38,29 @@ function parseDbI18nValue(raw: any, language: string): string {
             return raw.value;
         }
 
+        if ('name' in raw) {
+            return parseDbI18nValue(raw.name, language);
+        }
+
+        if ('data' in raw && raw.data && typeof raw.data === 'object') {
+            return (
+                raw.data[language] ||
+                raw.data.ua ||
+                raw.data.en ||
+                raw.data.de ||
+                raw.data.fr ||
+                ''
+            );
+        }
+
         return '';
     }
 
     if (typeof raw === 'string') {
+        if (!raw.includes('__ORADENT_I18N__')) {
+            return raw;
+        }
+
         try {
             const start = raw.indexOf('{');
             if (start === -1) return raw;
@@ -63,7 +82,9 @@ function parseDbI18nValue(raw: any, language: string): string {
 }
 
 function fullDoctorName(d: PublicDoctorItem) {
-    return `${d.lastName ?? ''} ${d.firstName ?? ''} ${d.middleName ?? ''}`.replace(/\s+/g, ' ').trim();
+    return `${d.lastName ?? ''} ${d.firstName ?? ''} ${d.middleName ?? ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 export default function HomePage() {
@@ -112,7 +133,7 @@ export default function HomePage() {
         }
 
         void load();
-    }, [language, t]);
+    }, [language]);
 
     const visibleDoctors = useMemo(() => doctors.slice(0, 8), [doctors]);
 
@@ -154,17 +175,28 @@ export default function HomePage() {
 
                         const specialtiesList = Array.isArray(doctor.specialties)
                             ? doctor.specialties
-                                .map((item: any) => item?.i18n?.[language] || item?.i18n?.ua || item?.value || '')
+                                .map(
+                                    (item: any) =>
+                                        item?.i18n?.[language] ||
+                                        item?.i18n?.ua ||
+                                        item?.value ||
+                                        '',
+                                )
                                 .filter(Boolean)
                             : [];
 
                         const specialtyText =
                             specialtiesList.length > 0
                                 ? specialtiesList.join(', ')
-                                : doctor.specialtyI18n?.[language] || doctor.specialtyI18n?.ua || doctor.specialty || '';
+                                : doctor.specialtyI18n?.[language] ||
+                                doctor.specialtyI18n?.ua ||
+                                doctor.specialty ||
+                                '';
 
-                        const infoBlock =
-                            parseDbI18nValue(doctor.infoBlockI18n || doctor.infoBlock, language);
+                        const infoBlock = parseDbI18nValue(
+                            doctor.infoBlockI18n || doctor.infoBlock,
+                            language,
+                        );
 
                         return (
                             <article key={doctor.id} className="home-page__doctor-card">
@@ -184,13 +216,13 @@ export default function HomePage() {
 
                                 <h3 className="home-page__doctor-name">{name}</h3>
 
-                                {specialtyText && (
+                                {specialtyText ? (
                                     <p className="home-page__doctor-specialty">{specialtyText}</p>
-                                )}
+                                ) : null}
 
-                                {infoBlock && (
+                                {infoBlock ? (
                                     <p className="home-page__doctor-description">{infoBlock}</p>
-                                )}
+                                ) : null}
                             </article>
                         );
                     })}
@@ -200,6 +232,7 @@ export default function HomePage() {
             <section className="home-page__catalog container">
                 {categories.map((category) => {
                     const opened = openedIds.includes(category.id);
+                    const categoryTitle = parseDbI18nValue(category.name, language);
 
                     return (
                         <div key={category.id} className="home-page__category">
@@ -208,8 +241,10 @@ export default function HomePage() {
                                 className={`home-page__category-head ${opened ? 'is-open' : ''}`}
                                 onClick={() => toggleCategory(category.id)}
                             >
-                                <span className="home-page__category-title">{category.name}</span>
-                                <span className="home-page__category-toggle">+</span>
+                                <span className="home-page__category-title">{categoryTitle}</span>
+                                <span className="home-page__category-toggle">
+                                    {opened ? '×' : '+'}
+                                </span>
                             </button>
 
                             <div className={`home-page__category-body ${opened ? 'is-open' : ''}`}>
@@ -217,9 +252,16 @@ export default function HomePage() {
                                     <ul className="home-page__service-list">
                                         {category.services.map((service) => (
                                             <li key={service.id} className="home-page__service-item">
-                                                <div className="home-page__service-name-wrap">
-                                                    <span className="home-page__service-name">{service.name}</span>
-                                                    <strong className="home-page__service-price">{service.priceUah} грн</strong>
+                                                <div className="home-page__service-left">
+                                                    <div className="home-page__service-name-wrap">
+                                                        <span className="home-page__service-name">
+                                                            {parseDbI18nValue(service.name, language)}
+                                                        </span>
+
+                                                        <strong className="home-page__service-price">
+                                                            {service.priceUah} грн
+                                                        </strong>
+                                                    </div>
                                                 </div>
 
                                                 <button

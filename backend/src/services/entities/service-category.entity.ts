@@ -13,13 +13,13 @@ export class ServiceCategoryEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ type: 'varchar', length: 120, unique: true })
+    @Column({ type: 'varchar', length: 700, unique: true })
     name: string;
 
     @Column({ type: 'text', nullable: true })
     description: string | null;
 
-    @Column({ type: 'int', default: 1 })
+    @Column({ type: 'int', default: 0 })
     sortOrder: number;
 
     @Column({ type: 'boolean', default: true })

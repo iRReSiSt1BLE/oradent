@@ -4,7 +4,7 @@ import {
     Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ClinicServiceEntity } from './entities/clinic-service.entity';
 import { CreateClinicServiceDto } from './dto/create-clinic-service.dto';
 import { UpdateClinicServiceDto } from './dto/update-clinic-service.dto';
@@ -15,7 +15,6 @@ import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { DoctorSpecialty } from '../doctor/entities/doctor-specialty.entity';
-import { DoctorService } from '../doctor/doctor.service';
 
 @Injectable()
 export class ServicesService {
@@ -28,7 +27,6 @@ export class ServicesService {
         private readonly specialtyRepository: Repository<DoctorSpecialty>,
         private readonly userService: UserService,
         private readonly adminService: AdminService,
-        private readonly doctorService: DoctorService,
     ) {}
 
     private normalizeName(name: string): string {
@@ -39,6 +37,7 @@ export class ServicesService {
         if (description === undefined) {
             return null;
         }
+
         const normalized = description.trim();
         return normalized.length ? normalized : null;
     }
@@ -97,40 +96,38 @@ export class ServicesService {
         }
     }
 
-    private async resolveSpecialties(specialtyIds?: string[]): Promise<DoctorSpecialty[]> {
-        if (!specialtyIds || !specialtyIds.length) {
-            return [];
-        }
-
-        const uniqueIds = Array.from(new Set(specialtyIds));
-        const specialties = await this.specialtyRepository.find({
-            where: { id: In(uniqueIds) },
-        });
-
-        if (specialties.length !== uniqueIds.length) {
-            const foundIds = new Set(specialties.map((s) => s.id));
-            const missing = uniqueIds.filter((id) => !foundIds.has(id));
-            throw new BadRequestException(`Не знайдено спеціальності: ${missing.join(', ')}`);
-        }
-
-        const inactive = specialties.filter((s) => !s.isActive);
-        if (inactive.length) {
-            throw new BadRequestException(
-                `Деякі спеціальності неактивні: ${inactive.map((s) => s.name).join(', ')}`,
-            );
-        }
-
-        return specialties.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-    }
-
     private async getCategoryOrThrow(categoryId: string): Promise<ServiceCategoryEntity> {
-        const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+        const category = await this.categoryRepository.findOne({
+            where: { id: categoryId },
+        });
 
         if (!category) {
             throw new BadRequestException('Категорію не знайдено');
         }
 
         return category;
+    }
+
+    private async resolveSpecialties(specialtyIds?: string[]): Promise<DoctorSpecialty[]> {
+        if (!specialtyIds || !specialtyIds.length) {
+            return [];
+        }
+        const uniqueIds = [...new Set(specialtyIds.map((id) => id.trim()).filter(Boolean))];
+
+        const specialties = await this.specialtyRepository.find({
+            where: uniqueIds.map((id) => ({ id, isActive: true })),
+            order: { order: 'ASC', name: 'ASC' },
+        });
+
+        if (specialties.length !== uniqueIds.length) {
+            const foundIds = new Set(specialties.map((item) => item.id));
+            const missing = uniqueIds.filter((id) => !foundIds.has(id));
+            throw new BadRequestException(`
+                Не знайдено спеціальностей: ${missing.join(', ')}`,
+        );
+        }
+
+        return specialties;
     }
 
     private mapCategory(category: ServiceCategoryEntity) {
@@ -161,6 +158,7 @@ export class ServicesService {
             description: service.description,
             durationMinutes: service.durationMinutes,
             priceUah: Number(service.priceUah),
+            sortOrder: service.sortOrder,
             isActive: service.isActive,
             categoryId: service.categoryId,
             category: service.category ? this.mapCategory(service.category) : null,
@@ -181,20 +179,10 @@ export class ServicesService {
         const name = this.normalizeName(dto.name);
         await this.ensureCategoryNameUnique(name);
 
-        let sortOrder = dto.sortOrder;
-        if (!sortOrder) {
-            const maxOrder = await this.categoryRepository
-                .createQueryBuilder('category')
-                .select('MAX(category.sortOrder)', 'max')
-                .getRawOne<{ max: string | null }>();
-
-            sortOrder = Number(maxOrder?.max || 0) + 1;
-        }
-
         const category = this.categoryRepository.create({
             name,
             description: this.normalizeDescription(dto.description),
-            sortOrder,
+            sortOrder: dto.sortOrder ?? 0,
             isActive: dto.isActive ?? true,
         });
 
@@ -239,7 +227,6 @@ export class ServicesService {
                 hasChanges = true;
             }
         }
-
         if (dto.description !== undefined) {
             const description = this.normalizeDescription(dto.description);
             if (description !== category.description) {
@@ -286,20 +273,6 @@ export class ServicesService {
         };
     }
 
-    async getSpecialtiesForAssignment(currentUserId: string) {
-        await this.ensureManagerAccess(currentUserId);
-
-        const specialties = await this.specialtyRepository.find({
-            where: { isActive: true },
-            order: { order: 'ASC', name: 'ASC' },
-        });
-
-        return {
-            ok: true,
-            specialties: specialties.map((s) => this.mapSpecialty(s)),
-        };
-    }
-
     async create(currentUserId: string, dto: CreateClinicServiceDto) {
         await this.ensureManagerAccess(currentUserId);
 
@@ -313,7 +286,8 @@ export class ServicesService {
             name,
             description: this.normalizeDescription(dto.description),
             durationMinutes: dto.durationMinutes,
-            priceUah: this.normalizePriceUah(Number(dto.priceUah)),
+            priceUah: this.normalizePriceUah(dto.priceUah),
+            sortOrder: dto.sortOrder ?? 0,
             isActive: dto.isActive ?? true,
             categoryId: category.id,
             category,
@@ -333,7 +307,7 @@ export class ServicesService {
         await this.ensureManagerAccess(currentUserId);
 
         const services = await this.clinicServiceRepository.find({
-            order: { name: 'ASC' },
+            order: { sortOrder: 'ASC', name: 'ASC' },
         });
 
         return {
@@ -350,7 +324,7 @@ export class ServicesService {
 
         const services = await this.clinicServiceRepository.find({
             where: { isActive: true },
-            order: { name: 'ASC' },
+            order: { sortOrder: 'ASC', name: 'ASC' },
         });
 
         const grouped = categories
@@ -371,7 +345,7 @@ export class ServicesService {
     async getActivePublic() {
         const services = await this.clinicServiceRepository.find({
             where: { isActive: true },
-            order: { name: 'ASC' },
+            order: { sortOrder: 'ASC', name: 'ASC' },
         });
 
         return {
@@ -379,7 +353,6 @@ export class ServicesService {
             services: services.map((s) => this.mapService(s)),
         };
     }
-
     async getPublicServiceById(serviceId: string) {
         const service = await this.clinicServiceRepository.findOne({
             where: { id: serviceId },
@@ -392,6 +365,20 @@ export class ServicesService {
         return {
             ok: true,
             service: this.mapService(service),
+        };
+    }
+
+    async getDoctorsForAssignment(currentUserId: string) {
+        await this.ensureManagerAccess(currentUserId);
+
+        const specialties = await this.specialtyRepository.find({
+            where: { isActive: true },
+            order: { order: 'ASC', name: 'ASC' },
+        });
+
+        return {
+            ok: true,
+            specialties: specialties.map((item) => this.mapSpecialty(item)),
         };
     }
 
@@ -425,13 +412,18 @@ export class ServicesService {
             }
         }
 
+        if (dto.sortOrder !== undefined && dto.sortOrder !== service.sortOrder) {
+            service.sortOrder = dto.sortOrder;
+            hasChanges = true;
+        }
+
         if (dto.durationMinutes !== undefined && dto.durationMinutes !== service.durationMinutes) {
             service.durationMinutes = dto.durationMinutes;
             hasChanges = true;
         }
 
         if (dto.priceUah !== undefined) {
-            const nextPrice = this.normalizePriceUah(Number(dto.priceUah));
+            const nextPrice = this.normalizePriceUah(dto.priceUah);
             if (nextPrice !== Number(service.priceUah)) {
                 service.priceUah = nextPrice;
                 hasChanges = true;
@@ -484,7 +476,6 @@ export class ServicesService {
         if (!service) {
             throw new BadRequestException('Послугу не знайдено');
         }
-
         service.isActive = !service.isActive;
         const saved = await this.clinicServiceRepository.save(service);
 
@@ -495,10 +486,9 @@ export class ServicesService {
         };
     }
 
-    async ensureBookable(serviceId: string, doctorId: string): Promise<void> {
+    async ensureBookable(serviceId: string, doctorId?: string | null): Promise<ClinicServiceEntity> {
         const service = await this.clinicServiceRepository.findOne({
             where: { id: serviceId },
-            relations: ['category', 'specialties'],
         });
 
         if (!service) {
@@ -506,34 +496,51 @@ export class ServicesService {
         }
 
         if (!service.isActive) {
-            throw new BadRequestException('Послуга деактивована');
+            throw new BadRequestException('Послуга неактивна');
         }
 
         if (!service.category?.isActive) {
-            throw new BadRequestException('Категорія послуги деактивована');
+            throw new BadRequestException('Категорія послуги неактивна');
         }
 
-        const doctor = await this.doctorService.findById(doctorId);
-        if (!doctor || !doctor.isActive) {
-            throw new BadRequestException('Лікаря не знайдено');
+        if (doctorId) {
+            const doctor = await this.userService.findById(doctorId);
+
+            if (!doctor || doctor.role !== UserRole.DOCTOR) {
+                throw new BadRequestException('Лікаря не знайдено');
+            }
+
+            if (Array.isArray(service.specialties) && service.specialties.length > 0) {
+                const doctorSpecialtiesRaw = Array.isArray((doctor as any).specialties)
+                    ? ((doctor as any).specialties as string[])
+                    : [];
+
+                const doctorSpecialties = doctorSpecialtiesRaw.map((item) => item.trim().toLowerCase());
+
+                const hasMatch = service.specialties.some((specialty) =>
+                    doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
+                );
+
+                if (!hasMatch) {
+                    throw new BadRequestException('Обраний лікар не може надавати цю послугу');
+                }
+            }
         }
 
-        const doctorSpecialties = Array.isArray(doctor.specialties)
-            ? doctor.specialties.map((s) => s.trim().toLowerCase())
-            : doctor.specialty
-                ? [doctor.specialty.trim().toLowerCase()]
-                : [];
+        return service;
+    }
 
-        if (!service.specialties?.length) {
-            return;
-        }
+    async getSpecialtiesForAssignment(currentUserId: string) {
+        await this.ensureManagerAccess(currentUserId);
 
-        const allowed = service.specialties.some((specialty) =>
-            doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
-        );
+        const specialties = await this.specialtyRepository.find({
+            where: { isActive: true },
+            order: { order: 'ASC', name: 'ASC' },
+        });
 
-        if (!allowed) {
-            throw new BadRequestException('Цей лікар не може надавати вибрану послугу');
-        }
+        return {
+            ok: true,
+            specialties: specialties.map((item) => this.mapSpecialty(item)),
+        };
     }
 }
