@@ -149,4 +149,121 @@ export class MailService {
             code,
         });
     }
+
+
+    async sendPaidAppointmentConfirmation(params: {
+        to: string;
+        patientName: string;
+        appointmentId: string;
+        appointmentDate: Date | null;
+        receiptNumber: string;
+        amountUah: number;
+        paymentMethod: string;
+    }) {
+        const {
+            to,
+            patientName,
+            appointmentId,
+            appointmentDate,
+            receiptNumber,
+            amountUah,
+            paymentMethod,
+        } = params;
+
+        const formattedDate = appointmentDate
+            ? new Date(appointmentDate).toLocaleString('uk-UA')
+            : 'Дата не вказана';
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — запис підтверджено та оплачено',
+            html:
+                `<div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
+            <div style="
+        max-width:640px;
+        margin:0 auto;
+        background:#f8f8f8;
+        border:1.5px solid #111111;
+        border-radius:14px;
+        box-shadow:8px 8px 0 #111111;
+        overflow:hidden;
+        ">
+            <div style="
+            background:#84d8ce;
+            padding:14px 20px;
+            text-align:center;
+            border-bottom:1.5px solid #111111;
+            ">
+                <div style="
+                color:#ffffff;
+                font-size:12px;
+                font-weight:700;
+                letter-spacing:0.28em;
+                text-transform:uppercase;
+                ">
+                    ORADENT
+                </div>
+            </div>
+
+            <div style="padding:28px 24px 24px;">
+                <h1 style="
+                margin:0 0 18px;
+                text-align:center;
+                font-size:30px;
+                line-height:1.15;
+                font-weight:700;
+                color:#111111;
+                text-transform:uppercase;
+                ">
+                    ЗАПИС ПІДТВЕРДЖЕНО
+                </h1>
+
+                <p style="
+                margin:0 0 18px;
+                color:#111111;
+                font-size:15px;
+                line-height:1.7;
+                text-align:center;
+                ">
+                    Добрий день, <b>${patientName}</b>.<br/>
+                    Ваш запис успішно підтверджено та оплачено.
+                </p>
+
+                <div style="
+                margin:0 0 20px;
+                padding:18px 16px;
+                border:2px solid #111111;
+                background:#ffffff;
+                ">
+                    <div style="
+                    display:grid;
+                    row-gap:10px;
+                    font-size:14px;
+                    color:#111111;
+                    line-height:1.6;
+                    ">
+                        <div><b>ID запису:</b> ${appointmentId}</div>
+                        <div><b>Дата та час:</b> ${formattedDate}</div>
+                        <div><b>Сума:</b> ${amountUah} грн</div>
+                        <div><b>Спосіб оплати:</b> ${paymentMethod}</div>
+                        <div><b>Номер квитанції:</b> ${receiptNumber}</div>
+                        <div><b>Статус:</b> PAID</div>
+                    </div>
+                </div>
+
+                <p style="
+                margin:0;
+                color:#4b5563;
+                font-size:13px;
+                line-height:1.7;
+                text-align:center;
+                ">
+                    Дякуємо, що обрали <b>ORADENT</b>.
+                </p>
+            </div>
+            </div>
+            </div>`,
+        });
+    }
 }

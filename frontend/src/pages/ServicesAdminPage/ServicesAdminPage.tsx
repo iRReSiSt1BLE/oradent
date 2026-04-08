@@ -702,12 +702,12 @@ export default function ServicesAdminPage() {
 
                                     <div className="services-admin-page__item-actions">
                                         <button type="button" onClick={() => openEditCategoryModal(item)}>
-                                            {tt(t, 'common.edit', 'Редагувати')}
+                                            {tt(t, 'servicesAdmin.edit', 'Редагувати')}
                                         </button>
                                         <button type="button" onClick={() => handleToggleCategory(item.id)}>
                                             {item.isActive
-                                                ? tt(t, 'common.deactivate', 'Деактивувати')
-                                                : tt(t, 'common.activate', 'Активувати')}
+                                                ? tt(t, 'servicesAdmin.deactivate', 'Деактивувати')
+                                                : tt(t, 'servicesAdmin.activate', 'Активувати')}
                                         </button>
                                     </div>
                                 </div>
@@ -748,12 +748,12 @@ export default function ServicesAdminPage() {
 
                                     <div className="services-admin-page__item-actions">
                                         <button type="button" onClick={() => openEditServiceModal(item)}>
-                                            {tt(t, 'common.edit', 'Редагувати')}
+                                            {tt(t, 'servicesAdmin.edit', 'Редагувати')}
                                         </button>
                                         <button type="button" onClick={() => handleToggleService(item.id)}>
                                             {item.isActive
-                                                ? tt(t, 'common.deactivate', 'Деактивувати')
-                                                : tt(t, 'common.activate', 'Активувати')}
+                                                ? tt(t, 'servicesAdmin.deactivate', 'Деактивувати')
+                                                : tt(t, 'servicesAdmin.activate', 'Активувати')}
                                         </button>
                                     </div>
                                 </div>

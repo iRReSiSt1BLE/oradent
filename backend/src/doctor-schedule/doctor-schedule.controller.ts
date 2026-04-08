@@ -5,7 +5,8 @@ import {
     Get,
     Param,
     ParseUUIDPipe,
-    Patch, Post,
+    Patch,
+    Post,
     Put,
     Query,
     Req,
@@ -40,7 +41,6 @@ export class DoctorScheduleController {
     @UseGuards(JwtAuthGuard)
     @Get(':doctorId')
     getRaw(
-        @Req() req: { user: { id: string } },
         @Param('doctorId', new ParseUUIDPipe()) doctorId: string,
     ) {
         return this.scheduleService.getRawSchedule(doctorId);
@@ -96,5 +96,15 @@ export class DoctorScheduleController {
         @Query('end') end: string,
     ) {
         return this.scheduleService.unblockSlot(req.user.id, doctorId, date, start, end);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get(':doctorId/day-conflicts')
+    getDayConflicts(
+        @Req() req: { user: { id: string } },
+        @Param('doctorId', new ParseUUIDPipe()) doctorId: string,
+        @Query('date') date: string,
+    ) {
+        return this.scheduleService.getDayConflicts(req.user.id, doctorId, date);
     }
 }

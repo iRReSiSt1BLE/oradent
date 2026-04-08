@@ -123,7 +123,6 @@
     color: #24324a;
     cursor: pointer;
     border-radius: 0;
-    box-shadow: 4px 4px 0 #1d1d1d;
   }
 
   &__top-actions button:last-child,
@@ -159,7 +158,6 @@
     padding: 16px 18px;
     border: 1px solid #3a3a3a;
     background: #fff;
-    box-shadow: 6px 6px 0 #1d1d1d;
   }
 
   &__item-dot {
@@ -226,7 +224,7 @@
     width: min(760px, 100%);
     max-height: 92vh;
     overflow: auto;
-    background: #f6f6f4;
+    background: white;
     border: 1px solid #3a3a3a;
     box-shadow: 10px 10px 0 #1d1d1d;
     border-radius: 0;
@@ -243,7 +241,7 @@
     gap: 12px;
     padding: 18px;
     border-bottom: 1px solid #d6dde3;
-    background: #f6f6f4;
+    background: white;
   }
 
   &__modal-head h3 {

@@ -121,11 +121,17 @@ export class ProfileService {
         const normalizedPhone = this.normalizePhone(phone);
 
         const patientWithPhone = await this.patientService.findByPhone(normalizedPhone);
-        if (
-            patientWithPhone &&
-            !(owner.mode === 'patient' && patientWithPhone.id === owner.patient.id)
-        ) {
-            throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+        if (patientWithPhone) {
+            if (owner.mode === 'patient') {
+                const isCurrentPatient = patientWithPhone.id === owner.patient.id;
+                const isGuestPatientWithoutUser = !patientWithPhone.user;
+
+                if (!isCurrentPatient && !isGuestPatientWithoutUser) {
+                    throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+                }
+            } else {
+                throw new BadRequestException('Цей номер телефону вже використовується іншим користувачем');
+            }
         }
 
         const adminWithPhone = await this.adminService.findByPhone(normalizedPhone);
@@ -355,25 +361,27 @@ export class ProfileService {
         const owner = await this.resolveProfileOwner(userId);
         const normalizedPhone = this.normalizePhone(dto.phone);
 
+        if (owner.mode === 'patient') {
+            const savedPatient = await this.patientService.verifyAndLinkPhone(
+                owner.patient.id,
+                normalizedPhone,
+                dto.phoneVerificationSessionId,
+            );
+
+            return {
+                ok: true,
+                message: 'Телефон оновлено',
+                phone: savedPatient.phone,
+                phoneVerified: savedPatient.phoneVerified,
+            };
+        }
+
         await this.phoneVerificationService.ensureVerified(
             dto.phoneVerificationSessionId,
             normalizedPhone,
         );
 
         await this.ensurePhoneAvailableForOwner(normalizedPhone, owner);
-
-        if (owner.mode === 'patient') {
-            owner.patient.phone = normalizedPhone;
-            owner.patient.phoneVerified = true;
-            await this.patientService.save(owner.patient);
-
-            return {
-                ok: true,
-                message: 'Телефон оновлено',
-                phone: owner.patient.phone,
-                phoneVerified: owner.patient.phoneVerified,
-            };
-        }
 
         if (owner.mode === 'admin') {
             owner.admin.phone = normalizedPhone;

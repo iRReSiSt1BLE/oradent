@@ -1,0 +1,439 @@
+.admin-patients-page {
+  padding: 24px 0 48px;
+
+  &__container {
+    display: grid;
+    gap: 20px;
+  }
+
+  &__header {
+    display: flex;
+    justify-content: flex-start;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  &__title {
+    margin: 0 0 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 34px;
+    font-weight: 600;
+    color: #5b6671;
+    letter-spacing: 0.04em;
+  }
+
+  &__subtitle,
+  &__state,
+  &__patient-card span,
+  &__patient-card-meta,
+  &__appointment-grid span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+
+  &__layout {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  &__sidebar,
+  &__content {
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 18px;
+    display: grid;
+    gap: 16px;
+    align-content: start;
+  }
+
+  &__sidebar-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 96px;
+    gap: 10px;
+  }
+
+  &__search {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: #24324a;
+    outline: none;
+  }
+
+  &__search:focus {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__secondary {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid #404040;
+    background: #fff;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #24324a;
+    transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+  }
+
+  &__secondary:hover:not(:disabled) {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &__patient-list,
+  &__appointments {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__patient-card,
+  &__appointment-card {
+    border: 1px solid #d7dde3;
+    background: #fff;
+    padding: 14px;
+    display: grid;
+    gap: 10px;
+  }
+
+  &__patient-card {
+    text-align: left;
+    cursor: pointer;
+  }
+
+  &__patient-card.is-active {
+    background: #eefaf7;
+    border-color: #7fd1c4;
+  }
+
+  &__patient-card strong,
+  &__appointment-top strong,
+  &__appointment-grid strong,
+  &__patient-head h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    color: #24324a;
+  }
+
+  &__patient-card-meta,
+  &__appointment-actions,
+  &__patient-head-meta {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__patient-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #d7dde3;
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #7b8591;
+    }
+  }
+
+  &__patient-head-meta span,
+  &__badge {
+    border: 1px solid #d7dde3;
+    background: #f7f7f5;
+    padding: 6px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #24324a;
+  }
+
+  &__appointment-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  &__appointment-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__appointment-grid--simple {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  &__appointment-grid div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  &__appointment-actions {
+    padding-top: 6px;
+  }
+
+  &__modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 24, 32, 0.42);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    z-index: 80;
+  }
+
+  &__modal {
+    width: min(1080px, 100%);
+    max-height: 88vh;
+    overflow: auto;
+    background: #fff;
+    padding: 24px;
+    display: grid;
+    gap: 18px;
+  }
+
+  &__modal-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    border-bottom: 1px solid #d7dde3;
+    padding-bottom: 12px;
+
+    h3 {
+      margin: 0 0 6px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 26px;
+      font-weight: 600;
+      color: #24324a;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #7b8591;
+    }
+  }
+
+  &__modal-close {
+    width: 44px;
+    height: 44px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 22px;
+    color: #24324a;
+  }
+
+  &__modal-body {
+    display: grid;
+    gap: 18px;
+  }
+
+  &__modal-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__schedule-layout {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 18px;
+  }
+
+  &__calendar-box,
+  &__slots-box {
+    border: 1px solid #d7dde3;
+    background: #fbfbfa;
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+  }
+
+  &__calendar-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+
+    h3 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 20px;
+      color: #24324a;
+    }
+
+    input {
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid #404040;
+      background: #fff;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: #24324a;
+    }
+  }
+
+  &__month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  &__day {
+    min-height: 68px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    cursor: pointer;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 8px;
+    transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+  }
+
+  &__day:hover:not(:disabled) {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__day.is-selected {
+    border-color: #404040;
+    background: #eefaf7;
+  }
+
+  &__day.is-free {
+    background: #ebfff4;
+  }
+
+  &__day.is-busy {
+    background: #f4f5f6;
+  }
+
+  &__day.is-off {
+    background: #f3f3f1;
+    opacity: 0.7;
+  }
+
+  &__day-number {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #24324a;
+  }
+
+  &__day-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #7b8591;
+  }
+
+  &__slots {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  &__slot {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid #404040;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #24324a;
+    transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+  }
+
+  &__slot:hover:not(:disabled) {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__slot.is-selected {
+    background: #7fd1c4;
+  }
+}
+
+@media (max-width: 1100px) {
+  .admin-patients-page {
+    &__layout {
+      grid-template-columns: 1fr;
+    }
+
+    &__appointment-grid--simple,
+    &__schedule-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-patients-page {
+    padding: 16px 0 32px;
+
+    &__title {
+      font-size: 26px;
+    }
+
+    &__sidebar,
+    &__content,
+    &__modal {
+      padding: 14px;
+    }
+
+    &__sidebar-top {
+      grid-template-columns: 1fr;
+    }
+
+    &__appointment-grid--simple,
+    &__month-grid,
+    &__slots {
+      grid-template-columns: 1fr;
+    }
+
+    &__secondary {
+      width: 100%;
+    }
+
+    &__modal-backdrop {
+      padding: 10px;
+    }
+  }
+}

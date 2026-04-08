@@ -400,7 +400,6 @@ export default function ServicesPage() {
                                                 </button>
 
                                                 <button type="button" onClick={() => openEditModal(service)}>
-                                                    РЕДАГУВАТИ
                                                 </button>
                                             </div>
                                         </article>

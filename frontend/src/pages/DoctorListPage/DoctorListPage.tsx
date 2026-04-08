@@ -48,7 +48,10 @@ async function translateText(text: string, from: AppLanguage, to: AppLanguage) {
     const sourceLang = from === 'ua' ? 'uk' : from;
     const targetLang = to === 'ua' ? 'uk' : to;
 
-    const endpoints = ['https://translate.argosopentech.com/translate', 'https://libretranslate.de/translate'];
+    const endpoints = [
+        'https://translate.argosopentech.com/translate',
+        'https://libretranslate.de/translate',
+    ];
 
     for (const url of endpoints) {
         try {
@@ -67,8 +70,7 @@ async function translateText(text: string, from: AppLanguage, to: AppLanguage) {
             const data = (await resp.json()) as { translatedText?: string };
             const translated = (data.translatedText || '').trim();
             if (translated) return translated;
-        } catch {
-        }
+        } catch {}
     }
 
     try {
@@ -84,8 +86,7 @@ async function translateText(text: string, from: AppLanguage, to: AppLanguage) {
             const translated = (data.responseData?.translatedText || '').trim();
             if (translated) return translated;
         }
-    } catch {
-    }
+    } catch {}
 
     try {
         const query = new URLSearchParams({
@@ -95,7 +96,9 @@ async function translateText(text: string, from: AppLanguage, to: AppLanguage) {
             dt: 't',
             q: source,
         });
-        const resp = await fetch(`https://translate.googleapis.com/translate_a/single?${query.toString()}`);
+        const resp = await fetch(
+            `https://translate.googleapis.com/translate_a/single?${query.toString()}`,
+        );
         if (resp.ok) {
             const data = (await resp.json()) as unknown;
             if (Array.isArray(data) && Array.isArray(data[0])) {
@@ -106,10 +109,15 @@ async function translateText(text: string, from: AppLanguage, to: AppLanguage) {
                 if (translated) return translated;
             }
         }
-    } catch {
-    }
+    } catch {}
 
     throw new Error('translation_unavailable');
+}
+
+function fullName(doctor: DoctorItem) {
+    return `${doctor.lastName} ${doctor.firstName} ${doctor.middleName || ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 export default function DoctorListPage() {
@@ -126,6 +134,8 @@ export default function DoctorListPage() {
     const [search, setSearch] = useState('');
     const [togglingId, setTogglingId] = useState<string | null>(null);
 
+    const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
+
     const [isSpecialtyModalOpen, setIsSpecialtyModalOpen] = useState(false);
     const [isDoctorCreateModalOpen, setIsDoctorCreateModalOpen] = useState(false);
 
@@ -139,7 +149,6 @@ export default function DoctorListPage() {
 
     const [editingById, setEditingById] = useState<Record<string, DoctorSpecialtyLocalized>>({});
     const [editingLangById, setEditingLangById] = useState<Record<string, AppLanguage>>({});
-
     const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string | null>(null);
 
     const [savingSpecialty, setSavingSpecialty] = useState(false);
@@ -191,7 +200,7 @@ export default function DoctorListPage() {
 
         try {
             const result = await getAllDoctors(token);
-            setDoctors(result.doctors);
+            setDoctors(result.doctors || []);
         } catch (err) {
             setError(err instanceof Error ? err.message : t('doctorList.loadDoctorsFailed'));
         } finally {
@@ -204,18 +213,21 @@ export default function DoctorListPage() {
         setLoadingSpecialties(true);
         try {
             const result = await getDoctorSpecialties(token);
-            setSpecialties(result.specialties);
+            setSpecialties(result.specialties || []);
 
             const localizedMap: Record<string, DoctorSpecialtyLocalized> = {};
             const langMap: Record<string, AppLanguage> = {};
-            result.specialties.forEach((s) => {
+
+            (result.specialties || []).forEach((s) => {
                 localizedMap[s.id] = parseDoctorSpecialtyLocalized(s.name);
                 langMap[s.id] = 'ua';
             });
 
             setEditingById(localizedMap);
             setEditingLangById(langMap);
-            setSelectedSpecialtyId((prev) => prev && result.specialties.some((s) => s.id === prev) ? prev : null);
+            setSelectedSpecialtyId((prev) =>
+                prev && result.specialties.some((s) => s.id === prev) ? prev : null,
+            );
         } catch (err) {
             setError(err instanceof Error ? err.message : t('doctorList.loadSpecialtiesFailed'));
         } finally {
@@ -248,17 +260,35 @@ export default function DoctorListPage() {
         if (!q) return doctors;
 
         return doctors.filter((doctor) => {
-            const fullName = `${doctor.lastName} ${doctor.firstName} ${doctor.middleName || ''}`.toLowerCase();
-            return fullName.includes(q);
+            const full = fullName(doctor).toLowerCase();
+            return (
+                full.includes(q) ||
+                doctor.email.toLowerCase().includes(q) ||
+                (doctor.phone || '').toLowerCase().includes(q)
+            );
         });
     }, [doctors, search]);
+
+    useEffect(() => {
+        if (!selectedDoctorId) return;
+        if (!filteredDoctors.some((doctor) => doctor.id === selectedDoctorId)) {
+            setSelectedDoctorId(null);
+        }
+    }, [filteredDoctors, selectedDoctorId]);
+
+    const selectedDoctor = useMemo(
+        () => doctors.find((doctor) => doctor.id === selectedDoctorId) || null,
+        [doctors, selectedDoctorId],
+    );
 
     const selectedSpecialty = useMemo(
         () => specialties.find((s) => s.id === selectedSpecialtyId) || null,
         [specialties, selectedSpecialtyId],
     );
 
-    const selectedEditLang = selectedSpecialtyId ? editingLangById[selectedSpecialtyId] || 'ua' : 'ua';
+    const selectedEditLang = selectedSpecialtyId
+        ? editingLangById[selectedSpecialtyId] || 'ua'
+        : 'ua';
 
     async function handleToggleDoctor(doctorId: string) {
         if (!token) return;
@@ -271,7 +301,9 @@ export default function DoctorListPage() {
             const result = await toggleDoctorActive(token, doctorId);
 
             setDoctors((prev) =>
-                prev.map((item) => (item.id === doctorId ? { ...item, isActive: result.isActive } : item)),
+                prev.map((item) =>
+                    item.id === doctorId ? { ...item, isActive: result.isActive } : item,
+                ),
             );
 
             setMessage(result.message);
@@ -379,12 +411,20 @@ export default function DoctorListPage() {
                 fr: newSpecialtyByLang.fr.trim(),
             };
 
-            const res = await createDoctorSpecialty(token, serializeDoctorSpecialtyLocalized(payload));
+            const res = await createDoctorSpecialty(
+                token,
+                serializeDoctorSpecialtyLocalized(payload),
+            );
 
             setNewSpecialtyByLang(emptyDoctorSpecialtyLocalized());
             setNewSpecialtyLang('ua');
             setSelectedSpecialtyId(res.specialty.id);
-            setMessage(`${t('doctorList.specialtyAdded')}: "${pickDoctorSpecialtyByLanguage(res.specialty.name, language)}"`);
+            setMessage(
+                `${t('doctorList.specialtyAdded')}: "${pickDoctorSpecialtyByLanguage(
+                    res.specialty.name,
+                    language,
+                )}"`,
+            );
 
             await loadSpecialties();
         } catch (err) {
@@ -399,7 +439,9 @@ export default function DoctorListPage() {
         const draft = editingById[id];
         if (!draft) return;
 
-        const fallbackName = draft.ua.trim() || draft.en.trim() || draft.de.trim() || draft.fr.trim();
+        const fallbackName =
+            draft.ua.trim() || draft.en.trim() || draft.de.trim() || draft.fr.trim();
+
         if (!fallbackName) return;
 
         setSavingSpecialtyId(id);
@@ -411,8 +453,19 @@ export default function DoctorListPage() {
                 fr: draft.fr.trim(),
             };
 
-            const res = await updateDoctorSpecialty(token, id, serializeDoctorSpecialtyLocalized(payload));
-            setMessage(`${t('doctorList.specialtyUpdated')}: ${pickDoctorSpecialtyByLanguage(res.specialty.name, language)}`);
+            const res = await updateDoctorSpecialty(
+                token,
+                id,
+                serializeDoctorSpecialtyLocalized(payload),
+            );
+
+            setMessage(
+                `${t('doctorList.specialtyUpdated')}: ${pickDoctorSpecialtyByLanguage(
+                    res.specialty.name,
+                    language,
+                )}`,
+            );
+
             await loadSpecialties();
         } catch (err) {
             setError(err instanceof Error ? err.message : t('doctorList.updateSpecialtyFailed'));
@@ -440,18 +493,30 @@ export default function DoctorListPage() {
         }
     }
 
+    function openProfile(doctor: DoctorItem) {
+        navigate(`/admin/doctors/${doctor.id}`);
+    }
+
     return (
         <div className="page-shell doctor-list-page">
             <div className="container doctor-list-page__container">
                 <div className="doctor-list-page__content">
                     {error && (
                         <div className="doctor-list-page__top-alert">
-                            <AlertToast message={error} variant="error" onClose={() => setError('')} />
+                            <AlertToast
+                                message={error}
+                                variant="error"
+                                onClose={() => setError('')}
+                            />
                         </div>
                     )}
                     {message && (
                         <div className="doctor-list-page__top-alert">
-                            <AlertToast message={message} variant="success" onClose={() => setMessage('')} />
+                            <AlertToast
+                                message={message}
+                                variant="success"
+                                onClose={() => setMessage('')}
+                            />
                         </div>
                     )}
 
@@ -461,9 +526,14 @@ export default function DoctorListPage() {
                         {isAllowed && (
                             <>
                                 <div className="doctor-list-page__toolbar">
-                                    <button type="button" className="doctor-list-page__toolbar-btn" onClick={openSpecialtiesModal}>
+                                    <button
+                                        type="button"
+                                        className="doctor-list-page__toolbar-btn"
+                                        onClick={openSpecialtiesModal}
+                                    >
                                         {t('doctorList.createSpecialties')}
                                     </button>
+
                                     <button
                                         type="button"
                                         className="doctor-list-page__toolbar-btn doctor-list-page__toolbar-btn--primary"
@@ -481,23 +551,62 @@ export default function DoctorListPage() {
                                         onChange={(e) => setSearch(e.target.value)}
                                     />
                                 </div>
+
+                                {selectedDoctor && (
+                                    <div className="doctor-list-page__selected-actions">
+                                        <button
+                                            type="button"
+                                            className="doctor-list-page__action-btn doctor-list-page__action-btn--danger"
+                                            onClick={() => handleToggleDoctor(selectedDoctor.id)}
+                                            disabled={togglingId === selectedDoctor.id}
+                                        >
+                                            {selectedDoctor.isActive
+                                                ? t('doctorList.deactivate')
+                                                : t('doctorList.activate')}
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            className="doctor-list-page__action-btn doctor-list-page__action-btn--primary"
+                                            onClick={() => openProfile(selectedDoctor)}
+                                        >
+                                            {t('doctorList.profile')}
+                                        </button>
+                                    </div>
+                                )}
                             </>
                         )}
 
                         {!isAllowed ? (
-                            <div className="doctor-list-page__blocked">{t('doctorList.blocked')}</div>
+                            <div className="doctor-list-page__blocked">
+                                {t('doctorList.blocked')}
+                            </div>
                         ) : loading ? (
-                            <div className="doctor-list-page__loading">{t('doctorList.loading')}</div>
+                            <div className="doctor-list-page__loader" />
+                        ) : filteredDoctors.length === 0 ? (
+                            <div className="doctor-list-page__empty">
+                                {t('doctorList.empty')}
+                            </div>
                         ) : (
                             <div className="doctor-list-page__list">
                                 {filteredDoctors.map((doctor) => (
-                                    <article key={doctor.id} className="doctor-list-page__item">
+                                    <article
+                                        key={doctor.id}
+                                        className={`doctor-list-page__item ${
+                                            selectedDoctorId === doctor.id ? 'is-selected' : ''
+                                        }`}
+                                        onClick={() => setSelectedDoctorId(doctor.id)}
+                                    >
                                         <div className="doctor-list-page__left">
                                             {doctor.hasAvatar ? (
                                                 <img
                                                     className="doctor-list-page__mini-avatar"
-                                                    src={buildDoctorAvatarUrl(doctor.id, 'sm', doctor.avatarVersion)}
-                                                    alt={`${doctor.lastName} ${doctor.firstName}`}
+                                                    src={buildDoctorAvatarUrl(
+                                                        doctor.id,
+                                                        'sm',
+                                                        doctor.avatarVersion,
+                                                    )}
+                                                    alt={fullName(doctor)}
                                                     loading="lazy"
                                                     decoding="async"
                                                 />
@@ -509,10 +618,12 @@ export default function DoctorListPage() {
 
                                             <div className="doctor-list-page__meta">
                                                 <h3>
-                                                    {doctor.lastName} {doctor.firstName} {doctor.middleName || ''}
+                                                    {fullName(doctor)}
                                                     <span
                                                         className={`doctor-list-page__status-dot ${
-                                                            doctor.isActive ? 'is-active' : 'is-inactive'
+                                                            doctor.isActive
+                                                                ? 'is-active'
+                                                                : 'is-inactive'
                                                         }`}
                                                     />
                                                 </h3>
@@ -520,164 +631,189 @@ export default function DoctorListPage() {
                                                 <p>{doctor.phone}</p>
                                             </div>
                                         </div>
-
-                                        <div className="doctor-list-page__actions">
-                                            <button
-                                                type="button"
-                                                className="doctor-list-page__action-btn"
-                                                onClick={() => handleToggleDoctor(doctor.id)}
-                                                disabled={togglingId === doctor.id}
-                                            >
-                                                {togglingId === doctor.id
-                                                    ? t('doctorList.processing')
-                                                    : doctor.isActive
-                                                        ? t('doctorList.deactivate')
-                                                        : t('doctorList.activate')}
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                className="doctor-list-page__action-btn"
-                                                onClick={() => navigate('/admin/doctors/schedule')}
-                                            >
-                                                Керування графіком
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                className="doctor-list-page__action-btn"
-                                                onClick={() => navigate(`/admin/doctors/${doctor.id}`)}
-                                            >
-                                                {t('doctorList.profile')}
-                                            </button>
-                                        </div>
                                     </article>
                                 ))}
-
-                                {!filteredDoctors.length && <div className="doctor-list-page__empty">{t('doctorList.emptySearch')}</div>}
                             </div>
                         )}
                     </section>
                 </div>
             </div>
 
+            {isDoctorCreateModalOpen && (
+                <div
+                    className="doctor-list-page__modal-backdrop doctor-list-page__modal-backdrop--wide is-open"
+                    onClick={closeDoctorCreateModal}
+                >
+                    <div
+                        className="doctor-list-page__modal doctor-list-page__modal--doctor"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="doctor-list-page__doctor-modal-body">
+                            <DoctorCreatePage embedded onCreated={closeDoctorCreateModal} onClose={closeDoctorCreateModal} />
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {isSpecialtyModalOpen && (
-                <div className="doctor-list-page__modal-backdrop" onClick={closeSpecialtiesModal}>
-                    <div className="doctor-list-page__modal doctor-list-page__modal--specialties" onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="doctor-list-page__modal-backdrop is-open"
+                    onClick={closeSpecialtiesModal}
+                >
+                    <div
+                        className="doctor-list-page__modal doctor-list-page__modal--specialties"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div className="doctor-list-page__modal-head doctor-list-page__modal-head--centered">
                             <h2>{t('doctorList.specialtiesTitle')}</h2>
                             <button
                                 type="button"
                                 className="doctor-list-page__close-icon"
-                                aria-label={t('doctorList.close')}
                                 onClick={closeSpecialtiesModal}
+                                aria-label={t('common.close')}
                             >
-                                <span aria-hidden="true">&times;</span>
+                                ×
                             </button>
                         </div>
 
-                        <section className="doctor-list-page__specialty-creator">
+                        <div className="doctor-list-page__specialty-creator">
                             <div className="doctor-list-page__specialty-lang-tabs">
                                 {SPECIALTY_LANGS.map((lang) => (
                                     <button
                                         key={lang}
                                         type="button"
-                                        className={['doctor-list-page__specialty-lang-btn', newSpecialtyLang === lang ? 'is-active' : ''].filter(Boolean).join(' ')}
+                                        className={`doctor-list-page__specialty-lang-btn ${
+                                            newSpecialtyLang === lang ? 'is-active' : ''
+                                        }`}
                                         onClick={() => setNewSpecialtyLang(lang)}
                                     >
                                         {langLabel[lang]}
                                     </button>
                                 ))}
+
                                 <button
                                     type="button"
                                     className="doctor-list-page__specialty-auto-btn"
-                                    onClick={() => void handleAutoTranslateNew()}
-                                    disabled={translatingNew}
+                                    onClick={handleAutoTranslateNew}
+                                    disabled={translatingNew || savingSpecialty}
                                 >
-                                    {translatingNew ? '...' : t('doctorCreate.autoTranslate')}
+                                    {translatingNew
+                                        ? t('doctorCreate.translating')
+                                        : t('doctorCreate.autoTranslate')}
                                 </button>
                             </div>
 
                             <div className="doctor-list-page__specialty-creator-row">
                                 <input
                                     value={newSpecialtyByLang[newSpecialtyLang]}
-                                    onChange={(e) => setNewSpecialtyValue(newSpecialtyLang, e.target.value)}
+                                    onChange={(e) =>
+                                        setNewSpecialtyValue(newSpecialtyLang, e.target.value)
+                                    }
                                     placeholder={t('doctorList.newSpecialtyPlaceholder')}
-                                    autoComplete="off"
                                 />
+
                                 <button
                                     type="button"
-                                    onClick={() => void handleCreateSpecialty()}
-                                    disabled={
-                                        savingSpecialty ||
-                                        !(
-                                            newSpecialtyByLang.ua.trim() ||
-                                            newSpecialtyByLang.en.trim() ||
-                                            newSpecialtyByLang.de.trim() ||
-                                            newSpecialtyByLang.fr.trim()
-                                        )
-                                    }
+                                    onClick={handleCreateSpecialty}
+                                    disabled={savingSpecialty}
                                 >
-                                    {savingSpecialty ? '...' : t('doctorList.add')}
+                                    {savingSpecialty
+                                        ? t('doctorList.saving')
+                                        : t('doctorList.add')}
                                 </button>
                             </div>
-                        </section>
+                        </div>
 
-                        <section className="doctor-list-page__specialty-tags-wrap">
+                        <div className="doctor-list-page__specialty-tags-wrap">
                             {loadingSpecialties ? (
-                                <div className="doctor-list-page__loading">{t('doctorList.loading')}</div>
+                                <div className="doctor-list-page__loader" />
+                            ) : specialties.length === 0 ? (
+                                <div className="doctor-list-page__empty">
+                                    {t('doctorList.specialtiesEmpty')}
+                                </div>
                             ) : (
                                 <div className="doctor-list-page__specialty-tags">
                                     {specialties.map((specialty) => (
                                         <button
                                             key={specialty.id}
                                             type="button"
-                                            className={[
-                                                'doctor-list-page__specialty-tag',
-                                                selectedSpecialtyId === specialty.id ? 'is-active' : '',
-                                            ].filter(Boolean).join(' ')}
+                                            className={`doctor-list-page__specialty-tag ${
+                                                selectedSpecialtyId === specialty.id
+                                                    ? 'is-active'
+                                                    : ''
+                                            }`}
                                             onClick={() => setSelectedSpecialtyId(specialty.id)}
                                         >
-                                            {pickDoctorSpecialtyByLanguage(specialty.name, language)}
+                                            {pickDoctorSpecialtyByLanguage(
+                                                specialty.name,
+                                                language,
+                                            )}
                                         </button>
                                     ))}
                                 </div>
                             )}
-                        </section>
+                        </div>
 
                         {selectedSpecialty && (
-                            <section className="doctor-list-page__specialty-editor">
+                            <div className="doctor-list-page__specialty-editor">
                                 <div className="doctor-list-page__specialty-editor-head">
-                                    <h3>{pickDoctorSpecialtyByLanguage(selectedSpecialty.name, language)}</h3>
+                                    <h3>
+                                        {pickDoctorSpecialtyByLanguage(
+                                            selectedSpecialty.name,
+                                            language,
+                                        )}
+                                    </h3>
+
                                     <div className="doctor-list-page__specialty-lang-tabs">
                                         {SPECIALTY_LANGS.map((lang) => (
                                             <button
                                                 key={lang}
                                                 type="button"
-                                                className={[
-                                                    'doctor-list-page__specialty-lang-btn',
-                                                    selectedEditLang === lang ? 'is-active' : '',
-                                                ].filter(Boolean).join(' ')}
-                                                onClick={() => setEditingLangById((prev) => ({ ...prev, [selectedSpecialty.id]: lang }))}
+                                                className={`doctor-list-page__specialty-lang-btn ${
+                                                    selectedEditLang === lang ? 'is-active' : ''
+                                                }`}
+                                                onClick={() =>
+                                                    setEditingLangById((prev) => ({
+                                                        ...prev,
+                                                        [selectedSpecialty.id]: lang,
+                                                    }))
+                                                }
                                             >
                                                 {langLabel[lang]}
                                             </button>
                                         ))}
+
                                         <button
                                             type="button"
                                             className="doctor-list-page__specialty-auto-btn"
-                                            onClick={() => void handleAutoTranslateExisting(selectedSpecialty.id)}
-                                            disabled={translatingSpecialtyId === selectedSpecialty.id}
+                                            onClick={() =>
+                                                handleAutoTranslateExisting(selectedSpecialty.id)
+                                            }
+                                            disabled={
+                                                translatingSpecialtyId === selectedSpecialty.id ||
+                                                savingSpecialtyId === selectedSpecialty.id
+                                            }
                                         >
-                                            {translatingSpecialtyId === selectedSpecialty.id ? '...' : t('doctorCreate.autoTranslate')}
+                                            {translatingSpecialtyId === selectedSpecialty.id
+                                                ? t('doctorCreate.translating')
+                                                : t('doctorCreate.autoTranslate')}
                                         </button>
                                     </div>
                                 </div>
 
                                 <div className="doctor-list-page__specialty-editor-row">
                                     <input
-                                        value={editingById[selectedSpecialty.id]?.[selectedEditLang] ?? ''}
-                                        onChange={(e) => setExistingSpecialtyValue(selectedSpecialty.id, selectedEditLang, e.target.value)}
+                                        value={
+                                            editingById[selectedSpecialty.id]?.[selectedEditLang] ||
+                                            ''
+                                        }
+                                        onChange={(e) =>
+                                            setExistingSpecialtyValue(
+                                                selectedSpecialty.id,
+                                                selectedEditLang,
+                                                e.target.value,
+                                            )
+                                        }
                                     />
                                 </div>
 
@@ -685,67 +821,30 @@ export default function DoctorListPage() {
                                     <button
                                         type="button"
                                         className="doctor-list-page__specialty-save"
-                                        onClick={() => void handleUpdateSpecialty(selectedSpecialty.id)}
-                                        disabled={
-                                            savingSpecialtyId === selectedSpecialty.id ||
-                                            !(
-                                                editingById[selectedSpecialty.id]?.ua?.trim() ||
-                                                editingById[selectedSpecialty.id]?.en?.trim() ||
-                                                editingById[selectedSpecialty.id]?.de?.trim() ||
-                                                editingById[selectedSpecialty.id]?.fr?.trim()
-                                            )
-                                        }
+                                        onClick={() => handleUpdateSpecialty(selectedSpecialty.id)}
+                                        disabled={savingSpecialtyId === selectedSpecialty.id}
                                     >
-                                        {savingSpecialtyId === selectedSpecialty.id ? '...' : t('doctorList.save')}
+                                        {savingSpecialtyId === selectedSpecialty.id
+                                            ? t('doctorList.saving')
+                                            : t('doctorList.save')}
                                     </button>
 
                                     <button
                                         type="button"
                                         className="doctor-list-page__specialty-delete"
-                                        onClick={() => void handleDeleteSpecialty(selectedSpecialty.id)}
+                                        onClick={() => handleDeleteSpecialty(selectedSpecialty.id)}
                                         disabled={deletingSpecialtyId === selectedSpecialty.id}
                                     >
-                                        {deletingSpecialtyId === selectedSpecialty.id ? '...' : t('doctorList.delete')}
+                                        {deletingSpecialtyId === selectedSpecialty.id
+                                            ? t('doctorList.deleting')
+                                            : t('doctorList.delete')}
                                     </button>
                                 </div>
-                            </section>
+                            </div>
                         )}
                     </div>
                 </div>
             )}
-
-            <div
-                className={[
-                    'doctor-list-page__modal-backdrop',
-                    'doctor-list-page__modal-backdrop--wide',
-                    isDoctorCreateModalOpen ? 'is-open' : 'is-closed',
-                ].join(' ')}
-                onClick={closeDoctorCreateModal}
-                aria-hidden={!isDoctorCreateModalOpen}
-            >
-                <div className="doctor-list-page__modal doctor-list-page__modal--doctor" onClick={(e) => e.stopPropagation()}>
-                    <div className="doctor-list-page__modal-head doctor-list-page__modal-head--centered">
-                        <h2>{t('doctorCreate.title')}</h2>
-                        <button
-                            type="button"
-                            className="doctor-list-page__close-icon"
-                            aria-label={t('doctorList.close')}
-                            onClick={closeDoctorCreateModal}
-                        >
-                            <span aria-hidden="true">&times;</span>
-                        </button>
-                    </div>
-                    <div className="doctor-list-page__doctor-modal-body">
-                        <DoctorCreatePage
-                            embedded
-                            onCreated={() => {
-                                void loadDoctors();
-                                setIsDoctorCreateModalOpen(false);
-                            }}
-                        />
-                    </div>
-                </div>
-            </div>
         </div>
     );
 }

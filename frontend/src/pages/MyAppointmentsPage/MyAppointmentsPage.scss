@@ -1,0 +1,292 @@
+.my-appointments-page {
+  padding: 24px 0 48px;
+
+  &__container {
+    display: grid;
+    gap: 18px;
+  }
+
+  &__title {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #24324a;
+  }
+
+  &__subtitle,
+  &__state,
+  &__doctor,
+  &__label {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+
+  &__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  &__tab {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid #404040;
+    background: #fff;
+    color: #24324a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: box-shadow .18s ease, transform .18s ease, background .18s ease;
+
+    &.is-active {
+      background: #79ddc8;
+    }
+
+    &:hover {
+      box-shadow: 4px 4px 0 #1e1e1e;
+      transform: translate(-1px, -1px);
+    }
+  }
+
+  &__state {
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 24px;
+  }
+
+  &__list {
+    display: grid;
+    gap: 18px;
+  }
+
+  &__item {
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 18px;
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  &__left {
+    min-width: 0;
+  }
+
+  &__date-card {
+    min-height: 140px;
+    border: 1px solid #d7dde3;
+    background: #e7fbf2;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  &__date-day,
+  &__service,
+  &__value,
+  &__badge {
+    font-family: 'IBM Plex Mono', monospace;
+    color: #24324a;
+  }
+
+  &__date-day {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  &__date-month {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #5f6d79;
+  }
+
+  &__date-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    color: #24324a;
+  }
+
+  &__right {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  &__item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  &__item-head-main {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  &__service {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+
+  &__doctor {
+    font-size: 14px;
+  }
+
+  &__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  &__badge {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid #404040;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #fff;
+
+    &.is-booked {
+      background: #e7fbf2;
+    }
+
+    &.is-completed {
+      background: #edf6f2;
+    }
+
+    &.is-cancelled {
+      background: #ffe6e6;
+      color: #8a1f1f;
+      border-color: #cf4d4d;
+    }
+
+    &--payment.is-paid {
+      background: #dff9f1;
+    }
+
+    &--payment.is-pending {
+      background: #fff1bf;
+      color: #5b4800;
+      border-color: #d6b656;
+    }
+
+    &--payment.is-failed {
+      background: #ffe6e6;
+      color: #8a1f1f;
+      border-color: #cf4d4d;
+    }
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  &__field {
+    border: 1px solid #d7dde3;
+    background: #fff;
+    padding: 14px;
+    display: grid;
+    gap: 8px;
+
+    &--wide {
+      grid-column: 1 / -1;
+    }
+  }
+
+  &__label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  &__value {
+    font-size: 16px;
+    font-weight: 700;
+    word-break: break-word;
+  }
+}
+
+@media (max-width: 900px) {
+  .my-appointments-page {
+    &__item {
+      grid-template-columns: 1fr;
+    }
+
+    &__date-card {
+      min-height: 100px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: center;
+    }
+
+    &__date-day {
+      font-size: 28px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .my-appointments-page {
+    &__title {
+      font-size: 28px;
+    }
+
+    &__grid {
+      grid-template-columns: 1fr;
+    }
+
+    &__item {
+      padding: 14px;
+    }
+
+    &__service {
+      font-size: 22px;
+    }
+  }
+}
+
+@media (max-width: 320px) {
+  .my-appointments-page {
+    &__title {
+      font-size: 24px;
+    }
+
+    &__tab {
+      width: 100%;
+    }
+
+    &__badge {
+      width: 100%;
+    }
+
+    &__badges {
+      width: 100%;
+      justify-content: stretch;
+    }
+  }
+}

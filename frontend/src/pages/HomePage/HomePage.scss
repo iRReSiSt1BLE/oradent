@@ -9,6 +9,11 @@
   padding-top: 36px;
   padding-bottom: 28px;
 }
+.home-page__doctor-card {
+  display: grid;
+  grid-template-rows: auto 72px 44px 1fr;
+  gap: 12px;
+}
 
 .home-page__doctors-grid {
   display: grid;
@@ -252,4 +257,30 @@
   .home-page__add-button {
     width: 100%;
   }
+}
+.home-page__doctor-card {
+  display: grid;
+  grid-template-rows: auto 56px 28px auto;
+  gap: 10px;
+}
+
+.home-page__doctor-name {
+  margin: 0;
+  min-height: 56px;
+}
+
+.home-page__doctor-specialty {
+  min-height: 28px;
+}
+
+.home-page__doctor-description {
+  min-height: 0;
+}
+.home-page__doctors-grid {
+  align-items: start;
+}
+
+.home-page__doctor-card {
+  height: auto;
+  align-self: start;
 }

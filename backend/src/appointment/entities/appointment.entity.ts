@@ -7,6 +7,8 @@ import {
     UpdateDateColumn,
 } from 'typeorm';
 import { Patient } from '../../patient/entities/patient.entity';
+import { PaymentStatus } from '../../common/enums/payment-status.enum';
+import { PaymentMethod } from '../../common/enums/payment-method.enum';
 
 @Entity('appointments')
 export class Appointment {
@@ -45,4 +47,63 @@ export class Appointment {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    @Column({
+        type: 'enum',
+        enum: PaymentStatus,
+        default: PaymentStatus.PENDING,
+    })
+    paymentStatus: PaymentStatus;
+
+    @Column({
+        type: 'enum',
+        enum: PaymentMethod,
+        nullable: true,
+    })
+    paymentMethod: PaymentMethod | null;
+
+    @Column({ type: 'varchar', length: 80, nullable: true })
+    paymentProvider: string | null;
+
+    @Column({ type: 'varchar', length: 180, nullable: true })
+    paymentReference: string | null;
+
+    @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+    paidAmountUah: number | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    paidAt: Date | null;
+
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    receiptNumber: string | null;
+
+
+
+
+    @Column({ type: 'varchar', length: 32, default: 'NONE' })
+    refundStatus: 'NONE' | 'PENDING' | 'REFUNDED' | 'FAILED';
+
+    @Column({ type: 'datetime', nullable: true })
+    refundRequestedAt: Date | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    refundedAt: Date | null;
+
+    @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+    refundAmountUah: number | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    refundReference: string | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    cancelledAt: Date | null;
+
+    @Column({ type: 'varchar', length: 500, nullable: true })
+    cancelReason: string | null;
+
+    @Column({ type: 'varchar', length: 32, nullable: true })
+    cancelledByRole: string | null;
+
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    cancelledByUserId: string | null;
 }

@@ -169,7 +169,9 @@ export default function CartDrawer({
                             {tx('cart.clear', 'Очистити')}
                         </button>
                         <button type="button" onClick={onBook} disabled={!items.length}>
-                            {tx('cart.toBooking', 'До запису')}
+                            {items.length > 1
+                                ? tx('cart.toSmartBooking', 'До запису')
+                                : tx('cart.toBooking', 'До запису')}
                         </button>
                     </div>
                 </div>

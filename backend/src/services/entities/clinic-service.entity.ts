@@ -69,4 +69,5 @@ export class ClinicServiceEntity {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
 }

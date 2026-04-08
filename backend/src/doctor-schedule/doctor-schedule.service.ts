@@ -5,7 +5,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 import { DoctorWorkSchedule } from './entities/doctor-work-schedule.entity';
 import { Doctor } from '../doctor/entities/doctor.entity';
 import { Appointment } from '../appointment/entities/appointment.entity';
@@ -18,14 +18,45 @@ import { BlockDoctorSlotDto } from './dto/block-doctor-slot.dto';
 import { ClinicServiceEntity } from '../services/entities/clinic-service.entity';
 
 type BreakInterval = { start: string; end: string };
-type DayRule = { weekday: number; enabled: boolean; start: string; end: string; breaks: BreakInterval[] };
-type CycleRule = { workDays: number; offDays: number; anchorDate: string; start: string; end: string; breaks: BreakInterval[] };
+type DayRule = {
+    weekday: number;
+    enabled: boolean;
+    start: string;
+    end: string;
+    breaks: BreakInterval[];
+};
+type CycleRule = {
+    workDays: number;
+    offDays: number;
+    anchorDate: string;
+    start: string;
+    end: string;
+    breaks: BreakInterval[];
+};
 type BlockedSlot = { date: string; start: string; end: string; reason?: string };
 
 type DaySlotsResult = {
     enabled: boolean;
     reason: string;
     slots: Array<{ time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }>;
+};
+
+type DayConflictInfo = {
+    hasAppointments: boolean;
+    appointmentsCount: number;
+    appointments: Array<{
+        id: string;
+        appointmentDate: Date | null;
+        status: string;
+        patient: {
+            id: string;
+            lastName: string;
+            firstName: string;
+            middleName: string | null;
+            phone: string | null;
+        } | null;
+        serviceId: string | null;
+    }>;
 };
 
 @Injectable()
@@ -69,15 +100,25 @@ export class DoctorScheduleService {
     }
 
     private ensureTime(value: string) {
-        if (!/^\d{2}:\d{2}$/.test(value)) throw new BadRequestException('ÐÐµÐ²Ñ–Ñ€Ð½Ð¸Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ Ñ‡Ð°ÑÑƒ');
+        if (!/^\d{2}:\d{2}$/.test(value)) {
+            throw new BadRequestException('Невірний формат часу');
+        }
+
         const [h, m] = value.split(':').map(Number);
-        if (h < 0 || h > 23 || m < 0 || m > 59) throw new BadRequestException('ÐÐµÐ²Ñ–Ñ€Ð½Ð¸Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ Ñ‡Ð°ÑÑƒ');
+        if (h < 0 || h > 23 || m < 0 || m > 59) {
+            throw new BadRequestException('Невірний формат часу');
+        }
     }
 
     private ensureDate(value: string) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequestException('ÐÐµÐ²Ñ–Ñ€Ð½Ð¸Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ Ð´Ð°Ñ‚Ð¸');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            throw new BadRequestException('Невірний формат дати');
+        }
+
         const d = new Date(`${value}T00:00:00`);
-        if (Number.isNaN(d.getTime())) throw new BadRequestException('ÐÐµÐ²Ñ–Ñ€Ð½Ð¸Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ Ð´Ð°Ñ‚Ð¸');
+        if (Number.isNaN(d.getTime())) {
+            throw new BadRequestException('Невірний формат дати');
+        }
     }
 
     private timeToMinutes(value: string): number {
@@ -102,6 +143,13 @@ export class DoctorScheduleService {
         return new Date(`${key}T00:00:00`);
     }
 
+    private isSameDay(date: Date, dateIso: string) {
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}` === dateIso;
+    }
+
     private normalizeBreaks(breaks: BreakInterval[]): BreakInterval[] {
         const normalized = breaks
             .map((b) => ({ start: b.start, end: b.end }))
@@ -119,10 +167,14 @@ export class DoctorScheduleService {
                 merged.push(item);
                 continue;
             }
+
             const lastEnd = this.timeToMinutes(last.end);
             const curStart = this.timeToMinutes(item.start);
+
             if (curStart <= lastEnd) {
-                last.end = this.minutesToTime(Math.max(lastEnd, this.timeToMinutes(item.end)));
+                last.end = this.minutesToTime(
+                    Math.max(lastEnd, this.timeToMinutes(item.end)),
+                );
             } else {
                 merged.push(item);
             }
@@ -131,20 +183,31 @@ export class DoctorScheduleService {
         return merged;
     }
 
-    private validateRule(rule: { start: string; end: string; breaks: BreakInterval[] }) {
+    private validateRule(rule: {
+        start: string;
+        end: string;
+        breaks: BreakInterval[];
+    }) {
         this.ensureTime(rule.start);
         this.ensureTime(rule.end);
 
         const start = this.timeToMinutes(rule.start);
         const end = this.timeToMinutes(rule.end);
-        if (end <= start) throw new BadRequestException('ÐšÑ–Ð½ÐµÑ†ÑŒ Ð·Ð¼Ñ–Ð½Ð¸ Ð¼Ð°Ñ” Ð±ÑƒÑ‚Ð¸ Ð¿Ñ–Ð·Ð½Ñ–ÑˆÐµ Ð·Ð° Ð¿Ð¾Ñ‡Ð°Ñ‚Ð¾Ðº');
+
+        if (end <= start) {
+            throw new BadRequestException(
+                'Кінець зміни має бути пізніше за початок',
+            );
+        }
 
         const breaks = this.normalizeBreaks(rule.breaks || []);
         for (const br of breaks) {
             const bs = this.timeToMinutes(br.start);
             const be = this.timeToMinutes(br.end);
             if (bs < start || be > end) {
-                throw new BadRequestException('ÐŸÐµÑ€ÐµÑ€Ð²Ð° Ð²Ð¸Ñ…Ð¾Ð´Ð¸Ñ‚ÑŒ Ð·Ð° Ð¼ÐµÐ¶Ñ– Ñ€Ð¾Ð±Ð¾Ñ‡Ð¾Ð³Ð¾ Ñ‡Ð°ÑÑƒ');
+                throw new BadRequestException(
+                    'Перерва виходить за межі робочого часу',
+                );
             }
         }
     }
@@ -169,21 +232,25 @@ export class DoctorScheduleService {
     private ensureDateInsideBookingWindow(date: Date) {
         const { start, end } = this.getBookingWindow();
         if (date < start || date > end) {
-            throw new BadRequestException('Ð—Ð°Ð¿Ð¸Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¸Ð¹ Ð»Ð¸ÑˆÐµ Ð½Ð° 1 Ð¼Ñ–ÑÑÑ†ÑŒ Ð½Ð°Ð¿ÐµÑ€ÐµÐ´');
+            throw new BadRequestException(
+                'Запис доступний лише на 1 місяць наперед',
+            );
         }
     }
 
     private async ensureManagerAccess(currentUserId: string) {
         const user = await this.userService.findById(currentUserId);
-        if (!user) throw new ForbiddenException('ÐšÐ¾Ñ€Ð¸ÑÑ‚ÑƒÐ²Ð°Ñ‡Ð° Ð½Ðµ Ð·Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾');
+        if (!user) {
+            throw new ForbiddenException('Користувача не знайдено');
+        }
 
         if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
-            throw new ForbiddenException('Ð”Ð¾ÑÑ‚ÑƒÐ¿ Ð»Ð¸ÑˆÐµ Ð´Ð»Ñ ADMIN Ñ‚Ð° SUPER_ADMIN');
+            throw new ForbiddenException('Доступ лише для ADMIN та SUPER_ADMIN');
         }
 
         const admin = await this.adminService.findByUserId(currentUserId);
         if (!admin || !admin.isActive) {
-            throw new ForbiddenException('ÐÐ´Ð¼Ñ–Ð½Ñ–ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð° Ð´ÐµÐ°ÐºÑ‚Ð¸Ð²Ð¾Ð²Ð°Ð½Ð¾');
+            throw new ForbiddenException('Адміністратора деактивовано');
         }
 
         return user;
@@ -197,7 +264,11 @@ export class DoctorScheduleService {
             ],
             relations: ['user'],
         });
-        if (!doctor) throw new NotFoundException('Ð›Ñ–ÐºÐ°Ñ€Ñ Ð½Ðµ Ð·Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾');
+
+        if (!doctor) {
+            throw new NotFoundException('Лікаря не знайдено');
+        }
+
         return doctor;
     }
 
@@ -245,7 +316,13 @@ export class DoctorScheduleService {
     private getDayRuleForDate(schedule: DoctorWorkSchedule, dateKey: string) {
         const blockedDays = schedule.blockedDays || [];
         if (blockedDays.includes(dateKey)) {
-            return { enabled: false, start: '00:00', end: '00:00', breaks: [] as BreakInterval[], source: 'blocked-day' };
+            return {
+                enabled: false,
+                start: '00:00',
+                end: '00:00',
+                breaks: [] as BreakInterval[],
+                source: 'blocked-day',
+            };
         }
 
         const override = (schedule.dayOverrides || []).find((o) => o.date === dateKey);
@@ -265,7 +342,9 @@ export class DoctorScheduleService {
 
             const targetDate = this.dateFromKey(dateKey).getTime();
             const anchorDate = this.dateFromKey(cycle.anchorDate).getTime();
-            const diffDays = Math.floor((targetDate - anchorDate) / (1000 * 60 * 60 * 24));
+            const diffDays = Math.floor(
+                (targetDate - anchorDate) / (1000 * 60 * 60 * 24),
+            );
             const period = cycle.workDays + cycle.offDays;
             const mod = ((diffDays % period) + period) % period;
             const isWorkDay = mod < cycle.workDays;
@@ -280,10 +359,18 @@ export class DoctorScheduleService {
         }
 
         const weekday = this.dateFromKey(dateKey).getDay();
-        const weekly = (schedule.weeklyTemplate || this.defaultWeeklyTemplate()).find((d) => d.weekday === weekday);
+        const weekly = (schedule.weeklyTemplate || this.defaultWeeklyTemplate()).find(
+            (d) => d.weekday === weekday,
+        );
 
         if (!weekly) {
-            return { enabled: false, start: '00:00', end: '00:00', breaks: [] as BreakInterval[], source: 'weekly' };
+            return {
+                enabled: false,
+                start: '00:00',
+                end: '00:00',
+                breaks: [] as BreakInterval[],
+                source: 'weekly',
+            };
         }
 
         return {
@@ -334,8 +421,8 @@ export class DoctorScheduleService {
     ): Promise<Map<string, Set<string>>> {
         const appointments = await this.appointmentRepository.find({
             where: [
-                { doctorId: doctor.id, appointmentDate: Between(startDateTime, endDateTime) },
-                { doctorId: doctor.user.id, appointmentDate: Between(startDateTime, endDateTime) },
+                { doctorId: doctor.id, appointmentDate: Between(startDateTime, endDateTime) } as any,
+                { doctorId: doctor.user.id, appointmentDate: Between(startDateTime, endDateTime) } as any,
             ],
         });
 
@@ -349,10 +436,17 @@ export class DoctorScheduleService {
 
         for (const appt of appointments) {
             if (!appt.appointmentDate) continue;
+            if (appt.status === 'CANCELLED') continue;
 
             const dateKey = this.toDateKey(appt.appointmentDate);
-            const duration = appt.serviceId ? (durationsMap.get(appt.serviceId) || 20) : 20;
-            const slots = this.expandAppointmentToOccupiedSlots(appt.appointmentDate, duration, slotMinutes);
+            const duration = appt.serviceId
+                ? (durationsMap.get(appt.serviceId) || 20)
+                : 20;
+            const slots = this.expandAppointmentToOccupiedSlots(
+                appt.appointmentDate,
+                duration,
+                slotMinutes,
+            );
 
             if (!map.has(dateKey)) map.set(dateKey, new Set<string>());
             const set = map.get(dateKey)!;
@@ -428,7 +522,12 @@ export class DoctorScheduleService {
         const rangeEnd = this.dateFromKey(sorted[sorted.length - 1]);
         rangeEnd.setHours(23, 59, 59, 999);
 
-        const bookedByDate = await this.getBookedSlotsMapForRange(doctor, rangeStart, rangeEnd, schedule.slotMinutes);
+        const bookedByDate = await this.getBookedSlotsMapForRange(
+            doctor,
+            rangeStart,
+            rangeEnd,
+            schedule.slotMinutes,
+        );
 
         const result = new Map<string, DaySlotsResult>();
         for (const dateKey of dateKeys) {
@@ -437,6 +536,54 @@ export class DoctorScheduleService {
         }
 
         return result;
+    }
+
+    private async getAppointmentsForDoctorDay(doctorId: string, dateIso: string): Promise<Appointment[]> {
+        const doctor = await this.getDoctorOrThrow(doctorId);
+
+        const appointments = await this.appointmentRepository.find({
+            where: [
+                { doctorId: doctor.id } as any,
+                { doctorId: doctor.user.id } as any,
+            ],
+            relations: ['patient'],
+            order: {
+                appointmentDate: 'ASC',
+            },
+        });
+
+        return appointments.filter((appointment: Appointment) => {
+            if (!appointment.appointmentDate) return false;
+            if (appointment.status === 'CANCELLED') return false;
+            return this.isSameDay(new Date(appointment.appointmentDate), dateIso);
+        });
+    }
+
+    private async getDayConflictInfo(
+        doctorId: string,
+        dateIso: string,
+    ): Promise<DayConflictInfo> {
+        const appointments: Appointment[] = await this.getAppointmentsForDoctorDay(doctorId, dateIso);
+
+        return {
+            hasAppointments: appointments.length > 0,
+            appointmentsCount: appointments.length,
+            appointments: appointments.map((item: Appointment) => ({
+                id: item.id,
+                appointmentDate: item.appointmentDate,
+                status: item.status,
+                patient: item.patient
+                    ? {
+                        id: item.patient.id,
+                        lastName: item.patient.lastName,
+                        firstName: item.patient.firstName,
+                        middleName: item.patient.middleName,
+                        phone: item.patient.phone,
+                    }
+                    : null,
+                serviceId: item.serviceId ?? null,
+            })),
+        };
     }
 
     async ensureSlotAvailableForBooking(
@@ -454,22 +601,32 @@ export class DoctorScheduleService {
         const day = dayMap.get(dateKey);
 
         if (!day || !day.enabled) {
-            throw new BadRequestException('ÐÐ° Ñ†ÑŽ Ð´Ð°Ñ‚Ñƒ Ð·Ð°Ð¿Ð¸Ñ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¸Ð¹');
+            throw new BadRequestException('На цю дату запис недоступний');
         }
 
-        const startTime = this.minutesToTime(appointmentDate.getHours() * 60 + appointmentDate.getMinutes());
-        const needed = Math.max(1, Math.ceil(serviceDurationMinutes / schedule.slotMinutes));
+        const startTime = this.minutesToTime(
+            appointmentDate.getHours() * 60 + appointmentDate.getMinutes(),
+        );
+        const needed = Math.max(
+            1,
+            Math.ceil(serviceDurationMinutes / schedule.slotMinutes),
+        );
 
-        const freeTimes = day.slots.filter((s) => s.state === 'FREE').map((s) => s.time);
+        const freeTimes = day.slots
+            .filter((s) => s.state === 'FREE')
+            .map((s) => s.time);
+
         if (!freeTimes.includes(startTime)) {
-            throw new BadRequestException('ÐžÐ±Ñ€Ð°Ð½Ð¸Ð¹ Ñ‡Ð°Ñ Ð²Ð¶Ðµ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¸Ð¹');
+            throw new BadRequestException('Обраний час вже недоступний');
         }
 
         const startMinute = this.timeToMinutes(startTime);
         for (let i = 0; i < needed; i += 1) {
             const check = this.minutesToTime(startMinute + i * schedule.slotMinutes);
             if (!freeTimes.includes(check)) {
-                throw new BadRequestException('Ð§Ð°Ñ Ð¿ÐµÑ€ÐµÑ‚Ð¸Ð½Ð°Ñ”Ñ‚ÑŒÑÑ Ð· Ñ–Ð½ÑˆÐ¸Ð¼ Ð·Ð°Ð¿Ð¸ÑÐ¾Ð¼ Ð°Ð±Ð¾ Ð±Ð»Ð¾ÐºÑƒÐ²Ð°Ð½Ð½ÑÐ¼');
+                throw new BadRequestException(
+                    'Час перетинається з іншим записом або блокуванням',
+                );
             }
         }
     }
@@ -495,13 +652,41 @@ export class DoctorScheduleService {
         };
     }
 
-    async updateSchedule(currentUserId: string, doctorId: string, dto: UpdateDoctorScheduleDto) {
+    async updateSchedule(
+        currentUserId: string,
+        doctorId: string,
+        dto: UpdateDoctorScheduleDto,
+    ) {
         await this.ensureManagerAccess(currentUserId);
         const doctor = await this.getDoctorOrThrow(doctorId);
         const schedule = await this.getOrCreateSchedule(doctor);
 
         if (dto.timezone) schedule.timezone = dto.timezone.trim();
-        if (dto.slotMinutes) schedule.slotMinutes = dto.slotMinutes;
+
+        if (dto.slotMinutes && dto.slotMinutes !== schedule.slotMinutes) {
+            const allAppointments = await this.appointmentRepository.find({
+                where: [
+                    { doctorId: doctor.id } as any,
+                    { doctorId: doctor.user.id } as any,
+                ],
+            });
+
+            const hasFutureAppointments = allAppointments.some((item) => {
+                if (!item.appointmentDate) return false;
+                if (item.status === 'CANCELLED') return false;
+                return new Date(item.appointmentDate).getTime() >= Date.now();
+            });
+
+            if (hasFutureAppointments) {
+                throw new BadRequestException(
+                    JSON.stringify({
+                        code: 'GLOBAL_SLOT_STEP_CHANGE_FORBIDDEN',
+                    }),
+                );
+            }
+
+            schedule.slotMinutes = dto.slotMinutes;
+        }
 
         schedule.templateType = dto.templateType;
 
@@ -532,26 +717,50 @@ export class DoctorScheduleService {
         }
 
         if (dto.dayOverrides) {
-            dto.dayOverrides.forEach((o) => {
-                this.ensureDate(o.date);
-                this.validateRule(o);
-            });
-
-            const nextOverrides = (schedule.dayOverrides || []).filter(
-                (existing) => !dto.dayOverrides?.some((incoming) => incoming.date === existing.date),
-            );
+            const existingOverrides = Array.isArray(schedule.dayOverrides)
+                ? [...schedule.dayOverrides]
+                : [];
 
             for (const o of dto.dayOverrides) {
-                nextOverrides.push({
+                this.ensureDate(o.date);
+                this.validateRule(o);
+
+                const makingDayOff = o.enabled === false;
+                if (makingDayOff) {
+                    const conflicts = await this.getDayConflictInfo(doctor.id, o.date);
+                    if (conflicts.hasAppointments) {
+                        throw new BadRequestException(
+                            JSON.stringify({
+                                code: 'DAY_HAS_APPOINTMENTS',
+                                date: o.date,
+                                appointmentsCount: conflicts.appointmentsCount,
+                            }),
+                        );
+                    }
+                }
+
+                const normalizedOverride = {
                     date: o.date,
                     enabled: o.enabled,
                     start: o.start,
                     end: o.end,
                     breaks: this.normalizeBreaks(o.breaks || []),
-                });
+                };
+
+                const existingIndex = existingOverrides.findIndex(
+                    (item) => item.date === o.date,
+                );
+
+                if (existingIndex >= 0) {
+                    existingOverrides[existingIndex] = normalizedOverride;
+                } else {
+                    existingOverrides.push(normalizedOverride);
+                }
             }
 
-            schedule.dayOverrides = nextOverrides.sort((a, b) => a.date.localeCompare(b.date));
+            schedule.dayOverrides = existingOverrides.sort((a, b) =>
+                a.date.localeCompare(b.date),
+            );
         }
 
         schedule.updatedByUserId = currentUserId;
@@ -559,17 +768,32 @@ export class DoctorScheduleService {
 
         return {
             ok: true,
-            message: 'Ð“Ñ€Ð°Ñ„Ñ–Ðº Ð»Ñ–ÐºÐ°Ñ€Ñ Ð¾Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾',
+            message: 'Графік лікаря оновлено',
             updatedAt: saved.updatedAt,
         };
     }
 
-    async blockDay(currentUserId: string, doctorId: string, dto: BlockDoctorDayDto) {
+    async blockDay(
+        currentUserId: string,
+        doctorId: string,
+        dto: BlockDoctorDayDto,
+    ) {
         await this.ensureManagerAccess(currentUserId);
         this.ensureDate(dto.date);
 
         const doctor = await this.getDoctorOrThrow(doctorId);
         const schedule = await this.getOrCreateSchedule(doctor);
+
+        const conflicts = await this.getDayConflictInfo(doctor.id, dto.date);
+        if (conflicts.hasAppointments) {
+            throw new BadRequestException(
+                JSON.stringify({
+                    code: 'DAY_HAS_APPOINTMENTS',
+                    date: dto.date,
+                    appointmentsCount: conflicts.appointmentsCount,
+                }),
+            );
+        }
 
         const list = new Set(schedule.blockedDays || []);
         list.add(dto.date);
@@ -580,7 +804,7 @@ export class DoctorScheduleService {
 
         return {
             ok: true,
-            message: 'Ð”ÐµÐ½ÑŒ Ð·Ð°Ð±Ð»Ð¾ÐºÐ¾Ð²Ð°Ð½Ð¾',
+            message: 'День заблоковано',
             blockedDays: schedule.blockedDays,
         };
     }
@@ -599,12 +823,16 @@ export class DoctorScheduleService {
 
         return {
             ok: true,
-            message: 'Ð‘Ð»Ð¾ÐºÑƒÐ²Ð°Ð½Ð½Ñ Ð´Ð½Ñ Ð·Ð½ÑÑ‚Ð¾',
+            message: 'Блокування дня знято',
             blockedDays: schedule.blockedDays,
         };
     }
 
-    async blockSlot(currentUserId: string, doctorId: string, dto: BlockDoctorSlotDto) {
+    async blockSlot(
+        currentUserId: string,
+        doctorId: string,
+        dto: BlockDoctorSlotDto,
+    ) {
         await this.ensureManagerAccess(currentUserId);
         this.ensureDate(dto.date);
         this.ensureTime(dto.start);
@@ -612,13 +840,19 @@ export class DoctorScheduleService {
 
         const start = this.timeToMinutes(dto.start);
         const end = this.timeToMinutes(dto.end);
-        if (end <= start) throw new BadRequestException('ÐšÑ–Ð½ÐµÑ†ÑŒ Ñ–Ð½Ñ‚ÐµÑ€Ð²Ð°Ð»Ñƒ Ð¼Ð°Ñ” Ð±ÑƒÑ‚Ð¸ Ð¿Ñ–Ð·Ð½Ñ–ÑˆÐµ Ð·Ð° Ð¿Ð¾Ñ‡Ð°Ñ‚Ð¾Ðº');
+        if (end <= start) {
+            throw new BadRequestException(
+                'Кінець інтервалу має бути пізніше за початок',
+            );
+        }
 
         const doctor = await this.getDoctorOrThrow(doctorId);
         const schedule = await this.getOrCreateSchedule(doctor);
 
         const slots = schedule.blockedSlots || [];
-        const exists = slots.some((s) => s.date === dto.date && s.start === dto.start && s.end === dto.end);
+        const exists = slots.some(
+            (s) => s.date === dto.date && s.start === dto.start && s.end === dto.end,
+        );
 
         if (!exists) {
             slots.push({
@@ -630,7 +864,9 @@ export class DoctorScheduleService {
         }
 
         schedule.blockedSlots = slots.sort((a, b) => {
-            if (a.date === b.date) return this.timeToMinutes(a.start) - this.timeToMinutes(b.start);
+            if (a.date === b.date) {
+                return this.timeToMinutes(a.start) - this.timeToMinutes(b.start);
+            }
             return a.date.localeCompare(b.date);
         });
 
@@ -639,12 +875,18 @@ export class DoctorScheduleService {
 
         return {
             ok: true,
-            message: 'Ð†Ð½Ñ‚ÐµÑ€Ð²Ð°Ð» Ñ‡Ð°ÑÑƒ Ð·Ð°Ð±Ð»Ð¾ÐºÐ¾Ð²Ð°Ð½Ð¾',
+            message: 'Інтервал часу заблоковано',
             blockedSlots: schedule.blockedSlots,
         };
     }
 
-    async unblockSlot(currentUserId: string, doctorId: string, date: string, start: string, end: string) {
+    async unblockSlot(
+        currentUserId: string,
+        doctorId: string,
+        date: string,
+        start: string,
+        end: string,
+    ) {
         await this.ensureManagerAccess(currentUserId);
         this.ensureDate(date);
         this.ensureTime(start);
@@ -661,14 +903,34 @@ export class DoctorScheduleService {
 
         return {
             ok: true,
-            message: 'Ð‘Ð»Ð¾ÐºÑƒÐ²Ð°Ð½Ð½Ñ Ñ–Ð½Ñ‚ÐµÑ€Ð²Ð°Ð»Ñƒ Ð·Ð½ÑÑ‚Ð¾',
+            message: 'Блокування інтервалу знято',
             blockedSlots: schedule.blockedSlots,
+        };
+    }
+
+    async getDayConflicts(
+        currentUserId: string,
+        doctorId: string,
+        dateIso: string,
+    ) {
+        await this.ensureManagerAccess(currentUserId);
+        this.ensureDate(dateIso);
+
+        const doctor = await this.getDoctorOrThrow(doctorId);
+        const info = await this.getDayConflictInfo(doctor.id, dateIso);
+
+        return {
+            ok: true,
+            date: dateIso,
+            ...info,
         };
     }
 
     async getMonth(doctorId: string, month: string) {
         if (!/^\d{4}-\d{2}$/.test(month)) {
-            throw new BadRequestException('ÐÐµÐ²Ñ–Ñ€Ð½Ð¸Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ month. ÐŸÐ¾Ñ‚Ñ€Ñ–Ð±Ð½Ð¾ YYYY-MM');
+            throw new BadRequestException(
+                'Невірний формат month. Потрібно YYYY-MM',
+            );
         }
 
         const doctor = await this.getDoctorOrThrow(doctorId);
@@ -679,24 +941,32 @@ export class DoctorScheduleService {
         const endDate = new Date(year, mon, 0);
 
         const keys: string[] = [];
-        for (let d = new Date(startDate); d <= endDate; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+        for (
+            let d = new Date(startDate);
+            d <= endDate;
+            d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+        ) {
             keys.push(this.toDateKey(d));
         }
 
         const daysMap = await this.buildDaySlotsByDateMap(doctor, schedule, keys);
 
-        const days = keys.map((dateKey) => {
-            const day = daysMap.get(dateKey);
-            const total = day?.slots.length || 0;
-            const free = (day?.slots || []).filter((s) => s.state === 'FREE').length;
+        const days = await Promise.all(
+            keys.map(async (dateKey) => {
+                const day = daysMap.get(dateKey);
+                const total = day?.slots.length || 0;
+                const free = (day?.slots || []).filter((s) => s.state === 'FREE').length;
+                const conflictInfo = await this.getDayConflictInfo(doctor.id, dateKey);
 
-            return {
-                date: dateKey,
-                isWorking: Boolean(day?.enabled),
-                freeSlots: free,
-                totalSlots: total,
-            };
-        });
+                return {
+                    date: dateKey,
+                    isWorking: Boolean(day?.enabled),
+                    freeSlots: free,
+                    totalSlots: total,
+                    hasConflicts: conflictInfo.hasAppointments && !Boolean(day?.enabled),
+                };
+            }),
+        );
 
         return {
             ok: true,
@@ -715,7 +985,12 @@ export class DoctorScheduleService {
         const schedule = await this.getOrCreateSchedule(doctor);
 
         const dayMap = await this.buildDaySlotsByDateMap(doctor, schedule, [date]);
-        const result = dayMap.get(date) || { enabled: false, reason: 'out-of-window', slots: [] as Array<{ time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }> };
+        const result =
+            dayMap.get(date) || {
+                enabled: false,
+                reason: 'out-of-window',
+                slots: [] as Array<{ time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }>,
+            };
 
         return {
             ok: true,

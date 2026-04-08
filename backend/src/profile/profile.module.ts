@@ -20,6 +20,7 @@ import { DoctorModule } from '../doctor/doctor.module';
         TelegramModule,
         AdminModule,
         DoctorModule,
+
     ],
     controllers: [ProfileController],
     providers: [ProfileService],

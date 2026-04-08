@@ -18,6 +18,9 @@ import DoctorAppointmentDetailPage from '../../pages/DoctorAppointmentDetailPage
 import DoctorScheduleAdminPage from '../../pages/DoctorScheduleAdminPage/DoctorScheduleAdminPage';
 import DoctorSchedulePage from '../../pages/DoctorSchedulePage/DoctorSchedulePage';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
+import SmartAppointmentPage from '../../pages/SmartAppointmentPage/SmartAppointmentPage';
+import MyAppointmentsPage from '../../pages/MyAppointmentsPage/MyAppointmentsPage';
+import AdminPatientsPage from '../../pages/AdminPatientsPage/AdminPatientsPage';
 
 function SuperAdminOnly() {
     const token = getToken();
@@ -63,7 +66,8 @@ export const router = createBrowserRouter([
             { path: 'login/success', element: <LoginSuccessPage /> },
             { path: 'profile', element: <RoleBasedProfilePage /> },
             { path: 'appointment', element: <AppointmentPage /> },
-
+            { path: 'smart-appointment', element: <SmartAppointmentPage /> },
+            { path: 'my-appointments', element: <MyAppointmentsPage /> },
             {
                 element: <DoctorOnly />,
                 children: [
@@ -79,6 +83,7 @@ export const router = createBrowserRouter([
                     { path: 'admin/doctors/list', element: <DoctorListPage /> },
                     { path: 'admin/doctors/schedule', element: <DoctorScheduleAdminPage /> },
                     { path: 'admin/doctors/:doctorId', element: <DoctorDetailPage /> },
+                    { path: 'admin/patients', element: <AdminPatientsPage /> },
                 ],
             },
 

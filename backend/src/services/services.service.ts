@@ -15,6 +15,7 @@ import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { DoctorSpecialty } from '../doctor/entities/doctor-specialty.entity';
+import { Doctor } from '../doctor/entities/doctor.entity';
 
 @Injectable()
 export class ServicesService {
@@ -27,6 +28,8 @@ export class ServicesService {
         private readonly specialtyRepository: Repository<DoctorSpecialty>,
         private readonly userService: UserService,
         private readonly adminService: AdminService,
+        @InjectRepository(Doctor)
+        private readonly doctorRepository: Repository<Doctor>,
     ) {}
 
     private normalizeName(name: string): string {
@@ -486,9 +489,10 @@ export class ServicesService {
         };
     }
 
-    async ensureBookable(serviceId: string, doctorId?: string | null): Promise<ClinicServiceEntity> {
+    async ensureBookable(serviceId: string, doctorId: string): Promise<void> {
         const service = await this.clinicServiceRepository.findOne({
             where: { id: serviceId },
+            relations: ['category', 'specialties'],
         });
 
         if (!service) {
@@ -496,38 +500,58 @@ export class ServicesService {
         }
 
         if (!service.isActive) {
-            throw new BadRequestException('Послуга неактивна');
+            throw new BadRequestException('Послуга деактивована');
         }
 
         if (!service.category?.isActive) {
-            throw new BadRequestException('Категорія послуги неактивна');
+            throw new BadRequestException('Категорія послуги деактивована');
         }
 
-        if (doctorId) {
-            const doctor = await this.userService.findById(doctorId);
+        const doctor = await this.doctorRepository.findOne({
+            where: [
+                { id: doctorId },
+                { user: { id: doctorId } },
+            ],
+            relations: ['user'],
+        });
 
-            if (!doctor || doctor.role !== UserRole.DOCTOR) {
-                throw new BadRequestException('Лікаря не знайдено');
-            }
+        if (!doctor) {
+            throw new BadRequestException('Лікаря не знайдено');
+        }
 
-            if (Array.isArray(service.specialties) && service.specialties.length > 0) {
-                const doctorSpecialtiesRaw = Array.isArray((doctor as any).specialties)
-                    ? ((doctor as any).specialties as string[])
+        if (!doctor.isActive) {
+            throw new BadRequestException('Лікаря деактивовано');
+        }
+
+        const serviceSpecialtyNames: string[] =
+            Array.isArray(service.specialties)
+                ? service.specialties
+                    .map((s: any) => {
+                        if (typeof s === 'string') return s.trim().toLowerCase();
+                        if (s && typeof s.name === 'string') return s.name.trim().toLowerCase();
+                        return '';
+                    })
+                    .filter(Boolean)
+                : [];
+
+        const doctorSpecialtyNames: string[] =
+            Array.isArray(doctor.specialties)
+                ? doctor.specialties
+                    .map((s) => (typeof s === 'string' ? s.trim().toLowerCase() : ''))
+                    .filter(Boolean)
+                : doctor.specialty
+                    ? [doctor.specialty.trim().toLowerCase()]
                     : [];
 
-                const doctorSpecialties = doctorSpecialtiesRaw.map((item) => item.trim().toLowerCase());
+        if (serviceSpecialtyNames.length > 0) {
+            const allowed = doctorSpecialtyNames.some((name) =>
+                serviceSpecialtyNames.includes(name),
+            );
 
-                const hasMatch = service.specialties.some((specialty) =>
-                    doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
-                );
-
-                if (!hasMatch) {
-                    throw new BadRequestException('Обраний лікар не може надавати цю послугу');
-                }
+            if (!allowed) {
+                throw new BadRequestException('Обраний лікар не може надавати цю послугу');
             }
         }
-
-        return service;
     }
 
     async getSpecialtiesForAssignment(currentUserId: string) {

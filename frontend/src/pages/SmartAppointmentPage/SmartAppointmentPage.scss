@@ -1,0 +1,937 @@
+.smart-appointment-page {
+  padding: 24px 0 48px;
+
+  &__container {
+    display: grid;
+    gap: 20px;
+  }
+
+  &__loading {
+    padding: 48px 16px;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    color: #5b6671;
+  }
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  &__title {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 34px;
+    font-weight: 700;
+    color: #24324a;
+    letter-spacing: 0.02em;
+  }
+
+  &__subtitle {
+    margin: 0;
+    max-width: 760px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #7b8591;
+  }
+
+  &__header-actions,
+  &__entry-actions,
+  &__modal-actions,
+  &__cart-actions,
+  &__confirm-row,
+  &__actions,
+  &__recommended-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  &__entry-actions,
+  &__modal-actions,
+  &__cart-actions,
+  &__actions,
+  &__recommended-actions {
+    justify-content: center;
+  }
+
+  &__confirm-row {
+    justify-content: flex-end;
+  }
+
+  &__main {
+    display: grid;
+    gap: 20px;
+  }
+
+  &__panel {
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 24px;
+    display: grid;
+    gap: 18px;
+
+    h2 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 28px;
+      font-weight: 600;
+      color: #24324a;
+    }
+  }
+
+  &__empty,
+  &__state {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+
+  &__cart-list,
+  &__plans,
+  &__confirm-list,
+  &__steps {
+    display: grid;
+    gap: 14px;
+  }
+
+  &__cart-item,
+  &__plan,
+  &__confirm-item {
+    border: 1px solid #d7dde3;
+    background: #fff;
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  &__cart-main strong,
+  &__confirm-item strong,
+  &__step-top strong,
+  &__picked-name,
+  &__step-doctor-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    font-weight: 600;
+    color: #24324a;
+  }
+
+  &__cart-meta,
+  &__picked-time,
+  &__step-time,
+  &__plan-window,
+  &__step-duration,
+  &__step-doctor-meta span,
+  &__verify-copy span,
+  &__payment-note,
+  &__calendar-head p {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+
+  &__cart-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__summary {
+    display: grid;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #d7dde3;
+
+    p {
+      margin: 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: #24324a;
+    }
+
+    strong {
+      font-weight: 700;
+    }
+  }
+
+  &__primary,
+  &__secondary,
+  &__verify-button,
+  &__doctor-chip,
+  &__slot,
+  &__day {
+    font-family: 'IBM Plex Mono', monospace;
+    transition:
+            box-shadow 0.18s ease,
+            transform 0.18s ease,
+            opacity 0.18s ease,
+            background 0.18s ease,
+            border-color 0.18s ease;
+  }
+
+  &__slot span{
+     margin-left: 50%;
+    transform: translateX(-50%);
+  }
+  &__primary,
+  &__secondary,
+  &__verify-button {
+    min-height: 44px;
+    height: 44px;
+    min-width: 220px;
+    padding: 0 18px;
+    border: 1px solid #404040;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  &__primary,
+  &__verify-button {
+    background: #7fd1c4;
+    color: #24324a;
+  }
+
+  &__secondary {
+    background: #fff;
+    color: #24324a;
+  }
+
+  &__primary:hover:not(:disabled),
+  &__verify-button:hover:not(:disabled),
+  &__secondary:hover:not(:disabled),
+  &__slot:hover:not(:disabled),
+  &__day:hover:not(:disabled),
+  &__doctor-chip:hover:not(:disabled) {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__primary:disabled,
+  &__secondary:disabled,
+  &__verify-button:disabled,
+  &__doctor-chip:disabled,
+  &__slot:disabled,
+  &__day:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &__picked,
+  &__step-doctor-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  &__picked-meta,
+  &__step-doctor-meta {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  &__picked-name,
+  &__step-doctor-name {
+    display: block;
+  }
+
+  &__picked-time,
+  &__step-time {
+    display: block;
+  }
+
+  &__avatar {
+    width: 44px;
+    height: 44px;
+    border: 1px solid #d7dde3;
+    object-fit: cover;
+    flex: 0 0 44px;
+    background: #f5f7f9;
+  }
+
+  &__avatar--placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #24324a;
+  }
+
+  &__modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 24, 32, 0.42);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    z-index: 80;
+  }
+
+  &__modal {
+    width: min(980px, 100%);
+    max-height: min(88vh, 900px);
+    overflow: auto;
+    background: #fff;
+    padding: 28px;
+    display: grid;
+    gap: 18px;
+    border: 1px solid #404040;
+    box-shadow: 8px 8px 0 #1e1e1e;
+  }
+
+  &__modal--wide {
+    width: min(1040px, 100%);
+  }
+
+  &__modal--phone {
+    width: min(760px, 100%);
+    max-height: min(86vh, 760px);
+  }
+
+  &__modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    border-bottom: 1px solid #d7dde3;
+    padding-bottom: 14px;
+
+    h3 {
+      margin: 0 0 6px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 30px;
+      font-weight: 600;
+      color: #24324a;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #7b8591;
+      line-height: 1.5;
+    }
+  }
+
+  &__modal-body {
+    display: grid;
+    gap: 20px;
+
+    > h3 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 28px;
+      font-weight: 700;
+      color: #24324a;
+    }
+  }
+
+  &__modal-close {
+    width: 48px;
+    height: 48px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    cursor: pointer;
+    font-size: 24px;
+    color: #24324a;
+    flex: 0 0 48px;
+  }
+
+  &__plan-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+
+    h3 {
+      margin: 0 0 4px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      color: #24324a;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #7b8591;
+    }
+  }
+
+  &__plan-meta {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+
+    span {
+      border: 1px solid #d7dde3;
+      background: #f7f7f5;
+      padding: 6px 10px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #24324a;
+    }
+  }
+
+  &__step {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 16px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    padding: 16px;
+    align-items: start;
+  }
+
+  &__step-index {
+    width: 56px;
+    height: 56px;
+    border: 1px solid #d7dde3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: #24324a;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  &__step-body {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__step-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  &__doctor-strip {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    justify-content: flex-start;
+    align-items: center;
+  }
+
+  &__doctor-chip {
+    min-width: 280px;
+    padding: 12px 14px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    cursor: pointer;
+    color: #24324a;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    border-radius: 10px;
+  }
+
+  &__doctor-chip .smart-appointment-page__avatar {
+    border-radius: 10px;
+    width: 52px;
+    height: 52px;
+    flex-basis: 52px;
+  }
+
+  &__doctor-chip.is-active {
+    background: #eefaf7;
+    border-color: #7fd1c4;
+  }
+
+  &__schedule-layout {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 18px;
+  }
+
+  &__calendar-box,
+  &__slots-box {
+    border: 1px solid #d7dde3;
+    background: #fbfbfa;
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+  }
+
+  &__calendar-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+
+    h3 {
+      margin: 0;
+      font-size: 20px;
+      color: #24324a;
+    }
+
+    input {
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid #404040;
+      background: #fff;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: #24324a;
+    }
+  }
+
+  &__calendar-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  &__weekday-row {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(52px, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+    min-width: 420px;
+  }
+
+  &__weekday-cell {
+    min-height: 28px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #5f6d79;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  &__month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(52px, 1fr));
+    gap: 8px;
+    min-width: 420px;
+  }
+
+  &__day {
+    min-height: 78px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    cursor: pointer;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  &__day.is-selected {
+    border-color: #404040;
+    background: #eefaf7;
+  }
+
+  &__day.is-free {
+    background: #e7fbf2;
+  }
+
+  &__day.is-busy {
+    background: #edf6f2;
+  }
+
+  &__day.is-off {
+    background: #f3f3f1;
+    opacity: 0.7;
+  }
+
+  &__day--empty {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  &__day-number {
+    font-size: 14px;
+    font-weight: 700;
+    color: #24324a;
+  }
+
+  &__day-meta {
+    font-size: 11px;
+    color: #7b8591;
+  }
+
+  &__slots {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  &__slot {
+    min-height: 48px;
+    padding: 0 14px;
+    border: 1px solid #9fd8cb;
+    background: #79ddc8;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    box-sizing: border-box;
+    font-size: 13px;
+    font-weight: 600;
+    color: #24324a;
+  }
+
+  &__slot.is-selected {
+    background: #5bcdb3;
+    border: 2px black solid;
+  }
+
+  &__slot span:first-child {
+    font-weight: 700;
+    color: #24324a;
+  }
+
+  &__slot span:last-child {
+    font-size: 12px;
+    color: #24324a;
+    opacity: 0.9;
+  }
+
+  &__slot.is-selected span:last-child {
+    color: #24324a;
+  }
+
+  &__slot.is-disabled {
+    background: #ececec;
+    border-color: #d7dde3;
+    color: #777;
+    cursor: not-allowed;
+  }
+
+  &__slot.is-disabled span:last-child {
+    color: #777;
+  }
+
+  &__identity-card {
+    padding: 18px;
+    border: 1px solid #d7dde3;
+    background: #fbfbfa;
+    display: grid;
+    gap: 16px;
+  }
+
+  &__identity-head {
+    display: grid;
+    gap: 6px;
+
+    h4 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+      color: #24324a;
+    }
+
+    p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #7b8591;
+    }
+  }
+
+  &__identity-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+  }
+
+  &__field {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+
+    span {
+      font-size: 12px;
+      font-weight: 600;
+      color: #5b6671;
+      letter-spacing: 0.04em;
+    }
+  }
+
+  &__field--wide {
+    grid-column: span 2;
+  }
+
+  &__input {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid #404040;
+    background: #fff;
+    outline: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: #24324a;
+    transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+  }
+
+  &__input:focus {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+
+  &__verify-card {
+    padding: 22px;
+    border: 1px solid #404040;
+    background: #fff;
+    display: grid;
+    gap: 16px;
+  }
+
+  &__verify-card-top {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 18px;
+    align-items: center;
+  }
+
+  &__verify-copy {
+    display: grid;
+    gap: 8px;
+
+    strong {
+      font-size: 18px;
+      font-weight: 700;
+      color: #24324a;
+      text-transform: uppercase;
+    }
+  }
+
+  &__verify-status {
+    font-size: 12px;
+
+    .ok {
+      color: #1b7f5b;
+      font-weight: 600;
+    }
+
+    .pending {
+      color: #9a6700;
+      font-weight: 600;
+    }
+  }
+
+  &__verified-box {
+    padding: 16px;
+    border: 1px solid #cde8dd;
+    background: #eefaf7;
+    font-size: 13px;
+    color: #1b7f5b;
+    font-weight: 600;
+  }
+
+  &__payment {
+    padding-top: 4px;
+    border-top: 1px solid #d7dde3;
+    display: grid;
+    gap: 12px;
+
+    h4 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+      color: #24324a;
+    }
+  }
+
+  &__payment-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #24324a;
+
+    input {
+      accent-color: #7fd1c4;
+    }
+  }
+
+  &__google-pay-wrap {
+    display: grid;
+    gap: 10px;
+  }
+
+  &__google-pay-button {
+    min-height: 48px;
+  }
+
+  &__top-alert {
+    display: grid;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .smart-appointment-page {
+    &__schedule-layout {
+      grid-template-columns: 1fr;
+    }
+
+    &__slots {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .smart-appointment-page {
+    &__entry-actions,
+    &__modal-actions,
+    &__cart-actions,
+    &__actions,
+    &__recommended-actions,
+    &__confirm-row {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    &__primary,
+    &__secondary,
+    &__verify-button {
+      width: 100%;
+      max-width: 320px;
+    }
+
+    &__step {
+      grid-template-columns: 1fr;
+    }
+
+    &__step-index {
+      width: 44px;
+      height: 44px;
+    }
+
+    &__verify-card-top {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .smart-appointment-page {
+    padding: 16px 0 32px;
+
+    &__panel,
+    &__modal {
+      padding: 18px;
+    }
+
+    &__title {
+      font-size: 28px;
+    }
+
+    &__modal-header h3,
+    &__payment h4,
+    &__identity-head h4,
+    &__modal-body > h3 {
+      font-size: 22px;
+    }
+
+    &__identity-grid {
+      grid-template-columns: 1fr;
+    }
+
+    &__field--wide {
+      grid-column: span 1;
+    }
+
+    &__calendar-scroll {
+      overflow-x: auto;
+    }
+
+    &__weekday-row,
+    &__month-grid {
+      min-width: 420px;
+    }
+
+    &__slots {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    &__doctor-chip {
+      min-width: 240px;
+    }
+
+    &__modal--phone {
+      width: min(680px, 100%);
+    }
+  }
+}
+
+@media (max-width: 520px) {
+  .smart-appointment-page {
+    &__title {
+      font-size: 24px;
+    }
+
+    &__modal-backdrop {
+      padding: 10px;
+    }
+
+    &__modal {
+      max-height: 94vh;
+      padding: 16px;
+    }
+
+    &__slots {
+      grid-template-columns: 1fr;
+    }
+
+    &__doctor-chip {
+      min-width: 220px;
+    }
+
+    &__verify-card {
+      padding: 16px;
+    }
+  }
+}
+.smart-appointment-page__slots-box{
+  display: flex;
+  flex-direction: column;
+  justify-content: start;
+}
+.smart-appointment-page__secondary{
+  width: 100px;
+}
+.smart-appointment-page__modal.modalphone{
+  width: 550px;
+}

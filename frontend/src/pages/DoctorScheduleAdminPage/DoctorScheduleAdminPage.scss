@@ -1,357 +1,555 @@
 .doctor-schedule-admin-page {
-  padding: 24px 16px 80px;
-  display: flex;
-  justify-content: center;
-}
+  padding: 24px 0 48px;
 
-.doctor-schedule-admin-page__card {
-  width: min(1180px, 100%);
-  background: #f8f8f8;
-  border: 1.5px solid #111;
-  border-radius: 16px;
-  box-shadow: 10px 10px 0 #111;
-  padding: 24px;
-}
+  &__container {
+    display: grid;
+    gap: 18px;
+  }
 
-.doctor-schedule-admin-page__title {
-  margin: 0 0 18px;
-  text-align: center;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 26px;
-  letter-spacing: 0.04em;
-  color: #111;
-}
+  &__title,
+  &__calendar-head h2,
+  &__day-head h2,
+  &__card-head h2,
+  &__day-card h3,
+  &__modal-head h3 {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    color: #24324a;
+  }
 
-.doctor-schedule-admin-page__topbar,
-.doctor-schedule-admin-page__cycle-grid,
-.doctor-schedule-admin-page__rules-grid {
-  display: grid;
-  gap: 14px;
-}
+  &__title {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
 
-.doctor-schedule-admin-page__topbar {
-  grid-template-columns: minmax(0, 1.4fr) 180px 180px;
-  margin-bottom: 14px;
-  align-items: end;
-}
+  &__subtitle,
+  &__calendar-head p,
+  &__day-head p,
+  &__card-head p,
+  &__state,
+  &__conflict-item p,
+  &__modal-head p {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
 
-.doctor-schedule-admin-page__cycle-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
+  &__card,
+  &__calendar-card,
+  &__day-card {
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 18px;
+  }
 
-.doctor-schedule-admin-page__rules-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
+  &__rules {
+    display: grid;
+    gap: 12px;
+    align-items: start;
+  }
 
-.doctor-schedule-admin-page__field {
-  display: grid;
-  gap: 6px;
-}
+  &__field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
 
-.doctor-schedule-admin-page__field span,
-.doctor-schedule-admin-page__check-card > span,
-.doctor-schedule-admin-page__week-day,
-.doctor-schedule-admin-page__week-enabled,
-.doctor-schedule-admin-page__calendar-head h3,
-.doctor-schedule-admin-page__slots-card h3,
-.doctor-schedule-admin-page__rules-card h2 {
-  font-family: 'IBM Plex Mono', monospace;
-  color: #111;
-}
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #24324a;
+    }
 
-.doctor-schedule-admin-page__field span,
-.doctor-schedule-admin-page__check-card > span {
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
+    input,
+    select {
+      min-height: 46px;
+      padding: 0 12px;
+      border: 1px solid #404040;
+      background: #fff;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: #24324a;
+      outline: none;
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
 
-.doctor-schedule-admin-page__field select,
-.doctor-schedule-admin-page__field input,
-.doctor-schedule-admin-page__week-row input,
-.doctor-schedule-admin-page__calendar-head input {
-  width: 100%;
-  min-height: 46px;
-  border: 2px solid #111;
-  border-radius: 0;
-  background: #fff;
-  padding: 10px 12px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 14px;
-  color: #111;
-  outline: none;
-}
+    input:focus,
+    select:focus {
+      box-shadow: 4px 4px 0 #1e1e1e;
+      transform: translate(-1px, -1px);
+    }
+  }
 
-.doctor-schedule-admin-page__field select:focus,
-.doctor-schedule-admin-page__field input:focus,
-.doctor-schedule-admin-page__week-row input:focus,
-.doctor-schedule-admin-page__calendar-head input:focus {
-  box-shadow: 4px 4px 0 #111;
-}
+  &__checkbox-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 46px;
+    padding: 0 12px;
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #24324a;
 
-.doctor-schedule-admin-page__field--check {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
+    &--full {
+      grid-column: 1 / -1;
+    }
+  }
 
-.doctor-schedule-admin-page__field--check input,
-.doctor-schedule-admin-page__week-enabled input,
-.doctor-schedule-admin-page__check-card input {
-  width: 16px;
-  height: 16px;
-  accent-color: #84d8ce;
-}
+  &__checkbox-toggle {
+    position: relative;
+    width: 54px;
+    height: 30px;
+    border: 1px solid #404040;
+    background: #ececec;
+    cursor: pointer;
+    transition: background .18s ease;
+    flex-shrink: 0;
 
-.doctor-schedule-admin-page__template-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
+    &.is-active {
+      background: #79ddc8;
+    }
+  }
 
-.doctor-schedule-admin-page__template-switch button,
-.doctor-schedule-admin-page__save-wrap button,
-.doctor-schedule-admin-page__rules-action button {
-  min-height: 46px;
-  border: 2px solid #111;
-  border-radius: 0;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #111;
-  cursor: pointer;
-}
+  &__checkbox-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    background: #fff;
+    border: 1px solid #404040;
+    transition: transform .18s ease;
+  }
 
-.doctor-schedule-admin-page__template-switch button {
-  background: #fff;
-}
+  &__checkbox-toggle.is-active &__checkbox-knob {
+    transform: translateX(24px);
+  }
 
-.doctor-schedule-admin-page__template-switch button.is-active,
-.doctor-schedule-admin-page__save-wrap button,
-.doctor-schedule-admin-page__rules-action button {
-  background: #84d8ce;
-  box-shadow: 4px 4px 0 #111;
-}
+  &__rules-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
 
-.doctor-schedule-admin-page__week-grid {
-  display: grid;
-  gap: 10px;
-}
+  &__actions,
+  &__conflict-actions,
+  &__modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+  }
 
-.doctor-schedule-admin-page__week-row {
-  display: grid;
-  grid-template-columns: 58px 150px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  border: 1.5px solid #111;
-  border-radius: 0;
-  background: #fff;
-  padding: 10px 12px;
-}
+  &__actions--center {
+    justify-content: center;
+    align-items: center;
+  }
 
-.doctor-schedule-admin-page__week-day {
-  font-size: 14px;
-  font-weight: 700;
-}
+  &__conflict-actions--inline {
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: center;
+  }
 
-.doctor-schedule-admin-page__week-enabled,
-.doctor-schedule-admin-page__check-card label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
-}
+  &__primary,
+  &__secondary {
+    min-height: 46px;
+    width: 195px;
+    padding: 0 18px;
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #24324a;
+    cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease, background .18s ease;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
 
-.doctor-schedule-admin-page__save-wrap,
-.doctor-schedule-admin-page__rules-action {
-  display: flex;
-  justify-content: center;
-  margin-top: 18px;
-}
+  &__primary {
+    background: #79ddc8;
+  }
 
-.doctor-schedule-admin-page__save-wrap button,
-.doctor-schedule-admin-page__rules-action button {
-  width: min(360px, 100%);
-}
+  &__secondary:hover:not(:disabled),
+  &__primary:hover:not(:disabled),
+  &__modal-close:hover:not(:disabled) {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
 
-.doctor-schedule-admin-page__rules-card,
-.doctor-schedule-admin-page__calendar-card,
-.doctor-schedule-admin-page__slots-card {
-  margin-top: 18px;
-  padding: 16px;
-  background: #fff;
-  border: 1.5px solid #111;
-  border-radius: 0;
-}
+  &__primary:disabled,
+  &__secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 
-.doctor-schedule-admin-page__rules-card h2,
-.doctor-schedule-admin-page__calendar-head h3,
-.doctor-schedule-admin-page__slots-card h3 {
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 700;
-}
+  &__layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
 
-.doctor-schedule-admin-page__check-card {
-  display: grid;
-  gap: 10px;
-  border: 1.5px solid #111;
-  border-radius: 0;
-  background: #f8f8f8;
-  padding: 12px;
-  align-content: start;
-}
+  &__calendar-head,
+  &__day-head,
+  &__card-head,
+  &__modal-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
 
-.doctor-schedule-admin-page__calendar-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 16px;
-  margin-top: 18px;
-}
+  &__calendar-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
 
-.doctor-schedule-admin-page__calendar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
+  &__weekday-row {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(52px, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+    min-width: 420px;
+  }
 
-.doctor-schedule-admin-page__calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-}
+  &__weekday-cell {
+    min-height: 32px;
+    display: grid;
+    place-items: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #5f6d79;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 
-.doctor-schedule-admin-page__day {
-  border: 1.5px solid #111;
-  border-radius: 0;
-  background: #fff;
-  min-height: 72px;
-  padding: 8px 6px;
-  display: grid;
-  place-items: center;
-  gap: 4px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-weight: 700;
-}
+  &__month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(52px, 1fr));
+    gap: 10px;
+    min-width: 420px;
+  }
 
-.doctor-schedule-admin-page__day.is-free {
-  background: #eef8f6;
-}
+  &__day {
+    min-height: 78px;
+    padding: 10px;
+    border: 1px solid #d7dde3;
+    background: #fff;
+    display: grid;
+    gap: 4px;
+    align-content: center;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
 
-.doctor-schedule-admin-page__day.is-full {
-  background: #f1f3f5;
-}
+    span {
+      font-size: 15px;
+      font-weight: 700;
+      color: #24324a;
+    }
 
-.doctor-schedule-admin-page__day.is-off {
-  background: #edf0f3;
-  color: #66758a;
-}
+    small {
+      font-size: 11px;
+      color: #6f7b88;
+    }
 
-.doctor-schedule-admin-page__day.is-active {
-  background: #84d8ce;
-  box-shadow: inset 0 0 0 2px #111;
-}
+    &:hover {
+      box-shadow: 4px 4px 0 #1e1e1e;
+      transform: translate(-1px, -1px);
+    }
 
-.doctor-schedule-admin-page__day small {
-  font-size: 12px;
-  font-weight: 500;
-}
+    &.is-selected {
+      border-color: #3f8f7f;
+      background: #dff9f1;
+    }
 
-.doctor-schedule-admin-page__slots-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 10px;
-}
+    &.is-free {
+      background: #e7fbf2;
+    }
 
-.doctor-schedule-admin-page__slot {
-  min-height: 44px;
-  display: grid;
-  place-items: center;
-  border: 1.5px solid #111;
-  border-radius: 0;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 14px;
-  font-weight: 700;
-  background: #fff;
-}
+    &.is-busy {
+      background: #edf6f2;
+    }
 
-.doctor-schedule-admin-page__slot--free {
-  background: #84d8ce;
-}
+    &.is-off {
+      background: #f4f4f2;
+    }
 
-.doctor-schedule-admin-page__slot--booked {
-  background: #f4cccc;
-}
+    &.is-conflict {
+      background: #ffe6e6;
+      border-color: #cf4d4d;
+    }
 
-.doctor-schedule-admin-page__slot--blocked {
-  background: #eceff2;
-}
+    &--empty {
+      visibility: hidden;
+      pointer-events: none;
+    }
+  }
 
-.doctor-schedule-admin-page__empty {
-  margin: 0;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
-  color: #586372;
+  &__conflict-box {
+    border: 1px solid #c94a4a;
+    background: #fff5f5;
+    padding: 14px;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 16px;
+
+    h3 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      color: #8a1f1f;
+    }
+
+    p {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #8a1f1f;
+    }
+  }
+
+  &__conflict-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  &__conflict-item {
+    border: 1px solid #e5bcbc;
+    background: #fff;
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    max-width: 95%;
+    flex-wrap: wrap;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      color: #24324a;
+    }
+
+    &--static {
+      justify-content: flex-start;
+    }
+  }
+
+  &__slots-wrap {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__slots-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  &__slot {
+    min-height: 46px;
+    border: 1px solid #d7dde3;
+    display: grid;
+    place-items: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    box-sizing: border-box;
+
+    &--free {
+      background: #79ddc8;
+      color: #24324a;
+      cursor: pointer;
+    }
+
+    &--booked {
+      background: #ffe8a3;
+      color: #5b4800;
+    }
+
+    &--blocked {
+      background: #ececec;
+      color: #555;
+    }
+
+    &.is-selected,
+    &--free:hover {
+      box-shadow: 4px 4px 0 #1e1e1e;
+      transform: translate(-1px, -1px);
+    }
+  }
+
+  &__modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 24, 32, 0.42);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    z-index: 80;
+  }
+
+  &__modal {
+    width: min(760px, 100%);
+    max-height: 88vh;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #404040;
+    padding: 18px;
+    display: grid;
+    gap: 16px;
+    box-sizing: border-box;
+  }
+
+  &__modal-close {
+    width: 44px;
+    height: 44px;
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 24px;
+    color: #24324a;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  &__modal-body {
+    display: grid;
+    gap: 16px;
+  }
 }
 
 @media (max-width: 1100px) {
-  .doctor-schedule-admin-page__topbar,
-  .doctor-schedule-admin-page__cycle-grid,
-  .doctor-schedule-admin-page__rules-grid,
-  .doctor-schedule-admin-page__calendar-section {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .doctor-schedule-admin-page__calendar-section {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 760px) {
   .doctor-schedule-admin-page {
-    padding: 16px 10px 56px;
-  }
+    &__layout,
+    &__rules-grid {
+      grid-template-columns: 1fr;
+    }
 
-  .doctor-schedule-admin-page__card {
-    padding: 16px 12px;
-    border-radius: 12px;
-    box-shadow: 6px 6px 0 #111;
-  }
-
-  .doctor-schedule-admin-page__title {
-    font-size: 22px;
-  }
-
-  .doctor-schedule-admin-page__topbar,
-  .doctor-schedule-admin-page__cycle-grid,
-  .doctor-schedule-admin-page__rules-grid,
-  .doctor-schedule-admin-page__template-switch,
-  .doctor-schedule-admin-page__week-row {
-    grid-template-columns: 1fr;
-  }
-
-  .doctor-schedule-admin-page__calendar-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .doctor-schedule-admin-page__calendar-head {
-    flex-direction: column;
-    align-items: flex-start;
+    &__slots-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
   }
 }
 
-@media (max-width: 360px) {
-  .doctor-schedule-admin-page__calendar-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+@media (max-width: 900px) {
+  .doctor-schedule-admin-page {
+    &__actions,
+    &__modal-actions {
+      flex-direction: column;
+      align-items: center;
+    }
 
-  .doctor-schedule-admin-page__slots-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    &__primary,
+    &__secondary {
+      width: 100%;
+      max-width: 320px;
+    }
+
+    &__conflict-actions--inline {
+      flex-wrap: wrap;
+    }
   }
+}
+
+@media (max-width: 768px) {
+  .doctor-schedule-admin-page {
+    &__card,
+    &__calendar-card,
+    &__day-card,
+    &__modal {
+      padding: 14px;
+    }
+
+    &__slots-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    &__modal {
+      width: min(640px, 100%);
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .doctor-schedule-admin-page {
+    padding: 14px 0 28px;
+
+    &__slots-grid {
+      grid-template-columns: 1fr;
+    }
+
+    &__day {
+      min-height: 68px;
+    }
+
+    &__calendar-head,
+    &__day-head,
+    &__card-head,
+    &__modal-head {
+      align-items: flex-start;
+    }
+
+    &__modal-backdrop {
+      padding: 10px;
+    }
+
+    &__title {
+      font-size: 28px;
+    }
+  }
+}
+
+@media (max-width: 320px) {
+  .doctor-schedule-admin-page {
+    &__title,
+    &__calendar-head h2,
+    &__day-head h2,
+    &__card-head h2,
+    &__day-card h3,
+    &__modal-head h3 {
+      font-size: 24px;
+    }
+
+    &__field input,
+    &__field select {
+      font-size: 13px;
+      padding: 0 10px;
+    }
+
+    &__primary,
+    &__secondary {
+      min-height: 42px;
+      padding: 0 12px;
+      font-size: 11px;
+    }
+
+    &__slot {
+      min-height: 42px;
+      font-size: 12px;
+    }
+
+    &__weekday-cell {
+      font-size: 11px;
+    }
+  }
+}
+.doctor-schedule-admin-page__field{
+  margin-bottom: 30px;
 }

@@ -18,7 +18,7 @@ import { getPhoneVerificationStatus, startPhoneVerification } from '../../shared
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import { useI18n } from '../../shared/i18n/I18nProvider';
-import type { AppLanguage } from '../../shared/i18n/translations';
+import type { AppLanguage } from '../../shared/i18n/types.ts';
 import {
     emptyDoctorInfoLocalized,
     serializeDoctorInfoLocalized,
@@ -32,6 +32,7 @@ type StepId = 'profile' | 'phone' | 'email' | 'confirm';
 type DoctorCreatePageProps = {
     embedded?: boolean;
     onCreated?: () => void;
+    onClose?: () => void;
 };
 
 const STEP_ITEMS: StepId[] = ['profile', 'phone', 'email', 'confirm'];
@@ -218,7 +219,7 @@ function getDoctorSpecialtyLabel(
     return '';
 }
 
-export default function DoctorCreatePage({ embedded = false, onCreated }: DoctorCreatePageProps) {
+export default function DoctorCreatePage({ embedded = false, onCreated, onClose }: DoctorCreatePageProps) {
     const token = getToken();
     const role = getUserRole();
     const isAllowed = role === 'ADMIN' || role === 'SUPER_ADMIN';
@@ -765,7 +766,20 @@ export default function DoctorCreatePage({ embedded = false, onCreated }: Doctor
     const content = (
         <>
             <section className="doctor-create-page__card">
-                {!embedded && <h1 className="doctor-create-page__title">{t('doctorCreate.title')}</h1>}
+                <div className="doctor-create-page__header">
+                    <h1 className="doctor-create-page__title">{t('doctorCreate.title')}</h1>
+
+                    {onClose && (
+                        <button
+                            type="button"
+                            className="doctor-create-page__close"
+                            onClick={onClose}
+                            aria-label={t('common.close')}
+                        >
+                            ×
+                        </button>
+                    )}
+                </div>
 
                 {error && (
                     <div className="doctor-create-page__top-alert">

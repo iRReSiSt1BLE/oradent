@@ -16,6 +16,20 @@ import { Video } from '../video/entities/video.entity';
 import { UserRole } from '../common/enums/user-role.enum';
 import { DoctorScheduleService } from '../doctor-schedule/doctor-schedule.service';
 import { ClinicServiceEntity } from '../services/entities/clinic-service.entity';
+import { GetSmartAppointmentPlanDto } from './dto/get-smart-appointment-plan.dto';
+import { Doctor } from '../doctor/entities/doctor.entity';
+import {PaymentStatus} from "../common/enums/payment-status.enum";
+import { MailService } from '../mail/mail.service';
+import {CreatePaidGooglePayTestBookingDto} from "./dto/create-paid-google-pay-test-booking.dto";
+import {PaymentMethod} from "../common/enums/payment-method.enum";
+import {Patient} from "../patient/entities/patient.entity";
+import { NotFoundException } from '@nestjs/common';
+import { AdminCancelAppointmentDto } from './dto/admin-cancel-appointment.dto';
+import { AdminRescheduleAppointmentDto } from './dto/admin-reschedule-appointment.dto';
+import { AdminRefundAppointmentDto } from './dto/admin-refund-appointment.dto';
+
+
+
 
 type JwtUser = {
     id: string;
@@ -33,11 +47,16 @@ export class AppointmentService {
         private readonly videoRepository: Repository<Video>,
         @InjectRepository(ClinicServiceEntity)
         private readonly clinicServiceRepository: Repository<ClinicServiceEntity>,
+        @InjectRepository(Doctor)
+        private readonly doctorRepository: Repository<Doctor>,
         private readonly patientService: PatientService,
         private readonly phoneVerificationService: PhoneVerificationService,
         private readonly userService: UserService,
         private readonly servicesService: ServicesService,
         private readonly doctorScheduleService: DoctorScheduleService,
+        private readonly mailService: MailService,
+        @InjectRepository(Patient)
+        private readonly patientRepository: Repository<Patient>,
     ) {}
 
     private parseAppointmentDateOrThrow(raw: string): Date {
@@ -71,6 +90,7 @@ export class AppointmentService {
             dto.phone,
         );
 
+
         await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
         await this.ensureScheduleAllowsBooking(dto.doctorId, dto.serviceId, dto.appointmentDate);
 
@@ -101,6 +121,13 @@ export class AppointmentService {
             source: 'GUEST',
             recordingCompleted: false,
             recordingCompletedAt: null,
+            paymentStatus: PaymentStatus.PENDING,
+            paymentMethod: null,
+            paymentProvider: null,
+            paymentReference: null,
+            paidAmountUah: null,
+            paidAt: null,
+            receiptNumber: null,
         });
 
         const savedAppointment = await this.appointmentRepository.save(appointment);
@@ -118,6 +145,7 @@ export class AppointmentService {
             },
         };
     }
+
 
     async createAuthenticatedAppointment(
         userId: string,
@@ -180,6 +208,13 @@ export class AppointmentService {
                 middleName: patient.middleName,
                 phone: patient.phone,
                 phoneVerified: patient.phoneVerified,
+                paymentStatus: PaymentStatus.PENDING,
+                paymentMethod: null,
+                paymentProvider: null,
+                paymentReference: null,
+                paidAmountUah: null,
+                paidAt: null,
+                receiptNumber: null,
             },
         };
     }
@@ -241,4 +276,1424 @@ export class AppointmentService {
 
         return appointment;
     }
+
+    private normalizePlanDate(raw?: string): Date {
+        if (!raw) {
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+            return now;
+        }
+
+        const date = new Date(raw);
+        if (Number.isNaN(date.getTime())) {
+            throw new BadRequestException('Невірна preferredDate');
+        }
+
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
+    private toDateKey(date: Date): string {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    private combineDateAndTime(dateKey: string, time: string): Date {
+        return new Date(`${dateKey}T${time}:00`);
+    }
+
+    private addDays(date: Date, days: number): Date {
+        const next = new Date(date);
+        next.setDate(next.getDate() + days);
+        return next;
+    }
+
+    private unique<T>(items: T[]): T[] {
+        return [...new Set(items)];
+    }
+
+    private getServiceDuration(service: ClinicServiceEntity): number {
+        const raw = Number(service.durationMinutes);
+        if (!Number.isFinite(raw) || raw <= 0) return 20;
+        return raw;
+    }
+
+    private getDoctorUserId(doctor: Doctor): string {
+        return doctor.user?.id || doctor.id;
+    }
+
+    private getDoctorDisplayName(doctor: Doctor): string {
+        const name = `${doctor.lastName ?? ''} ${doctor.firstName ?? ''} ${doctor.middleName ?? ''}`
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        return name || doctor.user?.email || doctor.id;
+    }
+
+    private doctorMatchesServiceBySpecialty(
+        doctor: Doctor,
+        service: ClinicServiceEntity,
+    ): boolean {
+        const doctorSpecialties = Array.isArray(doctor.specialties)
+            ? doctor.specialties
+                .map((value) => String(value).trim().toLowerCase())
+                .filter(Boolean)
+            : [];
+
+        const serviceSpecialties = Array.isArray(service.specialties)
+            ? service.specialties
+                .map((specialty) => String(specialty.name).trim().toLowerCase())
+                .filter(Boolean)
+            : [];
+
+        if (!serviceSpecialties.length) {
+            return true;
+        }
+
+        return serviceSpecialties.some((name) => doctorSpecialties.includes(name));
+    }
+
+    private async getCandidateDoctorsForService(service: ClinicServiceEntity): Promise<Doctor[]> {
+        const doctors = await this.doctorRepository.find({
+            where: { isActive: true },
+            relations: ['user'],
+        });
+
+        return doctors.filter((doctor) => this.doctorMatchesServiceBySpecialty(doctor, service));
+    }
+
+    private async getPlanServicesOrThrow(serviceIds: string[]): Promise<ClinicServiceEntity[]> {
+        const ids = this.unique(serviceIds);
+
+        const services = await this.clinicServiceRepository.find({
+            where: ids.map((id) => ({ id })),
+            relations: ['category', 'specialties'],
+        });
+
+        if (services.length !== ids.length) {
+            const found = new Set(services.map((s) => s.id));
+            const missing = ids.filter((id) => !found.has(id));
+            throw new BadRequestException(`Не знайдено послуги: ${missing.join(', ')}`);
+        }
+
+        for (const service of services) {
+            if (!service.isActive) {
+                throw new BadRequestException(`Послуга неактивна: ${service.name}`);
+            }
+
+            if (!service.category?.isActive) {
+                throw new BadRequestException(`Категорія послуги неактивна: ${service.name}`);
+            }
+        }
+
+        return services.sort((a, b) => {
+            const ao = Number(a.sortOrder || 0);
+            const bo = Number(b.sortOrder || 0);
+            if (ao !== bo) return ao - bo;
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+
+    async createPaidGooglePayTestBooking(
+        userId: string,
+        dto: CreatePaidGooglePayTestBookingDto,
+    ) {
+        const user = await this.userService.findById(userId);
+
+        if (!user || !user.patient) {
+            throw new BadRequestException('Пацієнта не знайдено');
+        }
+
+        const patient = user.patient;
+
+        if (!dto.steps?.length) {
+            throw new BadRequestException('Не передано жодного кроку запису');
+        }
+
+        const uniqueServiceIds = [...new Set(dto.steps.map((step) => step.serviceId))];
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueServiceIds.map((id) => ({ id })),
+        });
+
+        const servicesMap = new Map(
+            services.map((service) => [
+                service.id,
+                {
+                    durationMinutes: Number(service.durationMinutes || 0),
+                    priceUah: Number(service.priceUah || 0),
+                },
+            ]),
+        );
+
+        for (const step of dto.steps) {
+            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
+            await this.ensureScheduleAllowsBooking(
+                step.doctorId,
+                step.serviceId,
+                step.appointmentDate,
+            );
+        }
+
+        const groupedSteps = this.normalizeGroupedSteps(dto.steps, servicesMap);
+
+        const createdAppointments: Appointment[] = [];
+        const paymentReference =
+            dto.googleTransactionId ||
+            dto.googlePaymentToken ||
+            `gpay-test-${Date.now()}`;
+        const receiptNumber = this.generateReceiptNumber();
+
+        for (const group of groupedSteps) {
+            const firstStep = group[0];
+            const firstService = servicesMap.get(firstStep.serviceId);
+
+            const groupAmount = group.reduce((sum, step) => {
+                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
+            }, 0);
+
+            const appointment = this.appointmentRepository.create({
+                patient,
+                doctorId: firstStep.doctorId,
+                serviceId: firstStep.serviceId,
+                appointmentDate: new Date(firstStep.appointmentDate),
+                status: 'BOOKED',
+                source: 'AUTHENTICATED',
+                recordingCompleted: false,
+                recordingCompletedAt: null,
+                paymentStatus: PaymentStatus.PAID,
+                paymentMethod: dto.paymentMethod || PaymentMethod.GOOGLE_PAY,
+                paymentProvider: 'GOOGLE_PAY_TEST',
+                paymentReference,
+                paidAmountUah: groupAmount,
+                paidAt: new Date(),
+                receiptNumber,
+            });
+
+            const saved = await this.appointmentRepository.save(appointment);
+            createdAppointments.push(saved);
+        }
+
+        const totalAmount = createdAppointments.reduce(
+            (sum, item) => sum + Number(item.paidAmountUah || 0),
+            0,
+        );
+
+        if (patient.email) {
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: `${patient.lastName} ${patient.firstName}${
+                    patient.middleName ? ` ${patient.middleName}` : ''
+                }`.trim(),
+                appointmentId: createdAppointments.map((a) => a.id).join(', '),
+                appointmentDate: createdAppointments[0]?.appointmentDate || null,
+                receiptNumber,
+                amountUah: totalAmount,
+                paymentMethod: dto.paymentMethod || PaymentMethod.GOOGLE_PAY,
+            });
+        }
+
+        return {
+            ok: true,
+            message: 'Запис успішно створено та оплачено',
+            receiptNumber,
+            appointments: createdAppointments,
+            groupedSteps,
+        };
+    }
+
+    private generateReceiptNumber() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+        return `ORADENT-${y}${m}${d}-${rand}`;
+    }
+
+    private async findEarliestSlotForDoctor(
+        doctorId: string,
+        service: ClinicServiceEntity,
+        preferredDate: Date,
+        daysForward = 14,
+    ) {
+        const duration = this.getServiceDuration(service);
+
+        for (let offset = 0; offset < daysForward; offset += 1) {
+            const date = this.addDays(preferredDate, offset);
+            const dateKey = this.toDateKey(date);
+
+            const daily = await this.doctorScheduleService.getDay(doctorId, dateKey);
+            if (!daily?.ok || !daily?.isWorking) continue;
+
+            const freeSlots = (daily.slots || []).filter(
+                (slot: { time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }) =>
+                    slot.state === 'FREE',
+            );
+
+            const slotMinutes = Number(daily.slotMinutes || 20);
+            const needed = Math.max(1, Math.ceil(duration / slotMinutes));
+
+            for (let i = 0; i < freeSlots.length; i += 1) {
+                const startTime = freeSlots[i].time;
+                const startMinute =
+                    Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3, 5));
+
+                let ok = true;
+
+                for (let step = 0; step < needed; step += 1) {
+                    const hh = Math.floor((startMinute + step * slotMinutes) / 60)
+                        .toString()
+                        .padStart(2, '0');
+                    const mm = ((startMinute + step * slotMinutes) % 60)
+                        .toString()
+                        .padStart(2, '0');
+                    const expected = `${hh}:${mm}`;
+
+                    const exists = freeSlots.some(
+                        (slot: { time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }) =>
+                            slot.time === expected,
+                    );
+
+                    if (!exists) {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                if (!ok) continue;
+
+                return {
+                    doctorId,
+                    dateKey,
+                    startTime,
+                    startAt: this.combineDateAndTime(dateKey, startTime),
+                    durationMinutes: duration,
+                    endAt: new Date(
+                        this.combineDateAndTime(dateKey, startTime).getTime() +
+                        duration * 60 * 1000,
+                    ),
+                };
+            }
+        }
+
+        return null;
+    }
+
+
+    async createOfflineBooking(
+        userId: string,
+        dto: {
+            steps: Array<{
+                serviceId: string;
+                doctorId: string;
+                appointmentDate: string;
+            }>;
+            paymentMethod?: 'CASH';
+        },
+    ) {
+        const user = await this.userService.findById(userId);
+
+        if (!user || !user.patient) {
+            throw new BadRequestException('Пацієнта не знайдено');
+        }
+
+        const patient = user.patient;
+
+        if (!dto.steps?.length) {
+            throw new BadRequestException('Не передано жодного кроку запису');
+        }
+
+        const uniqueServiceIds = [...new Set(dto.steps.map((step) => step.serviceId))];
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueServiceIds.map((id) => ({ id })),
+        });
+
+        const servicesMap = new Map(
+            services.map((service) => [
+                service.id,
+                {
+                    durationMinutes: Number(service.durationMinutes || 0),
+                    priceUah: Number(service.priceUah || 0),
+                },
+            ]),
+        );
+
+        for (const step of dto.steps) {
+            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
+            await this.ensureScheduleAllowsBooking(
+                step.doctorId,
+                step.serviceId,
+                step.appointmentDate,
+            );
+        }
+
+        const groupedSteps = this.normalizeGroupedSteps(dto.steps, servicesMap);
+
+        const createdAppointments: Appointment[] = [];
+
+        for (const group of groupedSteps) {
+            const firstStep = group[0];
+
+            const groupAmount = group.reduce((sum, step) => {
+                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
+            }, 0);
+
+            const appointment = this.appointmentRepository.create({
+                patient,
+                doctorId: firstStep.doctorId,
+                serviceId: firstStep.serviceId,
+                appointmentDate: new Date(firstStep.appointmentDate),
+                status: 'BOOKED',
+                source: 'AUTHENTICATED',
+                recordingCompleted: false,
+                recordingCompletedAt: null,
+                paymentStatus: PaymentStatus.PENDING,
+                paymentMethod: dto.paymentMethod ? PaymentMethod.CASH : PaymentMethod.CASH,
+                paymentProvider: null,
+                paymentReference: null,
+                paidAmountUah: groupAmount,
+                paidAt: null,
+                receiptNumber: null,
+            });
+
+            const saved = await this.appointmentRepository.save(appointment);
+            createdAppointments.push(saved);
+        }
+
+        return {
+            ok: true,
+            message: 'Запис успішно створено',
+            appointments: createdAppointments,
+            groupedSteps,
+        };
+    }
+
+
+    async getMyAppointments(userId: string) {
+        const user = await this.userService.findById(userId);
+
+        if (!user) {
+            throw new BadRequestException('Користувача не знайдено');
+        }
+
+        if (!user.patient) {
+            return {
+                ok: true,
+                active: [],
+                completed: [],
+            };
+        }
+
+        const appointments = await this.appointmentRepository.find({
+            where: {
+                patient: { id: user.patient.id },
+            },
+            relations: ['patient'],
+            order: {
+                appointmentDate: 'DESC',
+                createdAt: 'DESC',
+            },
+        });
+
+        const mapped = await Promise.all(
+            appointments.map(async (item) => {
+                const service = item.serviceId
+                    ? await this.clinicServiceRepository.findOne({
+                        where: { id: item.serviceId },
+                    })
+                    : null;
+
+                const doctor = item.doctorId
+                    ? await this.doctorRepository.findOne({
+                        where: [
+                            { id: item.doctorId },
+                            { user: { id: item.doctorId } },
+                        ],
+                        relations: ['user'],
+                    })
+                    : null;
+
+                const doctorName = doctor
+                    ? `${doctor.lastName ?? ''} ${doctor.firstName ?? ''} ${doctor.middleName ?? ''}`
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                    : null;
+
+                return {
+                    id: item.id,
+                    patientId: item.patient?.id ?? undefined,
+                    doctorId: item.doctorId,
+                    doctorName,
+                    serviceId: item.serviceId,
+                    serviceName: service?.name || null,
+                    appointmentDate: item.appointmentDate,
+                    status: item.status,
+                    source: item.source,
+                    recordingCompleted: item.recordingCompleted,
+                    recordingCompletedAt: item.recordingCompletedAt,
+                    createdAt: item.createdAt,
+                    updatedAt: item.updatedAt,
+                    paymentStatus: (item as any).paymentStatus ?? 'PENDING',
+                    paymentMethod: (item as any).paymentMethod ?? null,
+                    paidAmountUah:
+                        (item as any).paidAmountUah ??
+                        (service ? Number(service.priceUah) : null),
+                    receiptNumber: (item as any).receiptNumber ?? null,
+                    canPayNow: ((item as any).paymentStatus ?? 'PENDING') !== 'PAID',
+                };
+            }),
+        );
+
+        const now = new Date();
+
+        const active = mapped.filter((item) => {
+            if (!item.appointmentDate) return false;
+            const appointmentDate = new Date(item.appointmentDate);
+            return (
+                appointmentDate >= now &&
+                item.status !== 'COMPLETED' &&
+                item.status !== 'CANCELLED'
+            );
+        });
+
+        const completed = mapped.filter((item) => {
+            if (!item.appointmentDate) return true;
+            const appointmentDate = new Date(item.appointmentDate);
+            return (
+                appointmentDate < now ||
+                item.status === 'COMPLETED' ||
+                item.status === 'CANCELLED'
+            );
+        });
+
+        return {
+            ok: true,
+            active,
+            completed,
+        };
+    }
+
+
+    private async buildSameDoctorPlan(
+        services: ClinicServiceEntity[],
+        preferredDate: Date,
+        forcedDoctorId?: string,
+    ) {
+        let doctorPool: Doctor[] = [];
+
+        if (forcedDoctorId) {
+            const forcedDoctor = await this.doctorRepository.findOne({
+                where: [
+                    { id: forcedDoctorId, isActive: true },
+                    { user: { id: forcedDoctorId }, isActive: true },
+                ],
+                relations: ['user'],
+            });
+
+            doctorPool = forcedDoctor ? [forcedDoctor] : [];
+        } else {
+            const allDoctors = await this.doctorRepository.find({
+                where: { isActive: true },
+                relations: ['user'],
+            });
+
+            doctorPool = allDoctors.filter((doctor) =>
+                services.every((service) => this.doctorMatchesServiceBySpecialty(doctor, service)),
+            );
+        }
+
+        for (const doctor of doctorPool) {
+            const doctorUserId = this.getDoctorUserId(doctor);
+
+            const steps: Array<{
+                serviceId: string;
+                serviceName: string;
+                doctorId: string;
+                doctorName: string;
+                startAt: Date;
+                endAt: Date;
+                durationMinutes: number;
+            }> = [];
+
+            let currentDate = preferredDate;
+            let valid = true;
+
+            for (const service of services) {
+                const slot = await this.findEarliestSlotForDoctor(
+                    doctorUserId,
+                    service,
+                    currentDate,
+                );
+
+                if (!slot) {
+                    valid = false;
+                    break;
+                }
+
+                steps.push({
+                    serviceId: service.id,
+                    serviceName: service.name,
+                    doctorId: doctorUserId,
+                    doctorName: this.getDoctorDisplayName(doctor),
+                    startAt: slot.startAt,
+                    endAt: slot.endAt,
+                    durationMinutes: slot.durationMinutes,
+                });
+
+                currentDate = new Date(slot.endAt);
+            }
+
+            if (!valid || steps.length !== services.length) continue;
+
+            return {
+                strategy: 'same-doctor',
+                sameDoctor: true,
+                doctorIds: [doctorUserId],
+                totalDurationMinutes: steps.reduce((sum, step) => sum + step.durationMinutes, 0),
+                startAt: steps[0].startAt,
+                endAt: steps[steps.length - 1].endAt,
+                steps,
+            };
+        }
+
+        return null;
+    }
+
+    private async buildEarliestMixedPlan(
+        services: ClinicServiceEntity[],
+        preferredDate: Date,
+        forcedDoctorId?: string,
+    ) {
+        const steps: Array<{
+            serviceId: string;
+            serviceName: string;
+            doctorId: string;
+            doctorName: string;
+            startAt: Date;
+            endAt: Date;
+            durationMinutes: number;
+        }> = [];
+
+        let currentDate = preferredDate;
+
+        for (const service of services) {
+            let doctorPool: Doctor[] = [];
+
+            if (forcedDoctorId) {
+                const forcedDoctor = await this.doctorRepository.findOne({
+                    where: [
+                        { id: forcedDoctorId, isActive: true },
+                        { user: { id: forcedDoctorId }, isActive: true },
+                    ],
+                    relations: ['user'],
+                });
+
+                doctorPool =
+                    forcedDoctor && this.doctorMatchesServiceBySpecialty(forcedDoctor, service)
+                        ? [forcedDoctor]
+                        : [];
+            } else {
+                doctorPool = await this.getCandidateDoctorsForService(service);
+            }
+
+            let best: {
+                doctor: Doctor;
+                startAt: Date;
+                endAt: Date;
+                durationMinutes: number;
+            } | null = null;
+
+            for (const doctor of doctorPool) {
+                const doctorUserId = this.getDoctorUserId(doctor);
+                const slot = await this.findEarliestSlotForDoctor(
+                    doctorUserId,
+                    service,
+                    currentDate,
+                );
+
+                if (!slot) continue;
+
+                if (!best || slot.startAt < best.startAt) {
+                    best = {
+                        doctor,
+                        startAt: slot.startAt,
+                        endAt: slot.endAt,
+                        durationMinutes: slot.durationMinutes,
+                    };
+                }
+            }
+
+            if (!best) {
+                return null;
+            }
+
+            steps.push({
+                serviceId: service.id,
+                serviceName: service.name,
+                doctorId: this.getDoctorUserId(best.doctor),
+                doctorName: this.getDoctorDisplayName(best.doctor),
+                startAt: best.startAt,
+                endAt: best.endAt,
+                durationMinutes: best.durationMinutes,
+            });
+
+            currentDate = new Date(best.endAt);
+        }
+
+        return {
+            strategy: 'mixed-doctors',
+            sameDoctor: this.unique(steps.map((step) => step.doctorId)).length === 1,
+            doctorIds: this.unique(steps.map((step) => step.doctorId)),
+            totalDurationMinutes: steps.reduce((sum, step) => sum + step.durationMinutes, 0),
+            startAt: steps[0].startAt,
+            endAt: steps[steps.length - 1].endAt,
+            steps,
+        };
+    }
+
+
+
+    async payMyAppointmentGooglePayTest(
+        userId: string,
+        appointmentId: string,
+        body: {
+            googleTransactionId?: string;
+            googlePaymentToken?: string;
+        },
+    ) {
+        const user = await this.userService.findById(userId);
+
+        if (!user || !user.patient) {
+            throw new BadRequestException('Пацієнта не знайдено');
+        }
+
+        const appointment = await this.appointmentRepository.findOne({
+            where: {
+                id: appointmentId,
+                patient: { id: user.patient.id },
+            },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new BadRequestException('Запис на прийом не знайдено');
+        }
+
+        if (appointment.paymentStatus === PaymentStatus.PAID) {
+            return {
+                ok: true,
+                message: 'Запис уже оплачено',
+                appointment,
+            };
+        }
+
+        const service = appointment.serviceId
+            ? await this.clinicServiceRepository.findOne({
+                where: { id: appointment.serviceId },
+            })
+            : null;
+
+        appointment.paymentStatus = PaymentStatus.PAID;
+        appointment.paymentMethod = PaymentMethod.GOOGLE_PAY;
+        appointment.paymentProvider = 'GOOGLE_PAY_TEST';
+        appointment.paymentReference =
+            body.googleTransactionId ||
+            body.googlePaymentToken ||
+            `gpay-test-${Date.now()}`;
+        appointment.paidAt = new Date();
+        appointment.paidAmountUah = service ? Number(service.priceUah || 0) : 0;
+        appointment.receiptNumber =
+            appointment.receiptNumber || this.generateReceiptNumber();
+
+        const saved = await this.appointmentRepository.save(appointment);
+
+        if (user.patient.email) {
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: user.patient.email,
+                patientName: `${user.patient.lastName} ${user.patient.firstName}${
+                    user.patient.middleName ? ` ${user.patient.middleName}` : ''
+                }`.trim(),
+                appointmentId: saved.id,
+                appointmentDate: saved.appointmentDate,
+                receiptNumber: saved.receiptNumber || '',
+                amountUah: Number(saved.paidAmountUah || 0),
+                paymentMethod: saved.paymentMethod || PaymentMethod.GOOGLE_PAY,
+            });
+        }
+
+        return {
+            ok: true,
+            message: 'Оплату успішно підтверджено',
+            appointment: saved,
+        };
+    }
+
+
+    async getSmartAppointmentPlan(
+        userId: string | null,
+        dto: GetSmartAppointmentPlanDto,
+    ) {
+        if (userId) {
+            const user = await this.userService.findById(userId);
+
+            if (!user) {
+                throw new BadRequestException('Користувача не знайдено');
+            }
+        }
+
+        const preferredDate = this.normalizePlanDate(dto.preferredDate);
+        const services = await this.getPlanServicesOrThrow(dto.serviceIds);
+
+        const plans: any[] = [];
+        let rejectionReason = '';
+
+        if ((dto.mode || 'same-doctor-first') === 'same-doctor-first') {
+            const sameDoctorPlan = await this.buildSameDoctorPlan(
+                services,
+                preferredDate,
+                dto.doctorId,
+            );
+
+            if (sameDoctorPlan) {
+                plans.push(sameDoctorPlan);
+            }
+
+            const mixedPlan = await this.buildEarliestMixedPlan(
+                services,
+                preferredDate,
+                dto.doctorId,
+            );
+
+            if (mixedPlan) {
+                const duplicate =
+                    sameDoctorPlan &&
+                    JSON.stringify(
+                        sameDoctorPlan.steps.map((s: any) => [
+                            s.serviceId,
+                            s.doctorId,
+                            s.startAt,
+                        ]),
+                    ) ===
+                    JSON.stringify(
+                        mixedPlan.steps.map((s: any) => [
+                            s.serviceId,
+                            s.doctorId,
+                            s.startAt,
+                        ]),
+                    );
+
+                if (!duplicate) {
+                    plans.push(mixedPlan);
+                }
+            }
+        } else {
+            const mixedPlan = await this.buildEarliestMixedPlan(
+                services,
+                preferredDate,
+                dto.doctorId,
+            );
+
+            if (mixedPlan) {
+                plans.push(mixedPlan);
+            }
+
+            const sameDoctorPlan = await this.buildSameDoctorPlan(
+                services,
+                preferredDate,
+                dto.doctorId,
+            );
+
+            if (sameDoctorPlan) {
+                const duplicate =
+                    mixedPlan &&
+                    JSON.stringify(
+                        mixedPlan.steps.map((s: any) => [
+                            s.serviceId,
+                            s.doctorId,
+                            s.startAt,
+                        ]),
+                    ) ===
+                    JSON.stringify(
+                        sameDoctorPlan.steps.map((s: any) => [
+                            s.serviceId,
+                            s.doctorId,
+                            s.startAt,
+                        ]),
+                    );
+
+                if (!duplicate) {
+                    plans.push(sameDoctorPlan);
+                }
+            }
+        }
+
+        if (plans.length === 0) {
+            const servicesWithoutSpecialties = services.filter(
+                (service) =>
+                    !Array.isArray(service.specialties) || service.specialties.length === 0,
+            );
+
+            if (servicesWithoutSpecialties.length > 0) {
+                rejectionReason =
+                    'Деякі послуги не прив’язані до жодної спеціальності.';
+            } else {
+                rejectionReason =
+                    'Не знайдено доступних лікарів або вільних слотів у найближчі 14 днів для вибраних послуг.';
+            }
+        }
+
+        return {
+            ok: true,
+            preferredDate: this.toDateKey(preferredDate),
+            requestedServiceIds: dto.serviceIds,
+            rejectionReason,
+            plans,
+        };
+    }
+
+
+
+    private addMinutes(date: Date, minutes: number): Date {
+        return new Date(date.getTime() + minutes * 60 * 1000);
+    }
+
+    private normalizeGroupedSteps(
+        steps: Array<{
+            serviceId: string;
+            doctorId: string;
+            appointmentDate: string;
+        }>,
+        servicesMap: Map<string, { durationMinutes: number }>,
+    ) {
+        const sorted = [...steps].sort(
+            (a, b) =>
+                new Date(a.appointmentDate).getTime() - new Date(b.appointmentDate).getTime(),
+        );
+
+        const groups: Array<
+            Array<{
+                serviceId: string;
+                doctorId: string;
+                appointmentDate: string;
+            }>
+        > = [];
+
+        for (const step of sorted) {
+            const currentStart = new Date(step.appointmentDate);
+
+            if (!groups.length) {
+                groups.push([step]);
+                continue;
+            }
+
+            const lastGroup = groups[groups.length - 1];
+            const prevStep = lastGroup[lastGroup.length - 1];
+
+            const prevStart = new Date(prevStep.appointmentDate);
+            const prevDuration = Number(
+                servicesMap.get(prevStep.serviceId)?.durationMinutes || 0,
+            );
+            const prevEnd = this.addMinutes(prevStart, prevDuration);
+
+            const sameDoctor = prevStep.doctorId === step.doctorId;
+            const contiguous = prevEnd.getTime() === currentStart.getTime();
+
+            if (sameDoctor && contiguous) {
+                lastGroup.push(step);
+            } else {
+                groups.push([step]);
+            }
+        }
+
+        return groups;
+    }
+
+
+    async createGuestSmartBooking(body: {
+        lastName: string;
+        firstName: string;
+        middleName?: string;
+        phone: string;
+        phoneVerificationSessionId: string;
+        steps: Array<{
+            serviceId: string;
+            doctorId: string;
+            appointmentDate: string;
+        }>;
+        paymentMethod?: 'CASH';
+    }) {
+        if (!body.steps?.length) {
+            throw new BadRequestException('Не передано жодного кроку запису');
+        }
+
+        const phone = body.phone.trim();
+
+        await this.phoneVerificationService.ensureVerified(
+            body.phoneVerificationSessionId,
+            phone,
+        );
+
+        let patient: any = await this.patientRepository.findOne({
+            where: { phone },
+        });
+
+        if (!patient) {
+            const patientEntity = this.patientRepository.create({
+                lastName: body.lastName.trim(),
+                firstName: body.firstName.trim(),
+                middleName: body.middleName?.trim() || null,
+                phone,
+                isActive: true,
+            } as any);
+
+            patient = await this.patientRepository.save(patientEntity);
+        } else {
+            patient.lastName = body.lastName.trim();
+            patient.firstName = body.firstName.trim();
+            patient.middleName = body.middleName?.trim() || null;
+            patient.phone = phone;
+
+            patient = await this.patientRepository.save(patient);
+        }
+
+        const uniqueServiceIds = [...new Set(body.steps.map((step) => step.serviceId))];
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueServiceIds.map((id) => ({ id })),
+        });
+
+        const servicesMap = new Map(
+            services.map((service) => [
+                service.id,
+                {
+                    durationMinutes: Number(service.durationMinutes || 0),
+                    priceUah: Number(service.priceUah || 0),
+                },
+            ]),
+        );
+
+        for (const step of body.steps) {
+            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
+            await this.ensureScheduleAllowsBooking(
+                step.doctorId,
+                step.serviceId,
+                step.appointmentDate,
+            );
+        }
+
+        const groupedSteps = this.normalizeGroupedSteps(body.steps, servicesMap);
+        const createdAppointments: any[] = [];
+
+        for (const group of groupedSteps) {
+            const firstStep = group[0];
+
+            const groupAmount = group.reduce((sum, step) => {
+                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
+            }, 0);
+
+            const entity = this.appointmentRepository.create({
+                patient,
+                doctorId: firstStep.doctorId,
+                serviceId: firstStep.serviceId,
+                appointmentDate: new Date(firstStep.appointmentDate),
+                status: 'BOOKED',
+                source: 'GUEST',
+                recordingCompleted: false,
+                recordingCompletedAt: null,
+                paymentStatus: 'PENDING',
+                paymentMethod: 'CASH',
+                paymentProvider: null,
+                paymentReference: null,
+                paidAmountUah: groupAmount,
+                paidAt: null,
+                receiptNumber: null,
+            } as any);
+
+            const savedEntity = await this.appointmentRepository.save(entity);
+            createdAppointments.push(savedEntity);
+        }
+
+        return {
+            ok: true,
+            message: 'Гостьовий запис успішно створено',
+            appointments: createdAppointments,
+            groupedSteps,
+        };
+    }
+
+    async createPaidGooglePayTestGuestBooking(body: {
+        lastName: string;
+        firstName: string;
+        middleName?: string;
+        phone: string;
+        phoneVerificationSessionId: string;
+        steps: Array<{
+            serviceId: string;
+            doctorId: string;
+            appointmentDate: string;
+        }>;
+        googleTransactionId?: string;
+        googlePaymentToken?: string;
+        paymentMethod?: 'GOOGLE_PAY';
+    }) {
+        if (!body.steps?.length) {
+            throw new BadRequestException('Не передано жодного кроку запису');
+        }
+
+        const phone = body.phone.trim();
+
+        await this.phoneVerificationService.ensureVerified(
+            body.phoneVerificationSessionId,
+            phone,
+        );
+
+        let patient: any = await this.patientRepository.findOne({
+            where: { phone },
+        });
+
+        if (!patient) {
+            const patientEntity = this.patientRepository.create({
+                lastName: body.lastName.trim(),
+                firstName: body.firstName.trim(),
+                middleName: body.middleName?.trim() || null,
+                phone,
+                isActive: true,
+            } as any);
+
+            patient = await this.patientRepository.save(patientEntity);
+        } else {
+            patient.lastName = body.lastName.trim();
+            patient.firstName = body.firstName.trim();
+            patient.middleName = body.middleName?.trim() || null;
+            patient.phone = phone;
+
+            patient = await this.patientRepository.save(patient);
+        }
+
+        const uniqueServiceIds = [...new Set(body.steps.map((step) => step.serviceId))];
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueServiceIds.map((id) => ({ id })),
+        });
+
+        const servicesMap = new Map(
+            services.map((service) => [
+                service.id,
+                {
+                    durationMinutes: Number(service.durationMinutes || 0),
+                    priceUah: Number(service.priceUah || 0),
+                },
+            ]),
+        );
+
+        for (const step of body.steps) {
+            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
+            await this.ensureScheduleAllowsBooking(
+                step.doctorId,
+                step.serviceId,
+                step.appointmentDate,
+            );
+        }
+
+        const groupedSteps = this.normalizeGroupedSteps(body.steps, servicesMap);
+        const createdAppointments: any[] = [];
+        const receiptNumber = this.generateReceiptNumber();
+
+        for (const group of groupedSteps) {
+            const firstStep = group[0];
+
+            const groupAmount = group.reduce((sum, step) => {
+                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
+            }, 0);
+
+            const entity = this.appointmentRepository.create({
+                patient,
+                doctorId: firstStep.doctorId,
+                serviceId: firstStep.serviceId,
+                appointmentDate: new Date(firstStep.appointmentDate),
+                status: 'BOOKED',
+                source: 'GUEST',
+                recordingCompleted: false,
+                recordingCompletedAt: null,
+                paymentStatus: 'PAID',
+                paymentMethod: 'GOOGLE_PAY',
+                paymentProvider: 'GOOGLE_PAY_TEST',
+                paymentReference:
+                    body.googleTransactionId ||
+                    body.googlePaymentToken ||
+                    `gpay-test-${Date.now()}`,
+                paidAmountUah: groupAmount,
+                paidAt: new Date(),
+                receiptNumber,
+            } as any);
+
+            const savedEntity = await this.appointmentRepository.save(entity);
+            createdAppointments.push(savedEntity);
+        }
+
+        return {
+            ok: true,
+            message: 'Гостьовий запис з оплатою успішно створено',
+            receiptNumber,
+            appointments: createdAppointments,
+            groupedSteps,
+        };
+    }
+
+
+    async getAdminPatientAppointments(userId: string, patientId: string) {
+        const user = await this.userService.findById(userId);
+
+        if (!user || (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN)) {
+            throw new ForbiddenException('Доступ дозволено лише для ADMIN та SUPER_ADMIN');
+        }
+
+        const appointments = await this.appointmentRepository.find({
+            where: {
+                patient: { id: patientId },
+            },
+            relations: ['patient'],
+            order: {
+                appointmentDate: 'DESC',
+                createdAt: 'DESC',
+            },
+        });
+
+        const mapped = await Promise.all(
+            appointments.map(async (item) => {
+                const service = item.serviceId
+                    ? await this.clinicServiceRepository.findOne({
+                        where: { id: item.serviceId },
+                    })
+                    : null;
+
+                const doctor = item.doctorId
+                    ? await this.doctorRepository.findOne({
+                        where: [
+                            { id: item.doctorId },
+                            { user: { id: item.doctorId } },
+                        ],
+                        relations: ['user'],
+                    })
+                    : null;
+
+                const doctorName = doctor
+                    ? `${doctor.lastName ?? ''} ${doctor.firstName ?? ''} ${doctor.middleName ?? ''}`
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                    : null;
+
+                return {
+                    id: item.id,
+                    patientId: item.patient?.id ?? undefined,
+                    patient: item.patient
+                        ? {
+                            id: item.patient.id,
+                            lastName: item.patient.lastName,
+                            firstName: item.patient.firstName,
+                            middleName: item.patient.middleName,
+                            phone: item.patient.phone,
+                            email: item.patient.email,
+                        }
+                        : undefined,
+                    doctorId: item.doctorId,
+                    doctorName,
+                    serviceId: item.serviceId,
+                    serviceName: service?.name || null,
+                    appointmentDate: item.appointmentDate,
+                    status: item.status,
+                    source: item.source,
+                    recordingCompleted: item.recordingCompleted,
+                    recordingCompletedAt: item.recordingCompletedAt,
+                    createdAt: item.createdAt,
+                    updatedAt: item.updatedAt,
+                    paymentStatus: (item as any).paymentStatus ?? 'PENDING',
+                    paymentMethod: (item as any).paymentMethod ?? null,
+                    paidAmountUah:
+                        (item as any).paidAmountUah ??
+                        (service ? Number(service.priceUah) : null),
+                    receiptNumber: (item as any).receiptNumber ?? null,
+                    canPayNow: false,
+                    refundStatus: (item as any).refundStatus ?? 'NONE',
+                    refundRequestedAt: (item as any).refundRequestedAt ?? null,
+                    refundedAt: (item as any).refundedAt ?? null,
+                    refundAmountUah: (item as any).refundAmountUah ?? null,
+                };
+            }),
+        );
+
+        return {
+            ok: true,
+            appointments: mapped,
+        };
+    }
+
+    private async ensureAdminOrSuperAdmin(userId: string) {
+        const user = await this.userService.findById(userId);
+
+        if (!user) {
+            throw new ForbiddenException('Користувача не знайдено');
+        }
+
+        if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+            throw new ForbiddenException('Доступ дозволено лише для ADMIN та SUPER_ADMIN');
+        }
+
+        return user;
+    }
+
+    private async getAppointmentOrThrow(id: string) {
+        const appointment = await this.appointmentRepository.findOne({
+            where: { id },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new NotFoundException('Запис не знайдено');
+        }
+
+        return appointment;
+    }
+
+
+    async adminRefundAppointment(
+        userId: string,
+        id: string,
+        dto: AdminRefundAppointmentDto,
+    ) {
+        const actor = await this.ensureAdminOrSuperAdmin(userId);
+        const appointment = await this.getAppointmentOrThrow(id);
+
+        if (appointment.paymentStatus !== 'PAID') {
+            throw new BadRequestException('Повернення можливе лише для оплаченого запису');
+        }
+
+        const nextStatus = dto.refundStatus || 'PENDING';
+
+        appointment.refundStatus = nextStatus;
+        appointment.refundRequestedAt =
+            nextStatus === 'PENDING'
+                ? appointment.refundRequestedAt || new Date()
+                : appointment.refundRequestedAt || null;
+
+        appointment.refundedAt = nextStatus === 'REFUNDED' ? new Date() : null;
+        appointment.refundAmountUah =
+            (appointment as any).paidAmountUah != null
+                ? Number((appointment as any).paidAmountUah)
+                : appointment.refundAmountUah || null;
+        appointment.refundReference = dto.refundReference?.trim() || appointment.refundReference || null;
+
+        await this.appointmentRepository.save(appointment);
+
+        return {
+            ok: true,
+            message:
+                nextStatus === 'PENDING'
+                    ? 'Повернення позначено як очікуване'
+                    : nextStatus === 'REFUNDED'
+                        ? 'Повернення позначено як виконане'
+                        : 'Повернення позначено як невдале',
+            appointmentId: appointment.id,
+            refundStatus: appointment.refundStatus,
+            actorRole: actor.role,
+        };
+    }
+
+
+
+    async adminCancelAppointment(
+        userId: string,
+        id: string,
+        dto: AdminCancelAppointmentDto,
+    ) {
+        const actor = await this.ensureAdminOrSuperAdmin(userId);
+        const appointment = await this.getAppointmentOrThrow(id);
+
+        if (appointment.status === 'CANCELLED') {
+            throw new BadRequestException('Запис уже скасовано');
+        }
+
+        if (
+            appointment.paymentStatus === 'PAID' &&
+            appointment.refundStatus !== 'REFUNDED'
+        ) {
+            throw new BadRequestException(
+                'Не можна скасувати оплачений запис, поки не виконано повернення коштів',
+            );
+        }
+
+        appointment.status = 'CANCELLED';
+        appointment.cancelledAt = new Date();
+        appointment.cancelReason = dto.reason?.trim() || null;
+        appointment.cancelledByRole = actor.role;
+        appointment.cancelledByUserId = userId;
+
+        await this.appointmentRepository.save(appointment);
+
+        return {
+            ok: true,
+            message: 'Запис успішно скасовано',
+            appointmentId: appointment.id,
+            status: appointment.status,
+        };
+    }
+
+
+
+    async adminRescheduleAppointment(
+        userId: string,
+        id: string,
+        dto: AdminRescheduleAppointmentDto,
+    ) {
+        await this.ensureAdminOrSuperAdmin(userId);
+
+        const appointment = await this.getAppointmentOrThrow(id);
+
+        if (appointment.status === 'CANCELLED') {
+            throw new BadRequestException('Скасований запис не можна перенести');
+        }
+
+        const nextDoctorId = (dto.doctorId || appointment.doctorId || '').trim();
+        if (!nextDoctorId) {
+            throw new BadRequestException('Не вдалося визначити лікаря для перенесення');
+        }
+
+        const nextDate = new Date(dto.appointmentDate);
+        if (Number.isNaN(nextDate.getTime())) {
+            throw new BadRequestException('Некоректна дата перенесення');
+        }
+
+        const service = appointment.serviceId
+            ? await this.clinicServiceRepository.findOne({
+                where: { id: appointment.serviceId },
+            })
+            : null;
+
+        const durationMinutes = Number(service?.durationMinutes || 20);
+
+        await this.doctorScheduleService.ensureSlotAvailableForBooking(
+            nextDoctorId,
+            nextDate,
+            durationMinutes,
+        );
+
+        appointment.doctorId = nextDoctorId;
+        appointment.appointmentDate = nextDate;
+
+        await this.appointmentRepository.save(appointment);
+
+        return {
+            ok: true,
+            message: 'Запис успішно перенесено',
+            appointmentId: appointment.id,
+            appointmentDate: appointment.appointmentDate,
+            doctorId: appointment.doctorId,
+        };
+    }
+
 }

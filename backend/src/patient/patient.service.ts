@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {BadRequestException, Injectable, NotFoundException} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
 import { Patient } from './entities/patient.entity';
@@ -13,6 +13,12 @@ export class PatientService {
         private readonly patientRepository: Repository<Patient>,
         private readonly dataSource: DataSource,
         private readonly phoneVerificationService: PhoneVerificationService,
+        @InjectRepository(Appointment)
+        private readonly appointmentRepository: Repository<Appointment>,
+
+        @InjectRepository(PatientMedicalRecord)
+        private readonly medicalRecordRepository: Repository<PatientMedicalRecord>,
+
     ) {}
 
     async findByPhone(phone: string): Promise<Patient | null> {
@@ -39,86 +45,144 @@ export class PatientService {
     }
 
     async verifyAndLinkPhone(
-        accountPatientId: string,
+        currentPatientId: string,
         phone: string,
         phoneVerificationSessionId: string,
-    ): Promise<Patient> {
+    ) {
+        const normalizedPhone = phone.trim();
+
         await this.phoneVerificationService.ensureVerified(
             phoneVerificationSessionId,
-            phone,
+            normalizedPhone,
         );
 
-        const accountPatient = await this.patientRepository.findOne({
-            where: { id: accountPatientId },
-            relations: ['user', 'medicalRecord', 'appointments'],
+        const currentPatient = await this.patientRepository.findOne({
+            where: { id: currentPatientId },
+            relations: ['user'],
         });
 
-        if (!accountPatient) {
-            throw new BadRequestException('Пацієнта акаунта не знайдено');
+        if (!currentPatient) {
+            throw new NotFoundException('Поточного пацієнта не знайдено');
         }
 
-        const existingPatientWithPhone = await this.patientRepository.findOne({
-            where: {
-                phone,
-                id: Not(accountPatientId),
-            },
-            relations: ['user', 'medicalRecord', 'appointments'],
+        const existingPatient = await this.patientRepository.findOne({
+            where: { phone: normalizedPhone },
+            relations: ['user'],
         });
 
         if (
-            existingPatientWithPhone &&
-            existingPatientWithPhone.user &&
-            existingPatientWithPhone.user.id !== accountPatient.user?.id
+            existingPatient &&
+            existingPatient.id !== currentPatient.id &&
+            existingPatient.user
         ) {
-            throw new BadRequestException('Цей номер уже використовується іншим акаунтом');
+            throw new BadRequestException(
+                'Цей номер телефону вже використовується іншим користувачем',
+            );
         }
 
-        return this.dataSource.transaction(async (manager) => {
-            const patientRepo = manager.getRepository(Patient);
-            const appointmentRepo = manager.getRepository(Appointment);
-            const medicalRecordRepo = manager.getRepository(PatientMedicalRecord);
+        if (existingPatient && existingPatient.id !== currentPatient.id) {
+            const guestPatient = existingPatient;
 
-            const freshAccountPatient = await patientRepo.findOne({
-                where: { id: accountPatientId },
-                relations: ['user', 'medicalRecord'],
-            });
-
-            if (!freshAccountPatient) {
-                throw new BadRequestException('Пацієнта акаунта не знайдено');
-            }
-
-            const guestPatient = await patientRepo.findOne({
+            const guestAppointments = await this.appointmentRepository.find({
                 where: {
-                    phone,
-                    id: Not(accountPatientId),
+                    patient: { id: guestPatient.id },
                 },
-                relations: ['user', 'medicalRecord', 'appointments'],
+                relations: ['patient'],
             });
 
-            if (guestPatient && !guestPatient.user) {
-                await appointmentRepo
-                    .createQueryBuilder()
-                    .update(Appointment)
-                    .set({ patient: freshAccountPatient })
-                    .where('patientId = :patientId', { patientId: guestPatient.id })
-                    .execute();
-
-                if (guestPatient.medicalRecord && !freshAccountPatient.medicalRecord) {
-                    await medicalRecordRepo
-                        .createQueryBuilder()
-                        .update(PatientMedicalRecord)
-                        .set({ patient: freshAccountPatient })
-                        .where('id = :id', { id: guestPatient.medicalRecord.id })
-                        .execute();
-                }
-
-                await patientRepo.delete(guestPatient.id);
+            for (const appointment of guestAppointments) {
+                appointment.patient = currentPatient;
             }
 
-            freshAccountPatient.phone = phone;
-            freshAccountPatient.phoneVerified = true;
+            if (guestAppointments.length > 0) {
+                await this.appointmentRepository.save(guestAppointments);
+            }
 
-            return patientRepo.save(freshAccountPatient);
+            const guestMedicalRecord = await this.medicalRecordRepository.findOne({
+                where: {
+                    patient: { id: guestPatient.id },
+                },
+                relations: ['patient'],
+            });
+
+            if (guestMedicalRecord) {
+                const currentMedicalRecord = await this.medicalRecordRepository.findOne({
+                    where: {
+                        patient: { id: currentPatient.id },
+                    },
+                    relations: ['patient'],
+                });
+
+                if (!currentMedicalRecord) {
+                    guestMedicalRecord.patient = currentPatient;
+                    await this.medicalRecordRepository.save(guestMedicalRecord);
+                } else {
+                    await this.medicalRecordRepository.remove(guestMedicalRecord);
+                }
+            }
+
+            guestPatient.phone = null;
+            guestPatient.phoneVerified = false;
+            await this.patientRepository.save(guestPatient);
+            await this.patientRepository.remove(guestPatient);
+        }
+
+        currentPatient.phone = normalizedPhone;
+        currentPatient.phoneVerified = true;
+
+        return this.patientRepository.save(currentPatient);
+    }
+
+    async getAdminPatients(search: string) {
+        const normalizedSearch = search.trim().toLowerCase();
+
+        const patients = await this.patientRepository.find({
+            relations: ['user', 'appointments'],
+            order: {
+                lastName: 'ASC',
+                firstName: 'ASC',
+            },
+        });
+
+        const filtered = normalizedSearch
+            ? patients.filter((patient) => {
+                const fullName = `${patient.lastName || ''} ${patient.firstName || ''} ${patient.middleName || ''}`
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase();
+
+                const phone = (patient.phone || '').toLowerCase();
+                const email = (patient.email || '').toLowerCase();
+
+                return (
+                    fullName.includes(normalizedSearch) ||
+                    phone.includes(normalizedSearch) ||
+                    email.includes(normalizedSearch)
+                );
+            })
+            : patients;
+
+        return filtered.map((patient) => {
+            const sortedAppointments = [...(patient.appointments || [])].sort((a, b) => {
+                const aTime = a.appointmentDate ? new Date(a.appointmentDate).getTime() : 0;
+                const bTime = b.appointmentDate ? new Date(b.appointmentDate).getTime() : 0;
+                return bTime - aTime;
+            });
+
+            const lastAppointment = sortedAppointments[0] || null;
+
+            return {
+                id: patient.id,
+                lastName: patient.lastName,
+                firstName: patient.firstName,
+                middleName: patient.middleName,
+                phone: patient.phone,
+                email: patient.email,
+                phoneVerified: patient.phoneVerified,
+                hasAccount: Boolean(patient.user),
+                appointmentsCount: patient.appointments?.length || 0,
+                lastAppointmentDate: lastAppointment?.appointmentDate || null,
+            };
         });
     }
 }

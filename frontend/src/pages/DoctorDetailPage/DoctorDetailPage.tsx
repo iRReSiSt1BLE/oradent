@@ -744,15 +744,7 @@ export default function DoctorDetailPage() {
                                 <p>{doctor.phone}</p>
                             </div>
 
-                            {doctorSpecialties.length > 0 && (
-                                <div className="doctor-detail-page__specialties-view">
-                                    {doctorSpecialties.map((name) => (
-                                        <span key={name} className="doctor-detail-page__chip-view">
-                                            {name}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
+
 
                             {localizedInfoBlock && (
                                 <div className="doctor-detail-page__info-block">
@@ -853,10 +845,10 @@ export default function DoctorDetailPage() {
                             <button type="button" onClick={() => changeZoom(editorScale + 0.15)} disabled={editorScale >= MAX_ZOOM}>
                                 ЗБІЛЬШИТИ
                             </button>
-                            <button type="button" onClick={() => moveBy(MOVE_STEP, 0)}>←</button>
-                            <button type="button" onClick={() => moveBy(-MOVE_STEP, 0)}>→</button>
-                            <button type="button" onClick={() => moveBy(0, MOVE_STEP)}>↑</button>
-                            <button type="button" onClick={() => moveBy(0, -MOVE_STEP)}>↓</button>
+                            <button type="button" onClick={() => moveBy(MOVE_STEP, 0)}><svg style={{transform: 'rotate(270deg)'}} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#000" fill-rule="evenodd" d="m7.979 2.021l3.853 3.854l-.707.707l-2.646-2.646v9.043h-1V3.936L4.832 6.582l-.707-.707z" clip-rule="evenodd"/></svg></button>
+                            <button type="button" onClick={() => moveBy(-MOVE_STEP, 0)}><svg style={{transform: 'rotate(90deg)'}} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#000" fill-rule="evenodd" d="m7.979 2.021l3.853 3.854l-.707.707l-2.646-2.646v9.043h-1V3.936L4.832 6.582l-.707-.707z" clip-rule="evenodd"/></svg></button>
+                            <button type="button" onClick={() => moveBy(0, MOVE_STEP)}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#000" fill-rule="evenodd" d="m7.979 2.021l3.853 3.854l-.707.707l-2.646-2.646v9.043h-1V3.936L4.832 6.582l-.707-.707z" clip-rule="evenodd"/></svg></button>
+                            <button type="button" onClick={() => moveBy(0, -MOVE_STEP)}><svg style={{transform: 'rotate(180deg)'}} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#000" fill-rule="evenodd" d="m7.979 2.021l3.853 3.854l-.707.707l-2.646-2.646v9.043h-1V3.936L4.832 6.582l-.707-.707z" clip-rule="evenodd"/></svg></button>
                             <button
                                 type="button"
                                 onClick={() => {

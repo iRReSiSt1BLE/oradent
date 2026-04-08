@@ -8,6 +8,7 @@ import { AdminModule } from '../admin/admin.module';
 import { ServiceCategoryEntity } from './entities/service-category.entity';
 import { DoctorSpecialty } from '../doctor/entities/doctor-specialty.entity';
 import { DoctorModule } from '../doctor/doctor.module';
+import {Doctor} from "../doctor/entities/doctor.entity";
 
 @Module({
     imports: [
@@ -15,6 +16,7 @@ import { DoctorModule } from '../doctor/doctor.module';
             ClinicServiceEntity,
             ServiceCategoryEntity,
             DoctorSpecialty,
+            Doctor,
         ]),
         UserModule,
         AdminModule,

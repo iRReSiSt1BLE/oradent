@@ -51,7 +51,8 @@ export default function App() {
 
     function handleBook() {
         setIsCartOpen(false);
-        navigate('/appointment');
+
+        navigate('/smart-appointment');
     }
 
     return (

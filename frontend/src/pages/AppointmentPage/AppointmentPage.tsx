@@ -1,11 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
-import { createAuthenticatedAppointment, createGuestAppointment } from '../../shared/api/appointmentApi';
-import { getPublicDoctors, type PublicDoctorItem } from '../../shared/api/doctorApi';
-import { getActivePublicServices, type ClinicService } from '../../shared/api/servicesApi';
+import {
+    createAuthenticatedAppointment,
+    createGuestAppointment,
+} from '../../shared/api/appointmentApi';
+import {
+    getPublicDoctors,
+    type PublicDoctorItem,
+} from '../../shared/api/doctorApi';
+import {
+    getActivePublicServices,
+    type ClinicService,
+} from '../../shared/api/servicesApi';
 import { getToken } from '../../shared/utils/authStorage';
+import { useI18n } from '../../shared/i18n/I18nProvider';
 import './AppointmentPage.scss';
 
 type Mode = 'guest' | 'authenticated';
@@ -17,7 +27,11 @@ type AlertState = {
 
 function fullDoctorName(d: PublicDoctorItem | null): string {
     if (!d) return '';
-    return `${d.lastName ?? ''} ${d.firstName ?? ''} ${d.middleName ?? ''}`.replace(/\s+/g, ' ').trim();
+    const name = `${d.lastName ?? ''} ${d.firstName ?? ''} ${d.middleName ?? ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return name || d.userId || d.id;
 }
 
 function normalizeScheduleDateTime(date: string, time: string): string {
@@ -30,14 +44,87 @@ function toIso(dateTimeLocal: string): string {
     return new Date(dateTimeLocal).toISOString();
 }
 
-function resolveDoctorByAnyId(id: string, doctors: PublicDoctorItem[]): PublicDoctorItem | null {
+function resolveDoctorByAnyId(
+    id: string,
+    doctors: PublicDoctorItem[],
+): PublicDoctorItem | null {
     if (!id) return null;
     return doctors.find((d) => d.id === id || d.userId === id) ?? null;
+}
+
+function parseDbI18nValue(raw: unknown, language: string): string {
+    if (!raw) return '';
+
+    if (typeof raw === 'object' && raw !== null) {
+        const record = raw as Record<string, any>;
+
+        if ('ua' in record || 'en' in record || 'de' in record || 'fr' in record) {
+            return record[language] || record.ua || record.en || record.de || record.fr || '';
+        }
+
+        if ('i18n' in record && record.i18n && typeof record.i18n === 'object') {
+            const map = record.i18n as Record<string, string>;
+            return map[language] || map.ua || map.en || map.de || map.fr || '';
+        }
+
+        if ('value' in record && typeof record.value === 'string') {
+            return record.value;
+        }
+
+        if ('name' in record) {
+            return parseDbI18nValue(record.name, language);
+        }
+
+        if ('data' in record && record.data && typeof record.data === 'object') {
+            return (
+                record.data[language] ||
+                record.data.ua ||
+                record.data.en ||
+                record.data.de ||
+                record.data.fr ||
+                ''
+            );
+        }
+
+        return '';
+    }
+
+    if (typeof raw === 'string') {
+        if (!raw.includes('__ORADENT_I18N__')) {
+            return raw;
+        }
+
+        try {
+            const start = raw.indexOf('{');
+            if (start === -1) return raw;
+
+            const parsed = JSON.parse(raw.slice(start));
+            const data = parsed?.data;
+
+            if (data && typeof data === 'object') {
+                return data[language] || data.ua || data.en || data.de || data.fr || raw;
+            }
+
+            return raw;
+        } catch {
+            return raw;
+        }
+    }
+
+    return String(raw);
+}
+
+function serviceLabel(service: ClinicService, language: string): string {
+    const name = parseDbI18nValue((service as any).name, language) || 'Послуга';
+    const minutes = Number((service as any).durationMinutes || 0);
+    return `${name} (${minutes} хв)`;
 }
 
 export default function AppointmentPage() {
     const token = getToken();
     const location = useLocation();
+    const { language } = useI18n();
+
     const params = new URLSearchParams(location.search);
 
     const paramDoctorId = (params.get('doctorId') || '').trim();
@@ -46,7 +133,9 @@ export default function AppointmentPage() {
     const paramTime = (params.get('time') || '').trim();
     const paramDoctorName = (params.get('doctorName') || '').trim();
 
-    const isFromSchedule = Boolean((paramDoctorId || paramDoctorUserId) && paramDate && paramTime);
+    const isFromSchedule = Boolean(
+        (paramDoctorId || paramDoctorUserId) && paramDate && paramTime,
+    );
 
     const [mode, setMode] = useState<Mode>(token ? 'authenticated' : 'guest');
 
@@ -55,7 +144,7 @@ export default function AppointmentPage() {
     const [middleName, setMiddleName] = useState('');
     const [phone, setPhone] = useState('');
 
-    const [doctorId, setDoctorId] = useState(paramDoctorId || paramDoctorUserId);
+    const [doctorId, setDoctorId] = useState(paramDoctorUserId || paramDoctorId);
     const [serviceId, setServiceId] = useState('');
     const [dateTime, setDateTime] = useState('');
 
@@ -67,42 +156,50 @@ export default function AppointmentPage() {
     const [alert, setAlert] = useState<AlertState>(null);
 
     const selectedDoctor = useMemo(() => {
-        const ref = isFromSchedule ? (paramDoctorId || paramDoctorUserId) : doctorId;
+        const ref = isFromSchedule ? paramDoctorUserId || paramDoctorId : doctorId;
+        if (!ref) return null;
         return resolveDoctorByAnyId(ref, doctors);
     }, [doctors, doctorId, isFromSchedule, paramDoctorId, paramDoctorUserId]);
 
-    const bookingDoctorId = useMemo(() => {
-        if (selectedDoctor?.id) return selectedDoctor.id;
-        return paramDoctorId || doctorId || '';
-    }, [selectedDoctor, paramDoctorId, doctorId]);
+    const bookingDoctorUserId = useMemo(() => {
+        if (selectedDoctor?.userId) return selectedDoctor.userId;
+
+        const byParam = resolveDoctorByAnyId(paramDoctorUserId || paramDoctorId, doctors);
+        if (byParam?.userId) return byParam.userId;
+
+        const bySelect = resolveDoctorByAnyId(doctorId, doctors);
+        return bySelect?.userId || '';
+    }, [selectedDoctor, paramDoctorId, paramDoctorUserId, doctorId, doctors]);
 
     const filteredServices = useMemo(() => {
-        if (!selectedDoctor) return services;
+        if (!services.length) return [];
+        if (!bookingDoctorUserId) return services;
 
-        const doctorSpecialties = Array.isArray(selectedDoctor.specialties)
-            ? selectedDoctor.specialties.map((s) => s.trim().toLowerCase())
-            : selectedDoctor.specialty
-                ? [selectedDoctor.specialty.trim().toLowerCase()]
+        const byDoctor = services.filter((service) => {
+            const fromDoctorIds = Array.isArray((service as any).doctorIds)
+                ? ((service as any).doctorIds as string[]).filter(Boolean)
                 : [];
 
-        if (!doctorSpecialties.length) return services;
+            const fromDoctors = Array.isArray((service as any).doctors)
+                ? ((service as any).doctors as Array<Record<string, any>>)
+                    .map((doctor) => doctor?.userId || doctor?.id || '')
+                    .filter(Boolean)
+                : [];
 
-        const matched = services.filter((service) => {
-            if (!service.specialties?.length) return true;
+            const allRefs = [...fromDoctorIds, ...fromDoctors];
+            if (!allRefs.length) return true;
 
-            return service.specialties.some((specialty) =>
-                doctorSpecialties.includes(specialty.name.trim().toLowerCase()),
-            );
+            return allRefs.includes(bookingDoctorUserId);
         });
 
-        return matched.length > 0 ? matched : services;
-    }, [services, selectedDoctor]);
+        return byDoctor.length ? byDoctor : services;
+    }, [services, bookingDoctorUserId]);
 
     const lockedDoctorLabel = useMemo(() => {
         if (selectedDoctor) return fullDoctorName(selectedDoctor);
         if (paramDoctorName) return paramDoctorName;
-        if (paramDoctorId) return paramDoctorId;
         if (paramDoctorUserId) return paramDoctorUserId;
+        if (paramDoctorId) return paramDoctorId;
         return 'Обраний лікар';
     }, [selectedDoctor, paramDoctorName, paramDoctorId, paramDoctorUserId]);
 
@@ -123,18 +220,30 @@ export default function AppointmentPage() {
                 getActivePublicServices(),
             ]);
 
-            const doctorsList = Array.isArray(doctorsRes?.doctors) ? doctorsRes.doctors : [];
-            const servicesList = Array.isArray(servicesRes?.services) ? servicesRes.services : [];
+            const doctorsList = Array.isArray((doctorsRes as any)?.doctors)
+                ? (doctorsRes as any).doctors
+                : Array.isArray(doctorsRes)
+                    ? (doctorsRes as any)
+                    : [];
+
+            const servicesList = Array.isArray((servicesRes as any)?.services)
+                ? (servicesRes as any).services
+                : Array.isArray(servicesRes)
+                    ? (servicesRes as any)
+                    : [];
 
             setDoctors(doctorsList);
             setServices(servicesList);
 
             if (isFromSchedule) {
-                const match = resolveDoctorByAnyId(paramDoctorId || paramDoctorUserId, doctorsList);
-                setDoctorId(match?.id || paramDoctorId || paramDoctorUserId);
+                const match = resolveDoctorByAnyId(
+                    paramDoctorUserId || paramDoctorId,
+                    doctorsList,
+                );
+                setDoctorId(match?.userId || paramDoctorUserId || paramDoctorId);
                 setDateTime(normalizeScheduleDateTime(paramDate, paramTime));
-            } else if (!doctorId && doctorsList.length > 0) {
-                setDoctorId(doctorsList[0].id);
+            } else if (!doctorId && doctorsList.length) {
+                setDoctorId(doctorsList[0].userId || doctorsList[0].id);
             }
         } catch {
             showError('Не вдалося завантажити дані для запису');
@@ -149,7 +258,7 @@ export default function AppointmentPage() {
 
     useEffect(() => {
         if (!serviceId) return;
-        if (!filteredServices.some((s) => s.id === serviceId)) {
+        if (!filteredServices.some((service) => service.id === serviceId)) {
             setServiceId('');
         }
     }, [filteredServices, serviceId]);
@@ -161,7 +270,7 @@ export default function AppointmentPage() {
             ? normalizeScheduleDateTime(paramDate, paramTime)
             : dateTime;
 
-        if (!bookingDoctorId) {
+        if (!bookingDoctorUserId) {
             showError('Оберіть лікаря');
             return;
         }
@@ -186,7 +295,7 @@ export default function AppointmentPage() {
                 }
 
                 await createAuthenticatedAppointment(token, {
-                    doctorId: bookingDoctorId,
+                    doctorId: bookingDoctorUserId,
                     serviceId,
                     appointmentDate: toIso(finalDateTime),
                 });
@@ -201,10 +310,10 @@ export default function AppointmentPage() {
                     firstName: firstName.trim(),
                     middleName: middleName.trim() || undefined,
                     phone: phone.trim(),
-                    doctorId: bookingDoctorId,
+                    doctorId: bookingDoctorUserId,
                     serviceId,
                     appointmentDate: toIso(finalDateTime),
-                    phoneVerificationSessionId: undefined as unknown as string,
+                    phoneVerificationSessionId: undefined,
                 });
             }
 
@@ -231,7 +340,7 @@ export default function AppointmentPage() {
                     <div>
                         <h1 className="appointment-page__title">ЗАПИС НА ПРИЙОМ</h1>
                         <p className="appointment-page__subtitle">
-                            Оберіть послугу та час. Якщо Ви прийшли зі сторінки графіка, лікар і дата вже будуть підставлені.
+                            Гість підтверджує номер кожного разу. Авторизований користувач — тільки під час першого запису.
                         </p>
                     </div>
 
@@ -266,22 +375,42 @@ export default function AppointmentPage() {
                         <div className="appointment-page__grid">
                             <label className="appointment-page__field">
                                 <span>ПРІЗВИЩЕ</span>
-                                <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Прізвище" />
+                                <input
+                                    className="appointment-page__input"
+                                    value={lastName}
+                                    onChange={(e) => setLastName(e.target.value)}
+                                    placeholder="Прізвище"
+                                />
                             </label>
 
                             <label className="appointment-page__field">
                                 <span>ІМ'Я</span>
-                                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ім'я" />
+                                <input
+                                    className="appointment-page__input"
+                                    value={firstName}
+                                    onChange={(e) => setFirstName(e.target.value)}
+                                    placeholder="Ім'я"
+                                />
                             </label>
 
                             <label className="appointment-page__field appointment-page__field--full">
                                 <span>ПО БАТЬКОВІ</span>
-                                <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} placeholder="По батькові" />
+                                <input
+                                    className="appointment-page__input"
+                                    value={middleName}
+                                    onChange={(e) => setMiddleName(e.target.value)}
+                                    placeholder="По батькові"
+                                />
                             </label>
 
                             <label className="appointment-page__field appointment-page__field--full">
                                 <span>ТЕЛЕФОН</span>
-                                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." />
+                                <input
+                                    className="appointment-page__input"
+                                    value={phone}
+                                    onChange={(e) => setPhone(e.target.value)}
+                                    placeholder="+380..."
+                                />
                             </label>
                         </div>
                     )}
@@ -297,9 +426,9 @@ export default function AppointmentPage() {
                                     disabled={loading}
                                 >
                                     <option value="">Оберіть лікаря</option>
-                                    {doctors.map((d) => (
-                                        <option key={d.id} value={d.id}>
-                                            {fullDoctorName(d)}
+                                    {doctors.map((doctor) => (
+                                        <option key={doctor.id} value={doctor.userId || doctor.id}>
+                                            {fullDoctorName(doctor)}
                                         </option>
                                     ))}
                                 </select>
@@ -327,16 +456,20 @@ export default function AppointmentPage() {
                                 disabled={loading}
                             >
                                 <option value="">Оберіть послугу</option>
-                                {filteredServices.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.name} ({s.durationMinutes} хв, {s.priceUah} грн)
+                                {filteredServices.map((service) => (
+                                    <option key={service.id} value={service.id}>
+                                        {serviceLabel(service, language)}
                                     </option>
                                 ))}
                             </select>
                         </label>
                     </div>
 
-                    <button className="appointment-page__submit" type="submit" disabled={submitting || loading}>
+                    <button
+                        className="appointment-page__submit"
+                        type="submit"
+                        disabled={submitting || loading}
+                    >
                         {submitting ? 'ЗАПИС...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
                     </button>
                 </form>
