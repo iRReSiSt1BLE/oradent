@@ -1,6 +1,7 @@
 import {
     IsDateString,
     IsNotEmpty,
+    IsOptional,
     IsString,
     Length,
     Matches,
@@ -17,10 +18,10 @@ export class CreateGuestAppointmentDto {
     @Length(1, 100)
     firstName: string;
 
+    @IsOptional()
     @IsString()
-    @IsNotEmpty()
     @Length(1, 100)
-    middleName: string;
+    middleName?: string;
 
     @IsString()
     @IsNotEmpty()

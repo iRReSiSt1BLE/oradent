@@ -39,4 +39,20 @@ export class CreatePaidGooglePayTestBookingDto {
     @IsOptional()
     @IsEnum(PaymentMethod)
     paymentMethod?: PaymentMethod;
+
+    @IsOptional()
+    @IsString()
+    lastName?: string;
+
+    @IsOptional()
+    @IsString()
+    firstName?: string;
+
+    @IsOptional()
+    @IsString()
+    middleName?: string;
+
+    @IsOptional()
+    @IsString()
+    phone?: string;
 }

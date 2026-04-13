@@ -5,7 +5,6 @@ import {
     Get,
     Param,
     ParseUUIDPipe,
-    Patch,
     Post,
     Put,
     Query,
@@ -16,7 +15,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { DoctorScheduleService } from './doctor-schedule.service';
 import { UpdateDoctorScheduleDto } from './dto/update-doctor-schedule.dto';
 import { BlockDoctorDayDto } from './dto/block-doctor-day.dto';
-import { BlockDoctorSlotDto } from './dto/block-doctor-slot.dto';
 
 @Controller('doctor-schedule')
 export class DoctorScheduleController {
@@ -76,27 +74,7 @@ export class DoctorScheduleController {
         return this.scheduleService.unblockDay(req.user.id, doctorId, date);
     }
 
-    @UseGuards(JwtAuthGuard)
-    @Post(':doctorId/block-slot')
-    blockSlot(
-        @Req() req: { user: { id: string } },
-        @Param('doctorId', new ParseUUIDPipe()) doctorId: string,
-        @Body() dto: BlockDoctorSlotDto,
-    ) {
-        return this.scheduleService.blockSlot(req.user.id, doctorId, dto);
-    }
 
-    @UseGuards(JwtAuthGuard)
-    @Patch(':doctorId/unblock-slot')
-    unblockSlot(
-        @Req() req: { user: { id: string } },
-        @Param('doctorId', new ParseUUIDPipe()) doctorId: string,
-        @Query('date') date: string,
-        @Query('start') start: string,
-        @Query('end') end: string,
-    ) {
-        return this.scheduleService.unblockSlot(req.user.id, doctorId, date, start, end);
-    }
 
     @UseGuards(JwtAuthGuard)
     @Get(':doctorId/day-conflicts')

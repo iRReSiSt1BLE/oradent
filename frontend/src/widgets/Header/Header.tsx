@@ -1,4 +1,4 @@
-﻿import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { getToken, getUserRole, removeToken } from '../../shared/utils/authStorage';
 import { useI18n } from '../../shared/i18n/I18nProvider';
@@ -85,6 +85,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
         ...(isSuperAdmin ? [{ to: '/admins/list', label: t('header.adminsList') }] : []),
         ...(isSuperAdmin ? [{ to: '/admins/create', label: t('header.adminsCreate') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/patients', label: t('header.patients') }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/cabinets', label: t('header.cabinets') }] : []),
     ];
 
     useEffect(() => {

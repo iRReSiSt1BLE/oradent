@@ -96,13 +96,7 @@ export type CreatePaidGooglePayTestBookingStep = {
     appointmentDate: string;
 };
 
-export type CreatePaidGooglePayTestBookingPayload = {
-    steps: CreatePaidGooglePayTestBookingStep[];
-    googleTransactionId?: string;
-    googlePaymentToken?: string;
-    paymentMethod?: 'GOOGLE_PAY';
-    phoneVerificationSessionId?: string;
-};
+
 
 export type CreatePaidGooglePayTestBookingResponse = {
     ok: boolean;
@@ -116,13 +110,29 @@ export type CreateOfflineBookingStep = {
     doctorId: string;
     appointmentDate: string;
 };
+export type CreatePaidGooglePayTestBookingPayload = {
+    steps: CreatePaidGooglePayTestBookingStep[];
+    googleTransactionId?: string;
+    googlePaymentToken?: string;
+    paymentMethod?: 'GOOGLE_PAY';
+    phoneVerificationSessionId?: string;
+
+    lastName?: string;
+    firstName?: string;
+    middleName?: string;
+    phone?: string;
+};
 
 export type CreateOfflineBookingPayload = {
     steps: CreateOfflineBookingStep[];
     paymentMethod?: 'CASH';
     phoneVerificationSessionId?: string;
-};
 
+    lastName?: string;
+    firstName?: string;
+    middleName?: string;
+    phone?: string;
+};
 export type CreateOfflineBookingResponse = {
     ok: boolean;
     message: string;

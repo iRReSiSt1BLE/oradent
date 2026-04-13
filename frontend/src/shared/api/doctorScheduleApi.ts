@@ -55,18 +55,19 @@ export type RawDoctorScheduleResponse = {
         doctorId: string;
         timezone: string;
         slotMinutes: number;
-        templateType: 'WEEKLY' | 'CYCLE';
-        weeklyTemplate: Array<{
-            weekday: number;
-            enabled: boolean;
-            start: string;
-            end: string;
-            breaks: Array<{ start: string; end: string }>;
-        }>;
+        workDaysConfigEnabled: boolean;
+        workDaysMode: 'cycle' | 'manual';
         cycleTemplate: {
             workDays: number;
             offDays: number;
             anchorDate: string;
+            start: string;
+            end: string;
+            breaks: Array<{ start: string; end: string }>;
+        } | null;
+        manualWeekTemplate: {
+            anchorDate: string;
+            weekdays: number[];
             start: string;
             end: string;
             breaks: Array<{ start: string; end: string }>;
@@ -141,18 +142,20 @@ export async function updateDoctorScheduleSettings(
     body: {
         timezone?: string;
         slotMinutes?: number;
-        templateType?: 'WEEKLY' | 'CYCLE';
-        weeklyTemplate?: Array<{
-            weekday: number;
-            enabled: boolean;
-            start: string;
-            end: string;
-            breaks: Array<{ start: string; end: string }>;
-        }>;
+        workDaysConfigEnabled?: boolean;
+        workDaysMode?: 'cycle' | 'manual';
+        replaceDayOverrides?: boolean;
         cycleTemplate?: {
             workDays: number;
             offDays: number;
             anchorDate: string;
+            start: string;
+            end: string;
+            breaks: Array<{ start: string; end: string }>;
+        };
+        manualWeekTemplate?: {
+            anchorDate: string;
+            weekdays: number[];
             start: string;
             end: string;
             breaks: Array<{ start: string; end: string }>;
@@ -208,55 +211,4 @@ export async function unblockDoctorDay(
         method: 'DELETE',
         token,
     });
-}
-
-export async function blockDoctorSlot(
-    token: string,
-    doctorId: string,
-    body: {
-        date: string;
-        start: string;
-        end: string;
-        reason?: string;
-    },
-) {
-    return http<{
-        ok: boolean;
-        message: string;
-        blockedSlots: Array<{
-            date: string;
-            start: string;
-            end: string;
-            reason?: string;
-        }>;
-    }>(`/doctor-schedule/${doctorId}/block-slot`, {
-        method: 'POST',
-        token,
-        body: JSON.stringify(body),
-    });
-}
-
-export async function unblockDoctorSlot(
-    token: string,
-    doctorId: string,
-    date: string,
-    start: string,
-    end: string,
-) {
-    return http<{
-        ok: boolean;
-        message: string;
-        blockedSlots: Array<{
-            date: string;
-            start: string;
-            end: string;
-            reason?: string;
-        }>;
-    }>(
-        `/doctor-schedule/${doctorId}/unblock-slot?date=${encodeURIComponent(date)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
-        {
-            method: 'PATCH',
-            token,
-        },
-    );
 }

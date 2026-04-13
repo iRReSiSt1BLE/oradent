@@ -3,9 +3,7 @@ import {
     ArrayMinSize,
     IsArray,
     IsBoolean,
-    IsIn,
     IsInt,
-    IsNotEmpty,
     IsOptional,
     IsString,
     Length,
@@ -26,14 +24,20 @@ class BreakDto {
     end: string;
 }
 
-class WeeklyDayDto {
+class CycleTemplateDto {
     @IsInt()
-    @Min(0)
-    @Max(6)
-    weekday: number;
+    @Min(1)
+    @Max(31)
+    workDays: number;
 
-    @IsBoolean()
-    enabled: boolean;
+    @IsInt()
+    @Min(1)
+    @Max(31)
+    offDays: number;
+
+    @IsString()
+    @Matches(/^\d{4}-\d{2}-\d{2}$/)
+    anchorDate: string;
 
     @IsString()
     @Matches(/^\d{2}:\d{2}$/)
@@ -49,20 +53,18 @@ class WeeklyDayDto {
     breaks: BreakDto[];
 }
 
-class CycleTemplateDto {
-    @IsInt()
-    @Min(1)
-    @Max(31)
-    workDays: number;
-
-    @IsInt()
-    @Min(1)
-    @Max(31)
-    offDays: number;
-
+class ManualWeekTemplateDto {
     @IsString()
     @Matches(/^\d{4}-\d{2}-\d{2}$/)
     anchorDate: string;
+
+    @IsArray()
+    @ArrayMinSize(1)
+    @ArrayMaxSize(7)
+    @IsInt({ each: true })
+    @Min(0, { each: true })
+    @Max(6, { each: true })
+    weekdays: number[];
 
     @IsString()
     @Matches(/^\d{2}:\d{2}$/)
@@ -112,16 +114,14 @@ export class UpdateDoctorScheduleDto {
     @Max(180)
     slotMinutes?: number;
 
-    @IsIn(['WEEKLY', 'CYCLE'])
-    templateType: 'WEEKLY' | 'CYCLE';
+    @IsOptional()
+    @IsBoolean()
+    workDaysConfigEnabled?: boolean;
 
     @IsOptional()
-    @IsArray()
-    @ArrayMinSize(7)
-    @ArrayMaxSize(7)
-    @ValidateNested({ each: true })
-    @Type(() => WeeklyDayDto)
-    weeklyTemplate?: WeeklyDayDto[];
+    @IsString()
+    @Matches(/^(cycle|manual)$/)
+    workDaysMode?: 'cycle' | 'manual';
 
     @IsOptional()
     @ValidateNested()
@@ -129,8 +129,17 @@ export class UpdateDoctorScheduleDto {
     cycleTemplate?: CycleTemplateDto;
 
     @IsOptional()
+    @ValidateNested()
+    @Type(() => ManualWeekTemplateDto)
+    manualWeekTemplate?: ManualWeekTemplateDto;
+
+    @IsOptional()
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => DayOverrideDto)
     dayOverrides?: DayOverrideDto[];
+
+    @IsOptional()
+    @IsBoolean()
+    replaceDayOverrides?: boolean;
 }

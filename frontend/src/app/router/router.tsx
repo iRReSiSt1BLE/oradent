@@ -21,6 +21,7 @@ import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import SmartAppointmentPage from '../../pages/SmartAppointmentPage/SmartAppointmentPage';
 import MyAppointmentsPage from '../../pages/MyAppointmentsPage/MyAppointmentsPage';
 import AdminPatientsPage from '../../pages/AdminPatientsPage/AdminPatientsPage';
+import CabinetsAdminPage from '../../pages/CabinetsAdminPage/CabinetsAdminPage';
 
 function SuperAdminOnly() {
     const token = getToken();
@@ -84,6 +85,7 @@ export const router = createBrowserRouter([
                     { path: 'admin/doctors/schedule', element: <DoctorScheduleAdminPage /> },
                     { path: 'admin/doctors/:doctorId', element: <DoctorDetailPage /> },
                     { path: 'admin/patients', element: <AdminPatientsPage /> },
+                    { path: 'admin/cabinets', element: <CabinetsAdminPage /> },
                 ],
             },
 

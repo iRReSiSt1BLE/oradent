@@ -155,6 +155,11 @@ export class AppointmentController {
                 appointmentDate: string;
             }>;
             paymentMethod?: 'CASH';
+            phoneVerificationSessionId?: string;
+            lastName?: string;
+            firstName?: string;
+            middleName?: string;
+            phone?: string;
         },
     ) {
         return this.appointmentService.createOfflineBooking(req.user.id, dto);

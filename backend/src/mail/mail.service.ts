@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
+import { existsSync } from 'fs';
+import { join } from 'path';
+const PDFDocument = require('pdfkit');
 
 @Injectable()
 export class MailService {
@@ -15,6 +18,298 @@ export class MailService {
                 user: this.configService.get('MAIL_USER'),
                 pass: this.configService.get('MAIL_PASS'),
             },
+        });
+    }
+    private resolvePdfFontPath() {
+        const candidates = [
+            join(process.cwd(), 'src', 'common', 'assets', 'fonts', 'DejaVuSans.ttf'),
+            join(process.cwd(), 'dist', 'common', 'assets', 'fonts', 'DejaVuSans.ttf'),
+            join(__dirname, '..', 'common', 'assets', 'fonts', 'DejaVuSans.ttf'),
+            join(__dirname, '..', '..', 'common', 'assets', 'fonts', 'DejaVuSans.ttf'),
+        ];
+
+        const found = candidates.find((path) => existsSync(path));
+
+        if (!found) {
+            throw new Error(
+                'Не знайдено файл шрифту DejaVuSans.ttf. Поклади реальний TTF у src/common/assets/fonts/DejaVuSans.ttf',
+            );
+        }
+
+        return found;
+    }
+
+    private escapeHtml(value: string) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    private formatDateTimeUa(value: Date | string | null | undefined) {
+        if (!value) return 'Дата не вказана';
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return 'Дата не вказана';
+
+        return date.toLocaleString('uk-UA', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    }
+
+    private async buildReceiptPdf(params: {
+        patientName: string;
+        receiptNumber: string;
+        appointmentDate: Date | null;
+        amountUah: number;
+        appointmentLines: string[];
+    }) {
+        const { patientName, receiptNumber, appointmentDate, amountUah, appointmentLines } = params;
+
+        const fontPath = this.resolvePdfFontPath();
+
+        return await new Promise<Buffer>((resolve, reject) => {
+            const doc = new PDFDocument({
+                size: 'A4',
+                margin: 36,
+                info: {
+                    Title: 'Квитанція ORADENT',
+                    Author: 'ORADENT',
+                    Subject: 'Підтвердження запису',
+                },
+            });
+
+            const chunks: Buffer[] = [];
+
+            doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+            doc.on('end', () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            doc.font(fontPath);
+
+            const pageWidth = doc.page.width;
+            const pageHeight = doc.page.height;
+            const left = 42;
+            const right = pageWidth - 42;
+            const width = right - left;
+            const bottomSafeY = pageHeight - 90;
+
+            const colors = {
+                border: '#1f2937',
+                muted: '#6b7280',
+                text: '#111827',
+                accent: '#7fd6cb',
+                soft: '#eef7f6',
+                white: '#ffffff',
+            };
+
+            const formatMoney = (value: number) =>
+                `${Number(value || 0).toFixed(2).replace('.00', '')} грн`;
+
+            const rows = appointmentLines.map((line, index) => {
+                const parts = line.split(' — ');
+                return {
+                    no: String(index + 1),
+                    service: parts[0] || 'Послуга',
+                    date: parts[1] || 'Дата не вказана',
+                    doctor: parts.slice(2).join(' — ') || 'Лікар не вказаний',
+                };
+            });
+
+            const drawHeader = () => {
+                doc.roundedRect(left, 28, width, pageHeight - 56, 12).lineWidth(1).stroke(colors.border);
+
+                doc.rect(left, 28, width, 34).fillAndStroke(colors.accent, colors.border);
+
+                doc
+                    .font(fontPath)
+                    .fontSize(13)
+                    .fillColor(colors.white)
+                    .text('ORADENT', left, 39, {
+                        width,
+                        align: 'center',
+                        characterSpacing: 3,
+                    });
+
+                doc
+                    .font(fontPath)
+                    .fontSize(22)
+                    .fillColor(colors.text)
+                    .text('КВИТАНЦІЯ ПРО ЗАПИС', left, 82, {
+                        width,
+                        align: 'center',
+                    });
+
+                doc
+                    .font(fontPath)
+                    .fontSize(10)
+                    .fillColor(colors.muted)
+                    .text('Документ підтверджує створення запису в системі ORADENT', left, 112, {
+                        width,
+                        align: 'center',
+                    });
+            };
+
+            const drawInfoBox = (startY: number) => {
+                const infoBoxHeight = 148;
+
+                doc.roundedRect(left + 16, startY, width - 32, infoBoxHeight, 10).lineWidth(1).stroke(colors.border);
+
+                const drawLabelValue = (
+                    x: number,
+                    y: number,
+                    label: string,
+                    value: string,
+                    valueOffset = 165,
+                ) => {
+                    doc.font(fontPath).fontSize(10).fillColor(colors.muted).text(label, x, y);
+                    doc.font(fontPath).fontSize(12).fillColor(colors.text).text(value, x + valueOffset, y - 1, {
+                        width: width - valueOffset - 70,
+                    });
+                };
+
+                drawLabelValue(left + 30, startY + 18, 'Номер квитанції', receiptNumber);
+                drawLabelValue(left + 30, startY + 44, 'Пацієнт', patientName);
+                drawLabelValue(left + 30, startY + 70, 'Дата створення', this.formatDateTimeUa(new Date()));
+                drawLabelValue(left + 30, startY + 96, 'Дата першого запису', this.formatDateTimeUa(appointmentDate));
+                drawLabelValue(left + 30, startY + 122, 'Загальна сума', formatMoney(amountUah));
+
+                return startY + infoBoxHeight + 22;
+            };
+
+            const drawTableHeader = (startY: number) => {
+                const tableLeft = left + 16;
+                const tableWidth = width - 32;
+
+                const colNo = 36;
+                const colService = 370;
+                const colDate = tableWidth - colNo - colService;
+
+                doc
+                    .font(fontPath)
+                    .fontSize(14)
+                    .fillColor(colors.text)
+                    .text('Перелік послуг', left + 18, startY);
+
+                const headerY = startY + 24;
+
+                doc.rect(tableLeft, headerY, tableWidth, 30).fillAndStroke(colors.accent, colors.border);
+
+                doc.font(fontPath).fontSize(10).fillColor(colors.text);
+                doc.text('№', tableLeft + 10, headerY + 10, { width: colNo - 12 });
+                doc.text('Послуга та лікар', tableLeft + colNo + 8, headerY + 10, { width: colService - 16 });
+                doc.text('Дата і час', tableLeft + colNo + colService + 8, headerY + 10, { width: colDate - 16 });
+
+                return {
+                    y: headerY + 30,
+                    tableLeft,
+                    tableWidth,
+                    colNo,
+                    colService,
+                    colDate,
+                };
+            };
+
+            drawHeader();
+
+            let y = 148;
+            y = drawInfoBox(y);
+
+            let table = drawTableHeader(y);
+            y = table.y;
+
+            rows.forEach((row, rowIndex) => {
+                const serviceText = row.service;
+                const doctorText = `Лікар: ${row.doctor}`;
+
+                const serviceHeight = doc.heightOfString(serviceText, {
+                    width: table.colService - 16,
+                    align: 'left',
+                });
+
+                const doctorHeight = doc.heightOfString(doctorText, {
+                    width: table.colService - 16,
+                    align: 'left',
+                });
+
+                const dateHeight = doc.heightOfString(row.date, {
+                    width: table.colDate - 16,
+                    align: 'left',
+                });
+
+                const rowHeight = Math.max(64, Math.max(serviceHeight + doctorHeight + 16, dateHeight + 20));
+
+                if (y + rowHeight + 90 > bottomSafeY) {
+                    doc.addPage();
+                    drawHeader();
+                    y = 60;
+                    y = drawInfoBox(y);
+                    table = drawTableHeader(y);
+                    y = table.y;
+                }
+
+                const fill = rowIndex % 2 === 0 ? colors.white : colors.soft;
+
+                doc.rect(table.tableLeft, y, table.tableWidth, rowHeight).fillAndStroke(fill, colors.border);
+
+                doc.font(fontPath).fontSize(10).fillColor(colors.text);
+                doc.text(row.no, table.tableLeft + 10, y + 10, {
+                    width: table.colNo - 12,
+                });
+
+                doc.font(fontPath).fontSize(12).fillColor(colors.text);
+                doc.text(serviceText, table.tableLeft + table.colNo + 8, y + 10, {
+                    width: table.colService - 16,
+                    lineGap: 2,
+                });
+
+                doc.font(fontPath).fontSize(10).fillColor(colors.muted);
+                doc.text(doctorText, table.tableLeft + table.colNo + 8, y + 34, {
+                    width: table.colService - 16,
+                    lineGap: 2,
+                });
+
+                doc.font(fontPath).fontSize(12).fillColor(colors.text);
+                doc.text(row.date, table.tableLeft + table.colNo + table.colService + 8, y + 10, {
+                    width: table.colDate - 16,
+                    lineGap: 2,
+                });
+
+                y += rowHeight;
+            });
+
+            y += 22;
+
+            if (y + 68 > bottomSafeY) {
+                doc.addPage();
+                drawHeader();
+                y = 60;
+            }
+
+            doc.roundedRect(left + 16, y, width - 32, 68, 10).lineWidth(1).stroke(colors.border);
+
+            doc
+                .font(fontPath)
+                .fontSize(11)
+                .fillColor(colors.text)
+                .text(
+                    'Ця квитанція сформована автоматично та є підтвердженням запису на прийом у клініці ORADENT.',
+                    left + 28,
+                    y + 18,
+                    {
+                        width: width - 56,
+                        align: 'center',
+                        lineGap: 3,
+                    },
+                );
+
+            doc.end();
         });
     }
 
@@ -154,116 +449,84 @@ export class MailService {
     async sendPaidAppointmentConfirmation(params: {
         to: string;
         patientName: string;
-        appointmentId: string;
         appointmentDate: Date | null;
-        receiptNumber: string;
         amountUah: number;
-        paymentMethod: string;
+        appointmentLines: string[];
+        receiptNumber?: string;
     }) {
         const {
             to,
             patientName,
-            appointmentId,
             appointmentDate,
-            receiptNumber,
             amountUah,
-            paymentMethod,
+            appointmentLines,
+            receiptNumber,
         } = params;
 
-        const formattedDate = appointmentDate
-            ? new Date(appointmentDate).toLocaleString('uk-UA')
-            : 'Дата не вказана';
+        const resolvedReceiptNumber =
+            receiptNumber ||
+            `ORADENT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
+        const linesHtml = appointmentLines.length
+            ? appointmentLines
+                .map((line) => `<li style="margin:0 0 10px;">${this.escapeHtml(line)}</li>`)
+                .join('')
+            : '<li>Дані про послуги не вказані</li>';
+
+        const pdfBuffer = await this.buildReceiptPdf({
+            patientName,
+            receiptNumber: resolvedReceiptNumber,
+            appointmentDate,
+            amountUah,
+            appointmentLines,
+        });
 
         await this.transporter.sendMail({
             from: this.configService.get('MAIL_FROM'),
             to,
-            subject: 'ORADENT — запис підтверджено та оплачено',
-            html:
-                `<div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
-            <div style="
-        max-width:640px;
-        margin:0 auto;
-        background:#f8f8f8;
-        border:1.5px solid #111111;
-        border-radius:14px;
-        box-shadow:8px 8px 0 #111111;
-        overflow:hidden;
-        ">
-            <div style="
-            background:#84d8ce;
-            padding:14px 20px;
-            text-align:center;
-            border-bottom:1.5px solid #111111;
-            ">
-                <div style="
-                color:#ffffff;
-                font-size:12px;
-                font-weight:700;
-                letter-spacing:0.28em;
-                text-transform:uppercase;
-                ">
-                    ORADENT
-                </div>
-            </div>
+            subject: 'ORADENT — підтвердження запису',
+            html: `
+            <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
+                <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
+                    <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
+                        <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">
+                            ORADENT
+                        </div>
+                    </div>
 
-            <div style="padding:28px 24px 24px;">
-                <h1 style="
-                margin:0 0 18px;
-                text-align:center;
-                font-size:30px;
-                line-height:1.15;
-                font-weight:700;
-                color:#111111;
-                text-transform:uppercase;
-                ">
-                    ЗАПИС ПІДТВЕРДЖЕНО
-                </h1>
+                    <div style="padding:28px 24px 24px;">
+                        <h1 style="margin:0 0 18px;text-align:center;font-size:30px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">
+                            ЗАПИС ПІДТВЕРДЖЕНО
+                        </h1>
 
-                <p style="
-                margin:0 0 18px;
-                color:#111111;
-                font-size:15px;
-                line-height:1.7;
-                text-align:center;
-                ">
-                    Добрий день, <b>${patientName}</b>.<br/>
-                    Ваш запис успішно підтверджено та оплачено.
-                </p>
+                        <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#111111;">
+                            Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.
+                        </p>
 
-                <div style="
-                margin:0 0 20px;
-                padding:18px 16px;
-                border:2px solid #111111;
-                background:#ffffff;
-                ">
-                    <div style="
-                    display:grid;
-                    row-gap:10px;
-                    font-size:14px;
-                    color:#111111;
-                    line-height:1.6;
-                    ">
-                        <div><b>ID запису:</b> ${appointmentId}</div>
-                        <div><b>Дата та час:</b> ${formattedDate}</div>
-                        <div><b>Сума:</b> ${amountUah} грн</div>
-                        <div><b>Спосіб оплати:</b> ${paymentMethod}</div>
-                        <div><b>Номер квитанції:</b> ${receiptNumber}</div>
-                        <div><b>Статус:</b> PAID</div>
+                        <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                            <div style="margin:0 0 10px;font-size:15px;font-weight:700;color:#111111;">
+                                Обрані послуги, дата та лікарі:
+                            </div>
+
+                            <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.7;color:#111111;">
+                                ${linesHtml}
+                            </ul>
+                        </div>
+
+                        <p style="margin:0;font-size:14px;line-height:1.7;color:#6b7280;text-align:center;">
+                            PDF-квитанція прикріплена до цього листа.
+                        </p>
                     </div>
                 </div>
-
-                <p style="
-                margin:0;
-                color:#4b5563;
-                font-size:13px;
-                line-height:1.7;
-                text-align:center;
-                ">
-                    Дякуємо, що обрали <b>ORADENT</b>.
-                </p>
             </div>
-            </div>
-            </div>`,
+        `,
+            attachments: [
+                {
+                    filename: `receipt-${resolvedReceiptNumber}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
         });
     }
 }

@@ -180,9 +180,9 @@
             border-color 0.18s ease;
   }
 
-  &__slot span{
-     margin-left: 50%;
-    transform: translateX(-50%);
+  &__slot span {
+    margin-left: 0;
+    transform: none;
   }
   &__primary,
   &__secondary,
@@ -216,8 +216,6 @@
   &__primary:hover:not(:disabled),
   &__verify-button:hover:not(:disabled),
   &__secondary:hover:not(:disabled),
-  &__slot:hover:not(:disabled),
-  &__day:hover:not(:disabled),
   &__doctor-chip:hover:not(:disabled) {
     box-shadow: 4px 4px 0 #1e1e1e;
     transform: translate(-1px, -1px);
@@ -395,7 +393,7 @@
 
   &__step {
     display: grid;
-    grid-template-columns: 56px 1fr;
+    grid-template-columns: 1fr;
     gap: 16px;
     border: 1px solid #d7dde3;
     background: #fff;
@@ -589,7 +587,7 @@
 
   &__slots {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
 
@@ -934,4 +932,937 @@
 }
 .smart-appointment-page__modal.modalphone{
   width: 550px;
+}
+
+.smart-appointment-page__modal--manual-compact {
+  width: min(760px, 100%);
+  max-height: min(84vh, 760px);
+}
+
+.smart-appointment-page__modal-body--manual {
+  gap: 18px;
+}
+
+.smart-appointment-page__manual-step {
+  display: grid;
+  gap: 16px;
+}
+
+.smart-appointment-page__manual-step-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+
+  h4 {
+    margin: 0 0 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 20px;
+    color: #24324a;
+  }
+
+  p {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+}
+
+.smart-appointment-page__manual-step-head--calendar {
+  align-items: center;
+}
+
+.smart-appointment-page__manual-search {
+  display: grid;
+  gap: 6px;
+
+  span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #24324a;
+  }
+
+  input {
+    width: 100%;
+    min-height: 42px;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: #24324a;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  input:focus {
+    box-shadow: 4px 4px 0 #1e1e1e;
+    transform: translate(-1px, -1px);
+  }
+}
+
+.smart-appointment-page__doctor-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(50vh, 430px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.smart-appointment-page__doctor-list--skeleton {
+  overflow: hidden;
+}
+
+.smart-appointment-page__doctor-card,
+.smart-appointment-page__doctor-card-skeleton {
+  min-height: 82px;
+  border: 1px solid #d7dde3;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.smart-appointment-page__doctor-card {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  transition: background 0.18s ease, border-color 0.18s ease, filter 0.18s ease;
+}
+
+.smart-appointment-page__doctor-card:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.smart-appointment-page__doctor-card.is-selected {
+  background: #eefaf7;
+  border-color: #111;
+  box-shadow: inset 0 0 0 1px #111;
+}
+
+.smart-appointment-page__doctor-card-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.smart-appointment-page__doctor-card .smart-appointment-page__avatar {
+  width: 52px;
+  height: 52px;
+  flex-basis: 52px;
+}
+
+.smart-appointment-page__doctor-card-meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+
+  strong {
+    font-size: 14px;
+    color: #24324a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  span {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #7b8591;
+  }
+}
+
+.smart-appointment-page__doctor-card-action {
+  font-size: 12px;
+  font-weight: 700;
+  color: #24324a;
+  flex-shrink: 0;
+}
+
+.smart-appointment-page__doctor-card-skeleton,
+.smart-appointment-page__skeleton {
+  background: linear-gradient(90deg, #f2f4f6 0%, #f7f9fb 50%, #f2f4f6 100%);
+  background-size: 200% 100%;
+  animation: smart-appointment-page-skeleton 1.15s linear infinite;
+}
+
+.smart-appointment-page__ghost-back {
+  min-height: 42px;
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid #404040;
+  background: #fff;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #24324a;
+  cursor: pointer;
+  transition: background 0.18s ease, opacity 0.18s ease;
+}
+
+.smart-appointment-page__ghost-back:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.smart-appointment-page__manual-calendar-card {
+  border: 1px solid #404040;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 440px;
+}
+
+.smart-appointment-page__calendar-top {
+  display: grid;
+  gap: 12px;
+
+  h4 {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: #24324a;
+  }
+}
+
+.smart-appointment-page__month-nav {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 12px;
+}
+
+.smart-appointment-page__month-nav-btn {
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  min-height: 46px;
+  border: 1px solid #404040;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px;
+  color: #24324a;
+  cursor: pointer;
+  transition: background 0.18s ease, opacity 0.18s ease, filter 0.18s ease;
+  padding: 0;
+}
+
+.smart-appointment-page__month-nav-btn:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.smart-appointment-page__month-nav-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.smart-appointment-page__month-nav-btn--back {
+  margin-left: auto;
+}
+
+.smart-appointment-page__month-label {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: #7b8591;
+  text-align: center;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.smart-appointment-page__calendar-scroll {
+  overflow: hidden;
+  width: 100%;
+}
+
+.smart-appointment-page__weekday-row,
+.smart-appointment-page__month-grid,
+.smart-appointment-page__skeleton-grid-days {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.smart-appointment-page__weekday-row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.smart-appointment-page__weekday-cell {
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #24324a;
+}
+
+.smart-appointment-page__month-grid,
+.smart-appointment-page__skeleton-grid-days {
+  display: grid;
+  gap: 8px;
+}
+
+.smart-appointment-page__day {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 54px;
+  padding: 6px;
+  border: 1px solid #d7dde3;
+  background: #fff;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  transition: background 0.18s ease, opacity 0.18s ease, border-color 0.18s ease, filter 0.18s ease;
+  box-sizing: border-box;
+  min-width: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.smart-appointment-page__day:hover:not(:disabled) {
+  filter: brightness(0.95);
+  box-shadow: none;
+  transform: none;
+}
+
+.smart-appointment-page__day.is-free {
+  background: #e7fbf2;
+}
+
+.smart-appointment-page__day.is-busy {
+  background: #ececec;
+}
+
+.smart-appointment-page__day.is-busy .smart-appointment-page__day-number,
+.smart-appointment-page__day.is-busy .smart-appointment-page__day-meta {
+  color: #666;
+}
+
+.smart-appointment-page__day.is-off {
+  background: #f2f2f0;
+}
+
+.smart-appointment-page__day.is-off .smart-appointment-page__day-number,
+.smart-appointment-page__day.is-off .smart-appointment-page__day-meta {
+  color: #6f7b88;
+}
+
+.smart-appointment-page__day.is-selected {
+  border-color: #111;
+  box-shadow: inset 0 0 0 1px #111;
+  background: #bde8dc;
+}
+
+.smart-appointment-page__day--empty {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.smart-appointment-page__day-number {
+  font-size: 15px;
+  font-weight: 700;
+  color: #24324a;
+  line-height: 1;
+}
+
+.smart-appointment-page__day-meta {
+  font-size: 10px;
+  color: #6f7b88;
+  line-height: 1;
+}
+
+.smart-appointment-page__slots-wrap {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 400px;
+}
+
+.smart-appointment-page__slots-head-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 50px;
+  align-items: center;
+  gap: 12px;
+}
+
+.smart-appointment-page__selection-summary {
+  margin: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7b8591;
+}
+
+.smart-appointment-page__slots-grid,
+.smart-appointment-page__skeleton-grid-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.smart-appointment-page__slot {
+  min-height: 46px;
+  height: 46px;
+  padding: 0 10px;
+  border: 1px solid #d7dde3;
+  background: #79ddc8;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #24324a;
+  transition: background 0.18s ease, border-color 0.18s ease, filter 0.18s ease, opacity 0.18s ease;
+  box-shadow: none;
+  transform: none;
+}
+
+.smart-appointment-page__slot:hover:not(:disabled) {
+  filter: brightness(0.94);
+  box-shadow: none;
+  transform: none;
+}
+
+.smart-appointment-page__slot.is-selected {
+  border-color: #111;
+  box-shadow: inset 0 0 0 2px #111;
+}
+
+.smart-appointment-page__state--manual-empty {
+  min-height: 120px;
+  border: 1px solid #d7dde3;
+  background: #fbfbfa;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.smart-appointment-page__skeleton--day {
+  aspect-ratio: 1 / 1;
+  min-height: 54px;
+  border: 1px solid #d7dde3;
+}
+
+.smart-appointment-page__skeleton--slot {
+  height: 50px;
+  border: 1px solid #d7dde3;
+}
+
+@keyframes smart-appointment-page-skeleton {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .smart-appointment-page__slots-grid,
+  .smart-appointment-page__skeleton-grid-slots {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .smart-appointment-page__modal--manual-compact {
+    width: 100%;
+  }
+
+  .smart-appointment-page__manual-calendar-card {
+    min-height: auto;
+  }
+
+  .smart-appointment-page__month-nav {
+    gap: 8px;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  .smart-appointment-page__month-nav-btn,
+  .smart-appointment-page__month-nav-btn--back {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .smart-appointment-page__slots-grid,
+  .smart-appointment-page__skeleton-grid-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .smart-appointment-page__doctor-card {
+    align-items: flex-start;
+  }
+
+  .smart-appointment-page__doctor-card-action {
+    display: none;
+  }
+
+  .smart-appointment-page__slots-grid,
+  .smart-appointment-page__skeleton-grid-slots {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.smart-appointment-page__modal--recommended-compact {
+  width: min(760px, 100%);
+  max-height: min(84vh, 760px);
+}
+
+
+.smart-appointment-page {
+  &__panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+
+    h2 {
+      margin: 0;
+    }
+  }
+
+  &__secondary,
+  &__primary,
+  &__verify-button {
+    width: 220px;
+    max-width: 100%;
+  }
+
+  &__secondary--head,
+  &__secondary--compact {
+    width: 220px;
+    min-width: 220px;
+    max-width: 100%;
+  }
+
+  &__entry-actions {
+    justify-content: center;
+  }
+
+  &__cart-item {
+    gap: 10px;
+  }
+
+  &__picked-card {
+    display: grid;
+    gap: 10px;
+    align-items: start;
+  }
+
+  &__picked-card--empty {
+    min-height: 54px;
+    align-content: start;
+  }
+
+  &__picked-card-top {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+  }
+
+  &__picked-card-meta {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  &__picked-card-actions {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  &__picked-name {
+    line-height: 1.25;
+    font-size: 16px;
+  }
+
+  &__picked-time {
+    line-height: 1.35;
+  }
+
+  &__verify-card {
+    display: grid;
+    gap: 14px;
+    border: 1px solid #404040;
+    background: #fff;
+    padding: 20px;
+  }
+
+  &__verify-card-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 16px;
+    align-items: center;
+  }
+
+  &__verify-status {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #a66b00;
+  }
+
+  &__modal--manual-compact,
+  &__modal--recommended-compact {
+    width: min(700px, 100%);
+    max-height: min(84vh, 760px);
+  }
+
+  &__modal--phone {
+    width: min(680px, 100%);
+    max-height: min(86vh, 760px);
+  }
+
+  &__modal-body--phone {
+    gap: 18px;
+  }
+
+  &__phone-modal-text {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    color: #24324a;
+  }
+
+  &__phone-modal-wait {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #586372;
+  }
+
+  &__phone-modal-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid #c7cfd8;
+    border-top-color: #7fd1c4;
+    animation: smart-appointment-phone-spin 0.8s linear infinite;
+    flex: 0 0 18px;
+  }
+
+  &__modal-actions--phone {
+    justify-content: center;
+  }
+}
+
+@keyframes smart-appointment-phone-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .smart-appointment-page {
+    &__verify-card-top {
+      grid-template-columns: 1fr;
+    }
+
+    &__secondary--head,
+    &__secondary--compact,
+    &__primary,
+    &__secondary,
+    &__verify-button {
+      width: 100%;
+      min-width: 0;
+    }
+
+    &__panel-head {
+      align-items: stretch;
+    }
+
+    &__picked-card-actions {
+      justify-content: stretch;
+    }
+  }
+}
+
+
+.smart-appointment-page {
+  &__entry-actions--double {
+    justify-content: center;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  &__primary--wide {
+    width: 360px;
+    max-width: 100%;
+  }
+
+  &__primary--confirm {
+    width: 276px;
+    max-width: 100%;
+  }
+
+  &__google-pay-wrap {
+    justify-items: center;
+    gap: 12px;
+  }
+
+  &__google-pay-frame {
+    width: min(430px, 100%);
+    min-height: 64px;
+    padding: 8px 12px;
+    border: 1px solid #d7dde3;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__google-pay-button {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    > * {
+      width: 100%;
+      max-width: 100%;
+    }
+  }
+
+  &__modal--phone {
+    width: min(700px, 100%);
+    max-height: min(86vh, 760px);
+    border-radius: 18px;
+    box-shadow: 10px 12px 0 #111111;
+  }
+
+  &__modal-body--phone {
+    gap: 20px;
+  }
+
+  &__phone-modal-text {
+    max-width: 540px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  &__phone-modal-wait {
+    padding: 0 4px;
+  }
+
+  &__modal--phone .telegram-qr-card {
+    grid-template-columns: minmax(150px, 196px) minmax(0, 1fr);
+    gap: 18px;
+    padding: 16px;
+    border-width: 2px;
+  }
+
+  &__modal--phone .telegram-qr-card__qr-wrap {
+    padding: 8px;
+  }
+
+  &__modal--phone .telegram-qr-card__content {
+    gap: 12px;
+  }
+
+  &__modal--phone .telegram-qr-card__content h3 {
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  &__modal--phone .telegram-qr-card__content p {
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  &__modal--phone .telegram-qr-card__content a {
+    min-height: 48px;
+    padding: 0 18px;
+  }
+}
+
+@media (max-width: 900px) {
+  .smart-appointment-page {
+    &__entry-actions--double {
+      flex-direction: column;
+      align-items: center;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .smart-appointment-page {
+    &__modal--phone .telegram-qr-card {
+      grid-template-columns: 1fr;
+    }
+
+    &__google-pay-frame,
+    &__primary--wide,
+    &__primary--confirm {
+      width: 100%;
+    }
+  }
+}
+
+.smart-appointment-page {
+  &__cart-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 12px;
+  }
+
+  &__cart-main {
+    min-width: 0;
+  }
+
+  &__remove-service {
+    width: 42px;
+    height: 42px;
+    border: 1px solid #404040;
+    background: #ffffff;
+    color: #24324a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 22px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+      background: #eef6f4;
+    }
+  }
+
+  &__picked-card,
+  &__picked-card--empty {
+    grid-column: 1 / -1;
+  }
+
+  &__picked-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 0;
+  }
+
+  &__picked-card-top {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+  }
+
+  &__picked-card-meta {
+    gap: 6px;
+  }
+
+  &__picked-card-actions {
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  &__secondary--compact {
+    width: 210px;
+    min-width: 210px;
+  }
+
+  &__google-pay-wrap {
+    justify-items: center;
+    gap: 14px;
+  }
+
+  &__google-pay-frame {
+    width: min(360px, 100%);
+    min-height: 72px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__google-pay-button {
+    width: auto;
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    > * {
+      width: auto !important;
+      max-width: 100%;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .smart-appointment-page {
+    &__cart-item {
+      grid-template-columns: 1fr;
+    }
+
+    &__remove-service {
+      justify-self: end;
+    }
+
+    &__picked-card {
+      grid-template-columns: 1fr;
+    }
+
+    &__picked-card-actions {
+      justify-content: flex-start;
+    }
+
+    &__secondary--compact {
+      width: 100%;
+      min-width: 0;
+    }
+
+    &__google-pay-frame {
+      width: min(320px, 100%);
+    }
+  }
 }

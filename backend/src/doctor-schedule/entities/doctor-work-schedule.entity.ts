@@ -24,23 +24,26 @@ export class DoctorWorkSchedule {
     @Column({ type: 'int', default: 20 })
     slotMinutes: number;
 
-    @Column({ type: 'varchar', length: 20, default: 'WEEKLY' })
-    templateType: 'WEEKLY' | 'CYCLE';
+    @Column({ type: 'boolean', default: false })
+    workDaysConfigEnabled: boolean;
 
-    @Column({ type: 'simple-json', nullable: true })
-    weeklyTemplate: Array<{
-        weekday: number;
-        enabled: boolean;
-        start: string;
-        end: string;
-        breaks: Array<{ start: string; end: string }>;
-    }> | null;
+    @Column({ type: 'varchar', length: 20, default: 'cycle' })
+    workDaysMode: 'cycle' | 'manual';
 
     @Column({ type: 'simple-json', nullable: true })
     cycleTemplate: {
         workDays: number;
         offDays: number;
         anchorDate: string;
+        start: string;
+        end: string;
+        breaks: Array<{ start: string; end: string }>;
+    } | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    manualWeekTemplate: {
+        anchorDate: string;
+        weekdays: number[];
         start: string;
         end: string;
         breaks: Array<{ start: string; end: string }>;

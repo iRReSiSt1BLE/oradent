@@ -14,7 +14,6 @@ import { AdminService } from '../admin/admin.service';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UpdateDoctorScheduleDto } from './dto/update-doctor-schedule.dto';
 import { BlockDoctorDayDto } from './dto/block-doctor-day.dto';
-import { BlockDoctorSlotDto } from './dto/block-doctor-slot.dto';
 import { ClinicServiceEntity } from '../services/entities/clinic-service.entity';
 
 type BreakInterval = { start: string; end: string };
@@ -76,17 +75,6 @@ export class DoctorScheduleService {
 
     private readonly bookingWindowDays = 30;
 
-    private defaultWeeklyTemplate(): DayRule[] {
-        return [
-            { weekday: 0, enabled: false, start: '09:00', end: '18:00', breaks: [] },
-            { weekday: 1, enabled: true, start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
-            { weekday: 2, enabled: true, start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
-            { weekday: 3, enabled: true, start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
-            { weekday: 4, enabled: true, start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
-            { weekday: 5, enabled: true, start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
-            { weekday: 6, enabled: false, start: '10:00', end: '14:00', breaks: [] },
-        ];
-    }
 
     private defaultCycleTemplate(): CycleRule {
         return {
@@ -282,9 +270,16 @@ export class DoctorScheduleService {
             doctor,
             timezone: 'Europe/Kiev',
             slotMinutes: 20,
-            templateType: 'WEEKLY',
-            weeklyTemplate: this.defaultWeeklyTemplate(),
+            workDaysConfigEnabled: false,
+            workDaysMode: 'cycle',
             cycleTemplate: this.defaultCycleTemplate(),
+            manualWeekTemplate: {
+                anchorDate: this.toDateKey(new Date()),
+                weekdays: [1, 2, 3, 4, 5],
+                start: '09:00',
+                end: '18:00',
+                breaks: [{ start: '13:00', end: '14:00' }],
+            },
             dayOverrides: [],
             blockedDays: [],
             blockedSlots: [],
@@ -313,35 +308,66 @@ export class DoctorScheduleService {
         }
     }
 
-    private getDayRuleForDate(schedule: DoctorWorkSchedule, dateKey: string) {
-        const blockedDays = schedule.blockedDays || [];
-        if (blockedDays.includes(dateKey)) {
+
+    private getTemplateRuleForDate(schedule: DoctorWorkSchedule, dateKey: string) {
+        if (!schedule.workDaysConfigEnabled) {
             return {
-                enabled: false,
-                start: '00:00',
-                end: '00:00',
-                breaks: [] as BreakInterval[],
-                source: 'blocked-day',
+                enabled: true,
+                start: '09:00',
+                end: '18:00',
+                breaks: [{ start: '13:00', end: '14:00' }] as BreakInterval[],
+                source: 'default-open',
             };
         }
 
-        const override = (schedule.dayOverrides || []).find((o) => o.date === dateKey);
-        if (override) {
+        if (schedule.workDaysMode === 'manual' && schedule.manualWeekTemplate) {
+            const manual = schedule.manualWeekTemplate;
+            this.ensureDate(manual.anchorDate);
+
+            const targetDate = this.dateFromKey(dateKey);
+            const anchorDate = this.dateFromKey(manual.anchorDate);
+
+            if (targetDate < anchorDate) {
+                return {
+                    enabled: true,
+                    start: '09:00',
+                    end: '18:00',
+                    breaks: [{ start: '13:00', end: '14:00' }] as BreakInterval[],
+                    source: 'before-anchor',
+                };
+            }
+
+            const weekday = targetDate.getDay();
+            const isEnabled = manual.weekdays.includes(weekday);
+
             return {
-                enabled: override.enabled,
-                start: override.start,
-                end: override.end,
-                breaks: this.normalizeBreaks(override.breaks || []),
-                source: 'override',
+                enabled: isEnabled,
+                start: manual.start,
+                end: manual.end,
+                breaks: this.normalizeBreaks(manual.breaks || []),
+                source: 'manual',
             };
         }
 
-        if (schedule.templateType === 'CYCLE' && schedule.cycleTemplate) {
+        if (schedule.cycleTemplate) {
             const cycle = schedule.cycleTemplate;
             this.ensureDate(cycle.anchorDate);
 
-            const targetDate = this.dateFromKey(dateKey).getTime();
-            const anchorDate = this.dateFromKey(cycle.anchorDate).getTime();
+            const targetDateObj = this.dateFromKey(dateKey);
+            const anchorDateObj = this.dateFromKey(cycle.anchorDate);
+
+            if (targetDateObj < anchorDateObj) {
+                return {
+                    enabled: true,
+                    start: '09:00',
+                    end: '18:00',
+                    breaks: [{ start: '13:00', end: '14:00' }] as BreakInterval[],
+                    source: 'before-anchor',
+                };
+            }
+
+            const targetDate = targetDateObj.getTime();
+            const anchorDate = anchorDateObj.getTime();
             const diffDays = Math.floor(
                 (targetDate - anchorDate) / (1000 * 60 * 60 * 24),
             );
@@ -358,28 +384,41 @@ export class DoctorScheduleService {
             };
         }
 
-        const weekday = this.dateFromKey(dateKey).getDay();
-        const weekly = (schedule.weeklyTemplate || this.defaultWeeklyTemplate()).find(
-            (d) => d.weekday === weekday,
-        );
+        return {
+            enabled: true,
+            start: '09:00',
+            end: '18:00',
+            breaks: [{ start: '13:00', end: '14:00' }] as BreakInterval[],
+            source: 'default-open',
+        };
+    }
 
-        if (!weekly) {
+
+
+    private getDayRuleForDate(schedule: DoctorWorkSchedule, dateKey: string) {
+        const override = (schedule.dayOverrides || []).find((o) => o.date === dateKey);
+        if (override) {
+            return {
+                enabled: override.enabled,
+                start: override.start,
+                end: override.end,
+                breaks: this.normalizeBreaks(override.breaks || []),
+                source: 'override',
+            };
+        }
+
+        const blockedDays = schedule.blockedDays || [];
+        if (blockedDays.includes(dateKey)) {
             return {
                 enabled: false,
                 start: '00:00',
                 end: '00:00',
                 breaks: [] as BreakInterval[],
-                source: 'weekly',
+                source: 'blocked-day',
             };
         }
 
-        return {
-            enabled: weekly.enabled,
-            start: weekly.start,
-            end: weekly.end,
-            breaks: this.normalizeBreaks(weekly.breaks || []),
-            source: 'weekly',
-        };
+        return this.getTemplateRuleForDate(schedule, dateKey);
     }
 
     private async getServiceDurationsMap(serviceIds: string[]): Promise<Map<string, number>> {
@@ -418,6 +457,7 @@ export class DoctorScheduleService {
         startDateTime: Date,
         endDateTime: Date,
         slotMinutes: number,
+        excludeAppointmentId?: string,
     ): Promise<Map<string, Set<string>>> {
         const appointments = await this.appointmentRepository.find({
             where: [
@@ -435,6 +475,7 @@ export class DoctorScheduleService {
         const map = new Map<string, Set<string>>();
 
         for (const appt of appointments) {
+            if (excludeAppointmentId && appt.id === excludeAppointmentId) continue;
             if (!appt.appointmentDate) continue;
             if (appt.status === 'CANCELLED') continue;
 
@@ -487,6 +528,13 @@ export class DoctorScheduleService {
             });
             if (inBreak) continue;
 
+            const now = new Date();
+            const slotDateTime = new Date(`${dateKey}T${t}:00`);
+            if (slotDateTime.getTime() <= now.getTime()) {
+                slots.push({ time: t, state: 'BLOCKED' });
+                continue;
+            }
+
             const blocked = blockedSlots.some((b) => {
                 const bs = this.timeToMinutes(b.start);
                 const be = this.timeToMinutes(b.end);
@@ -513,9 +561,12 @@ export class DoctorScheduleService {
         schedule: DoctorWorkSchedule,
         dateKeys: string[],
     ): Promise<Map<string, DaySlotsResult>> {
-        if (!dateKeys.length) return new Map<string, DaySlotsResult>();
+        if (!dateKeys.length) {
+            return new Map<string, DaySlotsResult>();
+        }
 
         const sorted = [...dateKeys].sort();
+
         const rangeStart = this.dateFromKey(sorted[0]);
         rangeStart.setHours(0, 0, 0, 0);
 
@@ -530,6 +581,7 @@ export class DoctorScheduleService {
         );
 
         const result = new Map<string, DaySlotsResult>();
+
         for (const dateKey of dateKeys) {
             const booked = bookedByDate.get(dateKey) || new Set<string>();
             result.set(dateKey, this.buildDaySlots(schedule, dateKey, booked));
@@ -537,6 +589,8 @@ export class DoctorScheduleService {
 
         return result;
     }
+
+
 
     private async getAppointmentsForDoctorDay(doctorId: string, dateIso: string): Promise<Appointment[]> {
         const doctor = await this.getDoctorOrThrow(doctorId);
@@ -590,6 +644,7 @@ export class DoctorScheduleService {
         doctorId: string,
         appointmentDate: Date,
         serviceDurationMinutes: number,
+        excludeAppointmentId?: string,
     ) {
         this.ensureDateInsideBookingWindow(appointmentDate);
 
@@ -597,8 +652,16 @@ export class DoctorScheduleService {
         const schedule = await this.getOrCreateSchedule(doctor);
         const dateKey = this.toDateKey(appointmentDate);
 
-        const dayMap = await this.buildDaySlotsByDateMap(doctor, schedule, [dateKey]);
-        const day = dayMap.get(dateKey);
+        const bookedByDate = await this.getBookedSlotsMapForRange(
+            doctor,
+            new Date(`${dateKey}T00:00:00`),
+            new Date(`${dateKey}T23:59:59.999`),
+            schedule.slotMinutes,
+            excludeAppointmentId,
+        );
+
+        const booked = bookedByDate.get(dateKey) || new Set<string>();
+        const day = this.buildDaySlots(schedule, dateKey, booked);
 
         if (!day || !day.enabled) {
             throw new BadRequestException('На цю дату запис недоступний');
@@ -641,13 +704,20 @@ export class DoctorScheduleService {
                 doctorId: doctor.id,
                 timezone: schedule.timezone,
                 slotMinutes: schedule.slotMinutes,
-                templateType: schedule.templateType,
-                weeklyTemplate: schedule.weeklyTemplate || this.defaultWeeklyTemplate(),
                 cycleTemplate: schedule.cycleTemplate || this.defaultCycleTemplate(),
                 dayOverrides: schedule.dayOverrides || [],
                 blockedDays: schedule.blockedDays || [],
                 blockedSlots: schedule.blockedSlots || [],
                 updatedAt: schedule.updatedAt,
+                workDaysConfigEnabled: schedule.workDaysConfigEnabled,
+                workDaysMode: schedule.workDaysMode,
+                manualWeekTemplate: schedule.manualWeekTemplate || {
+                    anchorDate: this.toDateKey(new Date()),
+                    weekdays: [1, 2, 3, 4, 5],
+                    start: '09:00',
+                    end: '18:00',
+                    breaks: [{ start: '13:00', end: '14:00' }],
+                },
             },
         };
     }
@@ -662,6 +732,14 @@ export class DoctorScheduleService {
         const schedule = await this.getOrCreateSchedule(doctor);
 
         if (dto.timezone) schedule.timezone = dto.timezone.trim();
+
+        if (typeof dto.workDaysConfigEnabled === 'boolean') {
+            schedule.workDaysConfigEnabled = dto.workDaysConfigEnabled;
+        }
+
+        if (dto.workDaysMode) {
+            schedule.workDaysMode = dto.workDaysMode;
+        }
 
         if (dto.slotMinutes && dto.slotMinutes !== schedule.slotMinutes) {
             const allAppointments = await this.appointmentRepository.find({
@@ -688,20 +766,6 @@ export class DoctorScheduleService {
             schedule.slotMinutes = dto.slotMinutes;
         }
 
-        schedule.templateType = dto.templateType;
-
-        if (dto.weeklyTemplate) {
-            dto.weeklyTemplate.forEach((d) => this.validateRule(d));
-            schedule.weeklyTemplate = [...dto.weeklyTemplate]
-                .sort((a, b) => a.weekday - b.weekday)
-                .map((d) => ({
-                    weekday: d.weekday,
-                    enabled: d.enabled,
-                    start: d.start,
-                    end: d.end,
-                    breaks: this.normalizeBreaks(d.breaks || []),
-                }));
-        }
 
         if (dto.cycleTemplate) {
             this.ensureDate(dto.cycleTemplate.anchorDate);
@@ -716,10 +780,26 @@ export class DoctorScheduleService {
             };
         }
 
+        if (dto.manualWeekTemplate) {
+            this.ensureDate(dto.manualWeekTemplate.anchorDate);
+            this.validateRule(dto.manualWeekTemplate);
+
+            schedule.manualWeekTemplate = {
+                anchorDate: dto.manualWeekTemplate.anchorDate,
+                weekdays: [...new Set(dto.manualWeekTemplate.weekdays)].sort((a, b) => a - b),
+                start: dto.manualWeekTemplate.start,
+                end: dto.manualWeekTemplate.end,
+                breaks: this.normalizeBreaks(dto.manualWeekTemplate.breaks || []),
+            };
+        }
+
         if (dto.dayOverrides) {
-            const existingOverrides = Array.isArray(schedule.dayOverrides)
-                ? [...schedule.dayOverrides]
-                : [];
+            const existingOverrides =
+                dto.replaceDayOverrides === true
+                    ? []
+                    : Array.isArray(schedule.dayOverrides)
+                        ? [...schedule.dayOverrides]
+                        : [];
 
             for (const o of dto.dayOverrides) {
                 this.ensureDate(o.date);
@@ -762,6 +842,11 @@ export class DoctorScheduleService {
                 a.date.localeCompare(b.date),
             );
         }
+        if (dto.replaceDayOverrides === true && (!dto.dayOverrides || dto.dayOverrides.length === 0)) {
+            schedule.dayOverrides = [];
+            schedule.blockedDays = [];
+        }
+
 
         schedule.updatedByUserId = currentUserId;
         const saved = await this.scheduleRepository.save(schedule);
@@ -828,85 +913,6 @@ export class DoctorScheduleService {
         };
     }
 
-    async blockSlot(
-        currentUserId: string,
-        doctorId: string,
-        dto: BlockDoctorSlotDto,
-    ) {
-        await this.ensureManagerAccess(currentUserId);
-        this.ensureDate(dto.date);
-        this.ensureTime(dto.start);
-        this.ensureTime(dto.end);
-
-        const start = this.timeToMinutes(dto.start);
-        const end = this.timeToMinutes(dto.end);
-        if (end <= start) {
-            throw new BadRequestException(
-                'Кінець інтервалу має бути пізніше за початок',
-            );
-        }
-
-        const doctor = await this.getDoctorOrThrow(doctorId);
-        const schedule = await this.getOrCreateSchedule(doctor);
-
-        const slots = schedule.blockedSlots || [];
-        const exists = slots.some(
-            (s) => s.date === dto.date && s.start === dto.start && s.end === dto.end,
-        );
-
-        if (!exists) {
-            slots.push({
-                date: dto.date,
-                start: dto.start,
-                end: dto.end,
-                reason: dto.reason?.trim() || '',
-            });
-        }
-
-        schedule.blockedSlots = slots.sort((a, b) => {
-            if (a.date === b.date) {
-                return this.timeToMinutes(a.start) - this.timeToMinutes(b.start);
-            }
-            return a.date.localeCompare(b.date);
-        });
-
-        schedule.updatedByUserId = currentUserId;
-        await this.scheduleRepository.save(schedule);
-
-        return {
-            ok: true,
-            message: 'Інтервал часу заблоковано',
-            blockedSlots: schedule.blockedSlots,
-        };
-    }
-
-    async unblockSlot(
-        currentUserId: string,
-        doctorId: string,
-        date: string,
-        start: string,
-        end: string,
-    ) {
-        await this.ensureManagerAccess(currentUserId);
-        this.ensureDate(date);
-        this.ensureTime(start);
-        this.ensureTime(end);
-
-        const doctor = await this.getDoctorOrThrow(doctorId);
-        const schedule = await this.getOrCreateSchedule(doctor);
-
-        schedule.blockedSlots = (schedule.blockedSlots || []).filter(
-            (s) => !(s.date === date && s.start === start && s.end === end),
-        );
-        schedule.updatedByUserId = currentUserId;
-        await this.scheduleRepository.save(schedule);
-
-        return {
-            ok: true,
-            message: 'Блокування інтервалу знято',
-            blockedSlots: schedule.blockedSlots,
-        };
-    }
 
     async getDayConflicts(
         currentUserId: string,
@@ -957,23 +963,25 @@ export class DoctorScheduleService {
                 const total = day?.slots.length || 0;
                 const free = (day?.slots || []).filter((s) => s.state === 'FREE').length;
                 const conflictInfo = await this.getDayConflictInfo(doctor.id, dateKey);
+                const templateRule = this.getTemplateRuleForDate(schedule, dateKey);
+                const hasConflicts = !templateRule.enabled && conflictInfo.hasAppointments;
 
                 return {
                     date: dateKey,
-                    isWorking: Boolean(day?.enabled),
+                    isWorking: hasConflicts ? true : Boolean(day?.enabled),
                     freeSlots: free,
                     totalSlots: total,
-                    hasConflicts: conflictInfo.hasAppointments && !Boolean(day?.enabled),
+                    hasConflicts,
                 };
             }),
         );
 
         return {
             ok: true,
+            doctorId: doctor.id,
             month,
             timezone: schedule.timezone,
             slotMinutes: schedule.slotMinutes,
-            bookingWindowDays: this.bookingWindowDays,
             days,
         };
     }

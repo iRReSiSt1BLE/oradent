@@ -4,7 +4,7 @@ import {
     Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
 import { PatientService } from '../patient/patient.service';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
@@ -90,27 +90,19 @@ export class AppointmentService {
             dto.phone,
         );
 
-
         await this.servicesService.ensureBookable(dto.serviceId, dto.doctorId);
         await this.ensureScheduleAllowsBooking(dto.doctorId, dto.serviceId, dto.appointmentDate);
 
-        let patient = await this.patientService.findByPhone(dto.phone);
+        const patient = await this.resolvePatientByPhoneOrCreate({
+            lastName: dto.lastName,
+            firstName: dto.firstName,
+            middleName: dto.middleName || null,
+            phone: dto.phone,
+        });
 
-        if (!patient) {
-            patient = await this.patientService.create({
-                lastName: dto.lastName,
-                firstName: dto.firstName,
-                middleName: dto.middleName || null,
-                phone: dto.phone,
-                email: null,
-                phoneVerified: false,
-            });
-        } else {
-            patient.lastName = dto.lastName;
-            patient.firstName = dto.firstName;
-            patient.middleName = dto.middleName || null;
-            patient = await this.patientService.save(patient);
-        }
+        const service = await this.clinicServiceRepository.findOne({
+            where: { id: dto.serviceId },
+        });
 
         const appointment = this.appointmentRepository.create({
             patient,
@@ -125,12 +117,31 @@ export class AppointmentService {
             paymentMethod: null,
             paymentProvider: null,
             paymentReference: null,
-            paidAmountUah: null,
+            paidAmountUah: service ? Number(service.priceUah || 0) : null,
             paidAt: null,
             receiptNumber: null,
         });
 
         const savedAppointment = await this.appointmentRepository.save(appointment);
+
+        if (patient.email) {
+            const appointmentLines = await this.buildAppointmentLines([
+                {
+                    serviceId: dto.serviceId,
+                    doctorId: dto.doctorId,
+                    appointmentDate: dto.appointmentDate,
+                },
+            ]);
+
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: this.buildPatientDisplayName(patient),
+                appointmentDate: savedAppointment.appointmentDate,
+                amountUah: Number(service?.priceUah || 0),
+                appointmentLines,
+                receiptNumber: `ORADENT-OFFLINE-${Date.now()}`,
+            });
+        }
 
         return {
             ok: true,
@@ -142,10 +153,144 @@ export class AppointmentService {
                 firstName: patient.firstName,
                 middleName: patient.middleName,
                 phone: patient.phone,
+                email: patient.email ?? null,
             },
         };
     }
 
+    private buildPatientDisplayName(patient: {
+        lastName: string;
+        firstName: string;
+        middleName?: string | null;
+    }) {
+        return `${patient.lastName} ${patient.firstName}${patient.middleName ? ` ${patient.middleName}` : ''}`
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private normalizePhone(phone?: string | null) {
+        return (phone || '').trim().replace(/\s+/g, '');
+    }
+
+    private async resolvePatientByPhoneOrCreate(params: {
+        lastName: string;
+        firstName: string;
+        middleName?: string | null;
+        phone: string;
+    }) {
+        const normalizedPhone = this.normalizePhone(params.phone);
+
+        let patient = await this.patientRepository.findOne({
+            where: { phone: normalizedPhone },
+        });
+
+        if (!patient) {
+            patient = this.patientRepository.create({
+                lastName: params.lastName.trim(),
+                firstName: params.firstName.trim(),
+                middleName: params.middleName?.trim() || null,
+                phone: normalizedPhone,
+                email: null,
+                phoneVerified: false,
+            });
+
+            patient = await this.patientRepository.save(patient);
+            return patient;
+        }
+
+        const existingEmail = patient.email || null;
+
+        patient.lastName = params.lastName.trim();
+        patient.firstName = params.firstName.trim();
+        patient.middleName = params.middleName?.trim() || null;
+        patient.phone = normalizedPhone;
+
+        if (existingEmail) {
+            patient.email = existingEmail;
+        }
+
+        return await this.patientRepository.save(patient);
+    }
+
+    private async resolveBookingPatientForAuthenticated(
+        userId: string,
+        payload?: {
+            lastName?: string;
+            firstName?: string;
+            middleName?: string;
+            phone?: string;
+        },
+    ) {
+        const user = await this.userService.findById(userId);
+
+        if (!user) {
+            throw new BadRequestException('Користувача не знайдено');
+        }
+
+        const isManagerActor =
+            user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN;
+
+        if (!isManagerActor) {
+            if (!user.patient) {
+                throw new BadRequestException('Пацієнта не знайдено');
+            }
+
+            return user.patient;
+        }
+
+        if (!payload?.lastName?.trim() || !payload?.firstName?.trim() || !payload?.phone?.trim()) {
+            throw new BadRequestException("Для запису пацієнта заповніть прізвище, ім'я та телефон");
+        }
+
+        return await this.resolvePatientByPhoneOrCreate({
+            lastName: payload.lastName,
+            firstName: payload.firstName,
+            middleName: payload.middleName || null,
+            phone: payload.phone,
+        });
+    }
+
+    private async buildAppointmentLines(
+        steps: Array<{
+            serviceId: string;
+            doctorId: string;
+            appointmentDate: string;
+        }>,
+    ) {
+        return await Promise.all(
+            steps.map(async (step) => {
+                const [service, doctor] = await Promise.all([
+                    this.clinicServiceRepository.findOne({
+                        where: { id: step.serviceId },
+                    }),
+                    this.doctorRepository.findOne({
+                        where: [
+                            { id: step.doctorId },
+                            { user: { id: step.doctorId } },
+                        ],
+                        relations: ['user'],
+                    }),
+                ]);
+
+                const serviceName =
+                    this.parseDbI18nValueBackend(service?.name, 'ua') || 'Послуга';
+
+                const doctorName = doctor
+                    ? this.getDoctorDisplayName(doctor)
+                    : 'Лікар не вказаний';
+
+                const formattedDate = new Date(step.appointmentDate).toLocaleString('uk-UA', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                });
+
+                return `${serviceName} — ${formattedDate} — ${doctorName}`;
+            }),
+        );
+    }
 
     async createAuthenticatedAppointment(
         userId: string,
@@ -397,114 +542,6 @@ export class AppointmentService {
     }
 
 
-    async createPaidGooglePayTestBooking(
-        userId: string,
-        dto: CreatePaidGooglePayTestBookingDto,
-    ) {
-        const user = await this.userService.findById(userId);
-
-        if (!user || !user.patient) {
-            throw new BadRequestException('Пацієнта не знайдено');
-        }
-
-        const patient = user.patient;
-
-        if (!dto.steps?.length) {
-            throw new BadRequestException('Не передано жодного кроку запису');
-        }
-
-        const uniqueServiceIds = [...new Set(dto.steps.map((step) => step.serviceId))];
-
-        const services = await this.clinicServiceRepository.find({
-            where: uniqueServiceIds.map((id) => ({ id })),
-        });
-
-        const servicesMap = new Map(
-            services.map((service) => [
-                service.id,
-                {
-                    durationMinutes: Number(service.durationMinutes || 0),
-                    priceUah: Number(service.priceUah || 0),
-                },
-            ]),
-        );
-
-        for (const step of dto.steps) {
-            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
-            await this.ensureScheduleAllowsBooking(
-                step.doctorId,
-                step.serviceId,
-                step.appointmentDate,
-            );
-        }
-
-        const groupedSteps = this.normalizeGroupedSteps(dto.steps, servicesMap);
-
-        const createdAppointments: Appointment[] = [];
-        const paymentReference =
-            dto.googleTransactionId ||
-            dto.googlePaymentToken ||
-            `gpay-test-${Date.now()}`;
-        const receiptNumber = this.generateReceiptNumber();
-
-        for (const group of groupedSteps) {
-            const firstStep = group[0];
-            const firstService = servicesMap.get(firstStep.serviceId);
-
-            const groupAmount = group.reduce((sum, step) => {
-                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
-            }, 0);
-
-            const appointment = this.appointmentRepository.create({
-                patient,
-                doctorId: firstStep.doctorId,
-                serviceId: firstStep.serviceId,
-                appointmentDate: new Date(firstStep.appointmentDate),
-                status: 'BOOKED',
-                source: 'AUTHENTICATED',
-                recordingCompleted: false,
-                recordingCompletedAt: null,
-                paymentStatus: PaymentStatus.PAID,
-                paymentMethod: dto.paymentMethod || PaymentMethod.GOOGLE_PAY,
-                paymentProvider: 'GOOGLE_PAY_TEST',
-                paymentReference,
-                paidAmountUah: groupAmount,
-                paidAt: new Date(),
-                receiptNumber,
-            });
-
-            const saved = await this.appointmentRepository.save(appointment);
-            createdAppointments.push(saved);
-        }
-
-        const totalAmount = createdAppointments.reduce(
-            (sum, item) => sum + Number(item.paidAmountUah || 0),
-            0,
-        );
-
-        if (patient.email) {
-            await this.mailService.sendPaidAppointmentConfirmation({
-                to: patient.email,
-                patientName: `${patient.lastName} ${patient.firstName}${
-                    patient.middleName ? ` ${patient.middleName}` : ''
-                }`.trim(),
-                appointmentId: createdAppointments.map((a) => a.id).join(', '),
-                appointmentDate: createdAppointments[0]?.appointmentDate || null,
-                receiptNumber,
-                amountUah: totalAmount,
-                paymentMethod: dto.paymentMethod || PaymentMethod.GOOGLE_PAY,
-            });
-        }
-
-        return {
-            ok: true,
-            message: 'Запис успішно створено та оплачено',
-            receiptNumber,
-            appointments: createdAppointments,
-            groupedSteps,
-        };
-    }
-
     private generateReceiptNumber() {
         const now = new Date();
         const y = now.getFullYear();
@@ -529,9 +566,22 @@ export class AppointmentService {
             const daily = await this.doctorScheduleService.getDay(doctorId, dateKey);
             if (!daily?.ok || !daily?.isWorking) continue;
 
+            const preferredDateKey = this.toDateKey(preferredDate);
+            const preferredMinute = preferredDate.getHours() * 60 + preferredDate.getMinutes();
+
             const freeSlots = (daily.slots || []).filter(
-                (slot: { time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }) =>
-                    slot.state === 'FREE',
+                (slot: { time: string; state: 'FREE' | 'BOOKED' | 'BLOCKED' }) => {
+                    if (slot.state !== 'FREE') return false;
+
+                    if (dateKey !== preferredDateKey) {
+                        return true;
+                    }
+
+                    const slotMinute =
+                        Number(slot.time.slice(0, 2)) * 60 + Number(slot.time.slice(3, 5));
+
+                    return slotMinute >= preferredMinute;
+                },
             );
 
             const slotMinutes = Number(daily.slotMinutes || 20);
@@ -593,15 +643,19 @@ export class AppointmentService {
                 appointmentDate: string;
             }>;
             paymentMethod?: 'CASH';
+            phoneVerificationSessionId?: string;
+            lastName?: string;
+            firstName?: string;
+            middleName?: string;
+            phone?: string;
         },
     ) {
-        const user = await this.userService.findById(userId);
-
-        if (!user || !user.patient) {
-            throw new BadRequestException('Пацієнта не знайдено');
-        }
-
-        const patient = user.patient;
+        const patient = await this.resolveBookingPatientForAuthenticated(userId, {
+            lastName: dto.lastName,
+            firstName: dto.firstName,
+            middleName: dto.middleName,
+            phone: dto.phone,
+        });
 
         if (!dto.steps?.length) {
             throw new BadRequestException('Не передано жодного кроку запису');
@@ -625,15 +679,10 @@ export class AppointmentService {
 
         for (const step of dto.steps) {
             await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
-            await this.ensureScheduleAllowsBooking(
-                step.doctorId,
-                step.serviceId,
-                step.appointmentDate,
-            );
+            await this.ensureScheduleAllowsBooking(step.doctorId, step.serviceId, step.appointmentDate);
         }
 
         const groupedSteps = this.normalizeGroupedSteps(dto.steps, servicesMap);
-
         const createdAppointments: Appointment[] = [];
 
         for (const group of groupedSteps) {
@@ -643,7 +692,7 @@ export class AppointmentService {
                 return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
             }, 0);
 
-            const appointment = this.appointmentRepository.create({
+            const appointment = this.createAppointmentEntity({
                 patient,
                 doctorId: firstStep.doctorId,
                 serviceId: firstStep.serviceId,
@@ -653,7 +702,7 @@ export class AppointmentService {
                 recordingCompleted: false,
                 recordingCompletedAt: null,
                 paymentStatus: PaymentStatus.PENDING,
-                paymentMethod: dto.paymentMethod ? PaymentMethod.CASH : PaymentMethod.CASH,
+                paymentMethod: PaymentMethod.CASH,
                 paymentProvider: null,
                 paymentReference: null,
                 paidAmountUah: groupAmount,
@@ -665,6 +714,19 @@ export class AppointmentService {
             createdAppointments.push(saved);
         }
 
+        if (patient.email) {
+            const appointmentLines = await this.buildAppointmentLines(groupedSteps.flat());
+
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: this.buildPatientDisplayName(patient),
+                appointmentDate: createdAppointments[0]?.appointmentDate || null,
+                amountUah: createdAppointments.reduce((sum, item) => sum + Number(item.paidAmountUah || 0), 0),
+                appointmentLines,
+                receiptNumber: `ORADENT-OFFLINE-${Date.now()}`,
+            });
+        }
+
         return {
             ok: true,
             message: 'Запис успішно створено',
@@ -672,6 +734,7 @@ export class AppointmentService {
             groupedSteps,
         };
     }
+
 
 
     async getMyAppointments(userId: string) {
@@ -998,6 +1061,13 @@ export class AppointmentService {
             })
             : null;
 
+        const doctor = appointment.doctorId
+            ? await this.doctorRepository.findOne({
+                where: [{ id: appointment.doctorId }],
+                relations: ['user'],
+            })
+            : null;
+
         appointment.paymentStatus = PaymentStatus.PAID;
         appointment.paymentMethod = PaymentMethod.GOOGLE_PAY;
         appointment.paymentProvider = 'GOOGLE_PAY_TEST';
@@ -1013,16 +1083,30 @@ export class AppointmentService {
         const saved = await this.appointmentRepository.save(appointment);
 
         if (user.patient.email) {
+            const serviceName = service?.name || 'Послуга';
+            const doctorName = doctor
+                ? this.getDoctorDisplayName(doctor)
+                : 'Лікар не вказаний';
+
+            const appointmentLines = [
+                `${serviceName} — ${new Date(saved.appointmentDate || new Date()).toLocaleString('uk-UA', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                })} — ${doctorName}`,
+            ];
+
             await this.mailService.sendPaidAppointmentConfirmation({
                 to: user.patient.email,
                 patientName: `${user.patient.lastName} ${user.patient.firstName}${
                     user.patient.middleName ? ` ${user.patient.middleName}` : ''
                 }`.trim(),
-                appointmentId: saved.id,
                 appointmentDate: saved.appointmentDate,
-                receiptNumber: saved.receiptNumber || '',
                 amountUah: Number(saved.paidAmountUah || 0),
-                paymentMethod: saved.paymentMethod || PaymentMethod.GOOGLE_PAY,
+                appointmentLines,
+                receiptNumber: saved.receiptNumber || '',
             });
         }
 
@@ -1213,6 +1297,10 @@ export class AppointmentService {
         return groups;
     }
 
+    private createAppointmentEntity(data: DeepPartial<Appointment>): Appointment {
+        return this.appointmentRepository.create(data) as Appointment;
+    }
+
 
     async createGuestSmartBooking(body: {
         lastName: string;
@@ -1238,28 +1326,12 @@ export class AppointmentService {
             phone,
         );
 
-        let patient: any = await this.patientRepository.findOne({
-            where: { phone },
+        const patient = await this.resolvePatientByPhoneOrCreate({
+            lastName: body.lastName,
+            firstName: body.firstName,
+            middleName: body.middleName || null,
+            phone,
         });
-
-        if (!patient) {
-            const patientEntity = this.patientRepository.create({
-                lastName: body.lastName.trim(),
-                firstName: body.firstName.trim(),
-                middleName: body.middleName?.trim() || null,
-                phone,
-                isActive: true,
-            } as any);
-
-            patient = await this.patientRepository.save(patientEntity);
-        } else {
-            patient.lastName = body.lastName.trim();
-            patient.firstName = body.firstName.trim();
-            patient.middleName = body.middleName?.trim() || null;
-            patient.phone = phone;
-
-            patient = await this.patientRepository.save(patient);
-        }
 
         const uniqueServiceIds = [...new Set(body.steps.map((step) => step.serviceId))];
 
@@ -1287,7 +1359,7 @@ export class AppointmentService {
         }
 
         const groupedSteps = this.normalizeGroupedSteps(body.steps, servicesMap);
-        const createdAppointments: any[] = [];
+        const createdAppointments: Appointment[] = [];
 
         for (const group of groupedSteps) {
             const firstStep = group[0];
@@ -1296,7 +1368,7 @@ export class AppointmentService {
                 return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
             }, 0);
 
-            const entity = this.appointmentRepository.create({
+            const entity = this.createAppointmentEntity({
                 patient,
                 doctorId: firstStep.doctorId,
                 serviceId: firstStep.serviceId,
@@ -1305,17 +1377,33 @@ export class AppointmentService {
                 source: 'GUEST',
                 recordingCompleted: false,
                 recordingCompletedAt: null,
-                paymentStatus: 'PENDING',
-                paymentMethod: 'CASH',
+                paymentStatus: PaymentStatus.PENDING,
+                paymentMethod: PaymentMethod.CASH,
                 paymentProvider: null,
                 paymentReference: null,
                 paidAmountUah: groupAmount,
                 paidAt: null,
                 receiptNumber: null,
-            } as any);
+            });
 
             const savedEntity = await this.appointmentRepository.save(entity);
             createdAppointments.push(savedEntity);
+        }
+
+        if (patient.email) {
+            const appointmentLines = await this.buildAppointmentLines(groupedSteps.flat());
+
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: this.buildPatientDisplayName(patient),
+                appointmentDate: createdAppointments[0]?.appointmentDate || null,
+                amountUah: createdAppointments.reduce(
+                    (sum, item) => sum + Number(item.paidAmountUah || 0),
+                    0,
+                ),
+                appointmentLines,
+                receiptNumber: `ORADENT-OFFLINE-${Date.now()}`,
+            });
         }
 
         return {
@@ -1352,28 +1440,12 @@ export class AppointmentService {
             phone,
         );
 
-        let patient: any = await this.patientRepository.findOne({
-            where: { phone },
+        const patient = await this.resolvePatientByPhoneOrCreate({
+            lastName: body.lastName,
+            firstName: body.firstName,
+            middleName: body.middleName || null,
+            phone,
         });
-
-        if (!patient) {
-            const patientEntity = this.patientRepository.create({
-                lastName: body.lastName.trim(),
-                firstName: body.firstName.trim(),
-                middleName: body.middleName?.trim() || null,
-                phone,
-                isActive: true,
-            } as any);
-
-            patient = await this.patientRepository.save(patientEntity);
-        } else {
-            patient.lastName = body.lastName.trim();
-            patient.firstName = body.firstName.trim();
-            patient.middleName = body.middleName?.trim() || null;
-            patient.phone = phone;
-
-            patient = await this.patientRepository.save(patient);
-        }
 
         const uniqueServiceIds = [...new Set(body.steps.map((step) => step.serviceId))];
 
@@ -1385,6 +1457,7 @@ export class AppointmentService {
             services.map((service) => [
                 service.id,
                 {
+                    name: service.name,
                     durationMinutes: Number(service.durationMinutes || 0),
                     priceUah: Number(service.priceUah || 0),
                 },
@@ -1401,7 +1474,13 @@ export class AppointmentService {
         }
 
         const groupedSteps = this.normalizeGroupedSteps(body.steps, servicesMap);
-        const createdAppointments: any[] = [];
+        const createdAppointments: Appointment[] = [];
+
+        const paymentReference =
+            body.googleTransactionId ||
+            body.googlePaymentToken ||
+            `gpay-test-${Date.now()}`;
+
         const receiptNumber = this.generateReceiptNumber();
 
         for (const group of groupedSteps) {
@@ -1411,7 +1490,7 @@ export class AppointmentService {
                 return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
             }, 0);
 
-            const entity = this.appointmentRepository.create({
+            const entity = this.createAppointmentEntity({
                 patient,
                 doctorId: firstStep.doctorId,
                 serviceId: firstStep.serviceId,
@@ -1420,25 +1499,219 @@ export class AppointmentService {
                 source: 'GUEST',
                 recordingCompleted: false,
                 recordingCompletedAt: null,
-                paymentStatus: 'PAID',
-                paymentMethod: 'GOOGLE_PAY',
+                paymentStatus: PaymentStatus.PAID,
+                paymentMethod: PaymentMethod.GOOGLE_PAY,
                 paymentProvider: 'GOOGLE_PAY_TEST',
-                paymentReference:
-                    body.googleTransactionId ||
-                    body.googlePaymentToken ||
-                    `gpay-test-${Date.now()}`,
+                paymentReference,
                 paidAmountUah: groupAmount,
                 paidAt: new Date(),
                 receiptNumber,
-            } as any);
+            });
 
             const savedEntity = await this.appointmentRepository.save(entity);
             createdAppointments.push(savedEntity);
         }
 
+        if (patient.email) {
+            const appointmentLines = await this.buildAppointmentLines(groupedSteps.flat());
+
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: this.buildPatientDisplayName(patient),
+                appointmentDate: createdAppointments[0]?.appointmentDate || null,
+                amountUah: createdAppointments.reduce(
+                    (sum, item) => sum + Number(item.paidAmountUah || 0),
+                    0,
+                ),
+                appointmentLines,
+                receiptNumber,
+            });
+        }
+
         return {
             ok: true,
-            message: 'Гостьовий запис з оплатою успішно створено',
+            message: 'Запис успішно створено та оплачено',
+            receiptNumber,
+            appointments: createdAppointments,
+            groupedSteps,
+        };
+    }
+
+
+    private tryExtractDbI18nData(raw: unknown): Record<string, string> | null {
+        if (!raw || typeof raw !== 'string') return null;
+
+        const jsonStart = raw.indexOf('{');
+        if (jsonStart === -1) return null;
+
+        try {
+            const parsed = JSON.parse(raw.slice(jsonStart));
+
+            if (parsed && typeof parsed === 'object') {
+                if (parsed.data && typeof parsed.data === 'object') {
+                    return parsed.data as Record<string, string>;
+                }
+
+                return parsed as Record<string, string>;
+            }
+
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
+    private parseDbI18nValueBackend(raw: unknown, language = 'ua'): string {
+        if (!raw) return '';
+
+        if (typeof raw === 'object' && raw !== null) {
+            const record = raw as Record<string, any>;
+
+            if ('ua' in record || 'en' in record || 'de' in record || 'fr' in record) {
+                return record[language] || record.ua || record.en || record.de || record.fr || '';
+            }
+
+            if ('i18n' in record && record.i18n) {
+                const map = record.i18n as Record<string, string>;
+                return map[language] || map.ua || map.en || map.de || map.fr || '';
+            }
+
+            if ('value' in record && typeof record.value === 'string') {
+                return record.value;
+            }
+
+            if ('name' in record) {
+                return this.parseDbI18nValueBackend(record.name, language);
+            }
+
+            if ('data' in record && record.data && typeof record.data === 'object') {
+                return (
+                    record.data[language] ||
+                    record.data.ua ||
+                    record.data.en ||
+                    record.data.de ||
+                    record.data.fr ||
+                    ''
+                );
+            }
+
+            return '';
+        }
+
+        if (typeof raw === 'string') {
+            const extracted = this.tryExtractDbI18nData(raw);
+            if (!extracted) {
+                return raw;
+            }
+
+            return (
+                extracted[language] ||
+                extracted.ua ||
+                extracted.en ||
+                extracted.de ||
+                extracted.fr ||
+                raw
+            );
+        }
+
+        return String(raw);
+    }
+
+
+    async createPaidGooglePayTestBooking(
+        userId: string,
+        dto: CreatePaidGooglePayTestBookingDto,
+    ) {
+        const patient = await this.resolveBookingPatientForAuthenticated(userId, {
+            lastName: dto.lastName,
+            firstName: dto.firstName,
+            middleName: dto.middleName,
+            phone: dto.phone,
+        });
+
+        if (!dto.steps?.length) {
+            throw new BadRequestException('Не передано жодного кроку запису');
+        }
+
+        const uniqueServiceIds = [...new Set(dto.steps.map((step) => step.serviceId))];
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueServiceIds.map((id) => ({ id })),
+        });
+
+        const servicesMap = new Map(
+            services.map((service) => [
+                service.id,
+                {
+                    name: service.name,
+                    durationMinutes: Number(service.durationMinutes || 0),
+                    priceUah: Number(service.priceUah || 0),
+                },
+            ]),
+        );
+
+        for (const step of dto.steps) {
+            await this.servicesService.ensureBookable(step.serviceId, step.doctorId);
+            await this.ensureScheduleAllowsBooking(step.doctorId, step.serviceId, step.appointmentDate);
+        }
+
+        const groupedSteps = this.normalizeGroupedSteps(dto.steps, servicesMap);
+        const createdAppointments: Appointment[] = [];
+
+        const paymentReference =
+            dto.googleTransactionId ||
+            dto.googlePaymentToken ||
+            `gpay-test-${Date.now()}`;
+
+        const receiptNumber = this.generateReceiptNumber();
+
+        for (const group of groupedSteps) {
+            const firstStep = group[0];
+
+            const groupAmount = group.reduce((sum, step) => {
+                return sum + Number(servicesMap.get(step.serviceId)?.priceUah || 0);
+            }, 0);
+
+            const appointment = this.createAppointmentEntity({
+                patient,
+                doctorId: firstStep.doctorId,
+                serviceId: firstStep.serviceId,
+                appointmentDate: new Date(firstStep.appointmentDate),
+                status: 'BOOKED',
+                source: 'AUTHENTICATED',
+                recordingCompleted: false,
+                recordingCompletedAt: null,
+                paymentStatus: PaymentStatus.PAID,
+                paymentMethod: dto.paymentMethod || PaymentMethod.GOOGLE_PAY,
+                paymentProvider: 'GOOGLE_PAY_TEST',
+                paymentReference,
+                paidAmountUah: groupAmount,
+                paidAt: new Date(),
+                receiptNumber,
+            });
+
+            const saved = await this.appointmentRepository.save(appointment);
+            createdAppointments.push(saved);
+        }
+
+
+
+        if (patient.email) {
+            const appointmentLines = await this.buildAppointmentLines(groupedSteps.flat());
+
+            await this.mailService.sendPaidAppointmentConfirmation({
+                to: patient.email,
+                patientName: this.buildPatientDisplayName(patient),
+                appointmentDate: createdAppointments[0]?.appointmentDate || null,
+                amountUah: createdAppointments.reduce((sum, item) => sum + Number(item.paidAmountUah || 0), 0),
+                appointmentLines,
+                receiptNumber,
+            });
+        }
+
+        return {
+            ok: true,
+            message: 'Запис успішно створено та оплачено',
             receiptNumber,
             appointments: createdAppointments,
             groupedSteps,
@@ -1680,6 +1953,7 @@ export class AppointmentService {
             nextDoctorId,
             nextDate,
             durationMinutes,
+            appointment.id,
         );
 
         appointment.doctorId = nextDoctorId;
