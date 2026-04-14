@@ -10,6 +10,7 @@ import {
     Length,
     Max,
     Min,
+    ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -26,7 +27,7 @@ export class CreateClinicServiceDto {
     @IsOptional()
     @Type(() => Number)
     @IsInt()
-    @Min(0)
+    @Min(1)
     @Max(9999)
     sortOrder?: number;
 
@@ -53,4 +54,41 @@ export class CreateClinicServiceDto {
     @ArrayUnique()
     @IsUUID('4', { each: true })
     specialtyIds?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsUUID('4', { each: true })
+    requiredServiceIds?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsUUID('4', { each: true })
+    prerequisiteServiceIds?: string[];
+
+    @IsOptional()
+    @IsBoolean()
+    allowMultipleInCart?: boolean;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    @Max(999)
+    maxCartQuantity?: number | null;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    @Max(365)
+    minIntervalDays?: number;
+
+    @ValidateIf((o) => o.maxIntervalDays !== undefined && o.maxIntervalDays !== null)
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    @Max(365)
+    maxIntervalDays?: number;
 }

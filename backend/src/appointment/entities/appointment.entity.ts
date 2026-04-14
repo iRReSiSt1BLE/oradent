@@ -27,6 +27,12 @@ export class Appointment {
     @Column({ type: 'varchar', length: 100, nullable: true })
     serviceId: string | null;
 
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    cabinetId: string | null;
+
+    @Column({ type: 'int', nullable: true })
+    durationMinutes: number | null;
+
     @Column({ type: 'datetime', nullable: true })
     appointmentDate: Date | null;
 
@@ -36,11 +42,32 @@ export class Appointment {
     @Column({ type: 'varchar', length: 50, default: 'GUEST' })
     source: string;
 
+    @Column({ type: 'varchar', length: 50, default: 'SCHEDULED' })
+    visitFlowStatus: string;
+
     @Column({ type: 'boolean', default: false })
     recordingCompleted: boolean;
 
     @Column({ type: 'datetime', nullable: true })
     recordingCompletedAt: Date | null;
+
+    @Column({ type: 'text', nullable: true })
+    consultationConclusion: string | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    treatmentPlanItems: string[] | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    recommendationItems: string[] | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    medicationItems: string[] | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    consultationEmail: string | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    completedAt: Date | null;
 
     @CreateDateColumn()
     createdAt: Date;

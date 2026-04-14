@@ -22,6 +22,8 @@ import SmartAppointmentPage from '../../pages/SmartAppointmentPage/SmartAppointm
 import MyAppointmentsPage from '../../pages/MyAppointmentsPage/MyAppointmentsPage';
 import AdminPatientsPage from '../../pages/AdminPatientsPage/AdminPatientsPage';
 import CabinetsAdminPage from '../../pages/CabinetsAdminPage/CabinetsAdminPage';
+import AdminWeeklyAppointmentsPage from '../../pages/AdminWeeklyAppointmentsPage/AdminWeeklyAppointmentsPage';
+import DoctorWeeklyAppointmentsPage from '../../pages/DoctorWeeklyAppointmentsPage/DoctorWeeklyAppointmentsPage';
 
 function SuperAdminOnly() {
     const token = getToken();
@@ -74,6 +76,7 @@ export const router = createBrowserRouter([
                 children: [
                     { path: 'doctor/appointments', element: <DoctorAppointmentsPage /> },
                     { path: 'doctor/appointments/:id', element: <DoctorAppointmentDetailPage /> },
+                    { path: 'doctor/appointments-week', element: <DoctorWeeklyAppointmentsPage /> },
                 ],
             },
 
@@ -86,6 +89,7 @@ export const router = createBrowserRouter([
                     { path: 'admin/doctors/:doctorId', element: <DoctorDetailPage /> },
                     { path: 'admin/patients', element: <AdminPatientsPage /> },
                     { path: 'admin/cabinets', element: <CabinetsAdminPage /> },
+                    { path: 'admin/appointments-week', element: <AdminWeeklyAppointmentsPage /> },
                 ],
             },
 

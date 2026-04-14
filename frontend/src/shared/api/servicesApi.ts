@@ -29,6 +29,12 @@ export type ClinicService = {
     category: ServiceCategory | null;
     specialtyIds: string[];
     specialties: ServiceSpecialty[];
+    requiredServiceIds: string[];
+    prerequisiteServiceIds: string[];
+    allowMultipleInCart: boolean;
+    maxCartQuantity: number | null;
+    minIntervalDays: number | null;
+    maxIntervalDays: number | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -75,22 +81,22 @@ export async function updateServiceCategory(
 ) {
     return http<{ ok: boolean; message: string; category: ServiceCategory }>(
         `/services/categories/${categoryId}`,
-    {
-        method: 'PATCH',
+        {
+            method: 'PATCH',
             token,
             body: JSON.stringify(payload),
-    },
-);
+        },
+    );
 }
 
 export async function toggleCategoryActive(token: string, categoryId: string) {
     return http<{ ok: boolean; message: string; category: ServiceCategory }>(
         `/services/categories/${categoryId}/toggle-active`,
-    {
-        method: 'PATCH',
+        {
+            method: 'PATCH',
             token,
-    },
-);
+        },
+    );
 }
 
 export async function getSpecialtiesOptions(token: string) {
@@ -111,6 +117,12 @@ export async function createService(
         categoryId: string;
         isActive?: boolean;
         specialtyIds?: string[];
+        requiredServiceIds?: string[];
+        prerequisiteServiceIds?: string[];
+        allowMultipleInCart?: boolean;
+        maxCartQuantity?: number | null;
+        minIntervalDays?: number | null;
+        maxIntervalDays?: number | null;
     },
 ) {
     return http<{ ok: boolean; message: string; service: ClinicService }>(
@@ -127,6 +139,12 @@ export async function createService(
                 categoryId: payload.categoryId,
                 isActive: payload.isActive,
                 specialtyIds: payload.specialtyIds ?? [],
+                requiredServiceIds: payload.requiredServiceIds ?? [],
+                prerequisiteServiceIds: payload.prerequisiteServiceIds ?? [],
+                allowMultipleInCart: payload.allowMultipleInCart ?? false,
+                maxCartQuantity: payload.maxCartQuantity ?? undefined,
+                minIntervalDays: payload.minIntervalDays ?? undefined,
+                maxIntervalDays: payload.maxIntervalDays ?? undefined,
             }),
         },
     );
@@ -144,35 +162,47 @@ export async function updateService(
         categoryId?: string;
         isActive?: boolean;
         specialtyIds?: string[];
+        requiredServiceIds?: string[];
+        prerequisiteServiceIds?: string[];
+        allowMultipleInCart?: boolean;
+        maxCartQuantity?: number | null;
+        minIntervalDays?: number | null;
+        maxIntervalDays?: number | null;
     },
 ) {
     return http<{ ok: boolean; message: string; service: ClinicService }>(
         `/services/${serviceId}`,
-    {
-        method: 'PATCH',
+        {
+            method: 'PATCH',
             token,
             body: JSON.stringify({
-        name: payload.name,
-        description: payload.description,
-        durationMinutes: payload.durationMinutes,
-        sortOrder: payload.sortOrder,
-        ...(payload.priceUah !== undefined ? { priceUah: String(payload.priceUah) } : {}),
-        categoryId: payload.categoryId,
-        isActive: payload.isActive,
-        specialtyIds: payload.specialtyIds,
-    }),
-    },
-);
+                name: payload.name,
+                description: payload.description,
+                durationMinutes: payload.durationMinutes,
+                sortOrder: payload.sortOrder,
+                ...(payload.priceUah !== undefined ? { priceUah: String(payload.priceUah) } : {}),
+                categoryId: payload.categoryId,
+                isActive: payload.isActive,
+                specialtyIds: payload.specialtyIds,
+                requiredServiceIds: payload.requiredServiceIds,
+                prerequisiteServiceIds: payload.prerequisiteServiceIds,
+                allowMultipleInCart: payload.allowMultipleInCart,
+                maxCartQuantity: payload.maxCartQuantity,
+                minIntervalDays: payload.minIntervalDays,
+                maxIntervalDays: payload.maxIntervalDays,
+            }),
+        },
+    );
 }
 
 export async function toggleServiceActive(token: string, serviceId: string) {
     return http<{ ok: boolean; message: string; service: ClinicService }>(
         `/services/${serviceId}/toggle-active`,
-    {
-        method: 'PATCH',
+        {
+            method: 'PATCH',
             token,
-    },
-);
+        },
+    );
 }
 
 export async function getPublicCatalog() {
@@ -186,8 +216,8 @@ export async function getPublicCatalog() {
 
 export async function getPublicServiceById(serviceId: string) {
     return http<{ ok: boolean; service: ClinicService }>(`/services/public/${serviceId}`, {
-    method: 'GET',
-});
+        method: 'GET',
+    });
 }
 
 export async function getActivePublicServices() {

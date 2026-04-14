@@ -13,6 +13,8 @@ import { ClinicServiceEntity } from '../services/entities/clinic-service.entity'
 import { Doctor } from '../doctor/entities/doctor.entity';
 import { MailModule } from '../mail/mail.module';
 import {Patient} from "../patient/entities/patient.entity";
+import { Cabinet } from '../cabinet/entities/cabinet.entity';
+import { VideoAccessGrant } from '../video/entities/video-access-grant.entity';
 
 @Module({
     imports: [
@@ -22,6 +24,8 @@ import {Patient} from "../patient/entities/patient.entity";
             ClinicServiceEntity,
             Doctor,
             Patient,
+            Cabinet,
+            VideoAccessGrant,
         ]),
         PatientModule,
         PhoneVerificationModule,

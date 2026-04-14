@@ -19,7 +19,9 @@ import { VideoTsaService } from './video-tsa.service';
 import { VideoEncryptionService } from './video-encryption.service';
 import { Appointment } from '../appointment/entities/appointment.entity';
 import { User } from '../user/entities/user.entity';
+import { Doctor } from '../doctor/entities/doctor.entity';
 import { UserRole } from '../common/enums/user-role.enum';
+import { VideoAccessGrant } from './entities/video-access-grant.entity';
 
 type JwtUser = {
     id: string;
@@ -37,11 +39,46 @@ export class VideoService {
         private readonly appointmentRepository: Repository<Appointment>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(Doctor)
+        private readonly doctorRepository: Repository<Doctor>,
+        @InjectRepository(VideoAccessGrant)
+        private readonly videoAccessGrantRepository: Repository<VideoAccessGrant>,
         private readonly configService: ConfigService,
         private readonly videoSignatureService: VideoSignatureService,
         private readonly videoTsaService: VideoTsaService,
         private readonly videoEncryptionService: VideoEncryptionService,
     ) {}
+
+    private async resolveDoctorEntityByAnyId(ref: string | null | undefined) {
+        if (!ref) return null;
+
+        return this.doctorRepository.findOne({
+            where: [
+                { id: ref },
+                { user: { id: ref } },
+            ],
+            relations: ['user'],
+        });
+    }
+
+    private async doctorOwnsAppointment(appointment: Appointment, actorUserId: string) {
+        if (!appointment.doctorId) return false;
+        if (appointment.doctorId === actorUserId) return true;
+
+        const doctor = await this.resolveDoctorEntityByAnyId(appointment.doctorId);
+        if (!doctor) return false;
+        return doctor.id === actorUserId || doctor.user?.id === actorUserId;
+    }
+
+    private async hasValidShareAccess(appointmentId: string, actorUserId: string) {
+        const now = new Date();
+        const grants = await this.videoAccessGrantRepository.find({
+            where: { appointmentId, sharedWithDoctorId: actorUserId },
+            order: { updatedAt: 'DESC', createdAt: 'DESC' },
+        });
+
+        return grants.some((grant) => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now.getTime());
+    }
 
     private async assertAppointmentAccess(
         appointmentId: string,
@@ -64,7 +101,12 @@ export class VideoService {
         }
 
         if (actor.role === UserRole.DOCTOR) {
-            if (appointment.doctorId !== actor.id) {
+            const ownsAppointment = await this.doctorOwnsAppointment(appointment, actor.id);
+            const hasSharedAccess = ownsAppointment
+                ? false
+                : await this.hasValidShareAccess(appointment.id, actor.id);
+
+            if (!ownsAppointment && !hasSharedAccess) {
                 throw new ForbiddenException(
                     'Немає доступу до цього прийому',
                 );
@@ -306,11 +348,26 @@ export class VideoService {
         }
 
         if (actor.role === UserRole.DOCTOR) {
+            const doctor = await this.resolveDoctorEntityByAnyId(actor.id);
+            const doctorRefs = [actor.id, doctor?.id].filter(Boolean) as string[];
+
             const myAppointments = await this.appointmentRepository.find({
-                where: { doctorId: actor.id },
+                where: doctorRefs.map((doctorId) => ({ doctorId })),
                 select: ['id'],
             });
-            const ids = myAppointments.map((a) => a.id);
+
+            const sharedGrants = await this.videoAccessGrantRepository.find({
+                where: { sharedWithDoctorId: actor.id },
+                select: ['appointmentId', 'expiresAt'],
+                order: { updatedAt: 'DESC', createdAt: 'DESC' },
+            });
+
+            const now = new Date();
+            const sharedAppointmentIds = sharedGrants
+                .filter((grant) => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now.getTime())
+                .map((grant) => grant.appointmentId);
+
+            const ids = [...new Set([...myAppointments.map((a) => a.id), ...sharedAppointmentIds].filter(Boolean))];
             if (ids.length === 0) return [];
             return this.videoRepository
                 .createQueryBuilder('v')
@@ -363,5 +420,83 @@ export class VideoService {
         await this.assertAppointmentAccess(video.appointmentId, actor);
 
         return this.decryptVideoToStream(video);
+    }
+
+    async shareAppointmentVideos(
+        appointmentId: string,
+        actor: JwtUser,
+        payload: {
+            sharedWithDoctorId: string;
+            password: string;
+            expiresAt?: string | null;
+        },
+    ) {
+        if (actor.role !== UserRole.DOCTOR) {
+            throw new ForbiddenException('Лише лікар може ділитися відео');
+        }
+
+        await this.verifyAccountPassword(actor.id, String(payload.password || ''));
+
+        const appointment = await this.appointmentRepository.findOne({
+            where: { id: appointmentId },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new NotFoundException('Прийом не знайдено');
+        }
+
+        const ownsAppointment = await this.doctorOwnsAppointment(appointment, actor.id);
+        if (!ownsAppointment) {
+            throw new ForbiddenException('Можна ділитися лише своїми записами');
+        }
+
+        const targetDoctor = await this.resolveDoctorEntityByAnyId(payload.sharedWithDoctorId);
+        if (!targetDoctor?.user?.id) {
+            throw new NotFoundException('Лікаря не знайдено');
+        }
+
+        if (targetDoctor.user.id === actor.id || targetDoctor.id === actor.id) {
+            throw new ForbiddenException('Неможливо поділитися записом із самим собою');
+        }
+
+        const expiresAt = payload.expiresAt ? new Date(payload.expiresAt) : null;
+        if (payload.expiresAt && Number.isNaN(expiresAt!.getTime())) {
+            throw new ForbiddenException('Невірний строк доступу');
+        }
+
+        let grant = await this.videoAccessGrantRepository.findOne({
+            where: {
+                appointmentId,
+                sharedWithDoctorId: targetDoctor.user.id,
+            },
+            order: { updatedAt: 'DESC', createdAt: 'DESC' },
+        });
+
+        if (!grant) {
+            grant = this.videoAccessGrantRepository.create({
+                appointmentId,
+                sharedByDoctorId: actor.id,
+                sharedWithDoctorId: targetDoctor.user.id,
+                expiresAt,
+            });
+        } else {
+            grant.sharedByDoctorId = actor.id;
+            grant.expiresAt = expiresAt;
+        }
+
+        const savedGrant = await this.videoAccessGrantRepository.save(grant);
+
+        return {
+            ok: true,
+            message: 'Доступ до відео успішно надано',
+            grant: {
+                id: savedGrant.id,
+                appointmentId: savedGrant.appointmentId,
+                sharedWithDoctorId: savedGrant.sharedWithDoctorId,
+                expiresAt: savedGrant.expiresAt,
+                sharedDoctorName: `${targetDoctor.lastName || ''} ${targetDoctor.firstName || ''}${targetDoctor.middleName ? ` ${targetDoctor.middleName}` : ''}`.replace(/\s+/g, ' ').trim(),
+            },
+        };
     }
 }

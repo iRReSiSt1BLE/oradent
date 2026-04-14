@@ -1,6 +1,5 @@
 import {
     ArrayMinSize,
-    ArrayUnique,
     IsArray,
     IsIn,
     IsOptional,
@@ -11,7 +10,6 @@ import {
 export class GetSmartAppointmentPlanDto {
     @IsArray()
     @ArrayMinSize(1)
-    @ArrayUnique()
     @IsUUID('4', { each: true })
     serviceIds: string[];
 

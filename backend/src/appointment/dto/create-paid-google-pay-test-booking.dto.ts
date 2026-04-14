@@ -19,6 +19,10 @@ class PaidBookingStepDto {
 
     @IsString()
     appointmentDate: string;
+
+    @IsOptional()
+    @IsString()
+    cabinetId?: string;
 }
 
 export class CreatePaidGooglePayTestBookingDto {

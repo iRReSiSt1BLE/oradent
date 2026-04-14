@@ -284,3 +284,139 @@
   height: auto;
   align-self: start;
 }
+.home-page__info-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 1000;
+}
+
+.home-page__info-modal {
+  width: min(560px, 100%);
+  background: #fff;
+  border: 1px solid #111;
+  box-shadow: 8px 8px 0 #111;
+}
+
+.home-page__info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #d5dde3;
+
+  h3 {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    color: #111827;
+  }
+
+  button {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #111;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 22px;
+    cursor: pointer;
+  }
+}
+
+.home-page__info-body {
+  padding: 18px 16px 6px;
+  display: grid;
+  gap: 10px;
+
+  p {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #374151;
+  }
+}
+
+.home-page__info-actions {
+  padding: 0 16px 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.home-page__info-button {
+  min-height: 42px;
+  border: 1px solid #111;
+  background: #84d4c6;
+  padding: 0 18px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+
+.home-page__service-item-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.home-page__service-qty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #3a3a3a;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: #24324a;
+}
+
+.home-page__service-info {
+  margin-left: 36px;
+  padding: 12px 14px;
+  border: 1px solid #d5dde3;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+
+  p {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #5b6b80;
+  }
+
+  &.is-emphasis p {
+    color: #c75b5b;
+  }
+}
+
+.home-page__service-info-actions {
+  display: flex;
+  justify-content: flex-start;
+
+  button {
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid #111;
+    background: #84d4c6;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page__service-info {
+    margin-left: 0;
+  }
+}

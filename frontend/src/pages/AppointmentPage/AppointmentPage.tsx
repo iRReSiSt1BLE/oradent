@@ -469,7 +469,8 @@ export default function AppointmentPage() {
                         className="appointment-page__submit"
                         type="submit"
                         disabled={submitting || loading}
-                    >
+>
+                        {submitting ? <span className="appointment-page__spinner" /> : null}
                         {submitting ? 'ЗАПИС...' : 'ЗАПИСАТИСЯ НА ПРИЙОМ'}
                     </button>
                 </form>

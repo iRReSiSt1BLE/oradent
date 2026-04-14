@@ -137,3 +137,42 @@ export async function streamVideoWithPassword(
 
     return response.blob();
 }
+
+
+export async function shareAppointmentVideos(
+    token: string,
+    appointmentId: string,
+    payload: {
+        sharedWithDoctorId: string;
+        password: string;
+        expiresAt?: string | null;
+    },
+) {
+    const response = await fetch(`${API_BASE_URL}/video/appointment/${appointmentId}/share`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+        const message = data?.message || data?.error || 'Не вдалося надати доступ до відео';
+        throw new Error(Array.isArray(message) ? message.join(', ') : message);
+    }
+
+    return data as {
+        ok: boolean;
+        message: string;
+        grant?: {
+            id: string;
+            appointmentId: string;
+            sharedWithDoctorId: string;
+            expiresAt: string | null;
+            sharedDoctorName: string;
+        };
+    };
+}

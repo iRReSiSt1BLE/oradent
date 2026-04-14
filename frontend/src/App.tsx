@@ -1,19 +1,22 @@
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import Header from './widgets/Header/Header';
-import CartDrawer from './widgets/CartDrawer/CartDrawer';
+import CartDrawer from './widgets/CartDrawer/CartDrawer.tsx';
 import {
     clearCart,
     getCart,
     getCartCount,
     getCartTotalUah,
     removeServiceFromCart,
+    getDependentServiceNames,
     type CartItem,
 } from './shared/cart/cartStore';
 import './App.scss';
+import { useI18n } from './shared/i18n/I18nProvider';
 
 export default function App() {
     const navigate = useNavigate();
+    const { t } = useI18n();
 
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -39,8 +42,16 @@ export default function App() {
     const cartCount = useMemo(() => getCartCount(), [cartItems]);
     const cartTotalUah = useMemo(() => getCartTotalUah(), [cartItems]);
 
-    function handleRemove(serviceId: string) {
-        removeServiceFromCart(serviceId);
+    function handleRemove(cartItemId: string) {
+        const dependentNames = getDependentServiceNames(cartItemId);
+        if (dependentNames.length) {
+            const message = `${t('cart.dependencyRemoveWarning')}
+
+${dependentNames.join(', ')}`;
+            if (!window.confirm(message)) return;
+        }
+
+        removeServiceFromCart(cartItemId);
         syncCart();
     }
 

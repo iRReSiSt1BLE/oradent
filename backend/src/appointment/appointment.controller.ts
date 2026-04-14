@@ -4,7 +4,10 @@ import {
     Get,
     Param,
     Post,
+    Query,
     Req,
+    Res,
+    StreamableFile,
     UseGuards,
 } from '@nestjs/common';
 import { AppointmentService } from './appointment.service';
@@ -17,6 +20,7 @@ import {CreatePaidGooglePayTestBookingDto} from "./dto/create-paid-google-pay-te
 import { AdminCancelAppointmentDto } from './dto/admin-cancel-appointment.dto';
 import { AdminRescheduleAppointmentDto } from './dto/admin-reschedule-appointment.dto';
 import { AdminRefundAppointmentDto } from './dto/admin-refund-appointment.dto';
+import type { Response } from 'express';
 
 type JwtUser = {
     id: string;
@@ -83,6 +87,86 @@ export class AppointmentController {
         return this.appointmentService.getAdminPatientAppointments(req.user.id, patientId);
     }
 
+
+    @UseGuards(JwtAuthGuard)
+    @Get('admin/week')
+    getAdminWeekAppointments(
+        @Req() req: { user: { id: string } },
+        @Query('date') date?: string,
+    ) {
+        return this.appointmentService.getAdminWeekAppointments(req.user.id, date);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get('doctor/week')
+    getDoctorWeekAppointments(
+        @Req() req: { user: { id: string } },
+        @Query('date') date?: string,
+    ) {
+        return this.appointmentService.getDoctorWeekAppointments(req.user.id, date);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get('doctor/archive/my')
+    getDoctorArchiveAppointments(
+        @Req() req: { user: { id: string } },
+    ) {
+        return this.appointmentService.getDoctorArchiveAppointments(req.user.id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get('doctor/archive/shared')
+    getDoctorSharedArchiveAppointments(
+        @Req() req: { user: { id: string } },
+    ) {
+        return this.appointmentService.getDoctorSharedArchiveAppointments(req.user.id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/consultation-pdf-auth')
+    async streamConsultationPdfAuth(
+        @Param('id') id: string,
+        @Body() body: { password: string },
+        @Req() req: { user: JwtUser },
+        @Res({ passthrough: true }) res: Response,
+    ): Promise<StreamableFile> {
+        const pdfBuffer = await this.appointmentService.getConsultationPdfBufferWithPassword(id, req.user, body.password);
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'inline; filename="consultation-conclusion.pdf"',
+        });
+        return new StreamableFile(pdfBuffer);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/visit-flow-status')
+    updateVisitFlowStatus(
+        @Req() req: { user: { id: string } },
+        @Param('id') id: string,
+        @Body() body: { visitFlowStatus: string },
+    ) {
+        return this.appointmentService.updateVisitFlowStatus(req.user.id, id, body.visitFlowStatus);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/mark-paid')
+    markAppointmentPaid(
+        @Req() req: { user: { id: string } },
+        @Param('id') id: string,
+    ) {
+        return this.appointmentService.markAppointmentPaid(req.user.id, id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/change-cabinet')
+    changeAppointmentCabinet(
+        @Req() req: { user: { id: string } },
+        @Param('id') id: string,
+        @Body() body: { cabinetId: string },
+    ) {
+        return this.appointmentService.changeAppointmentCabinet(req.user.id, id, body.cabinetId);
+    }
+
     @UseGuards(JwtAuthGuard)
     @Post('admin/:id/cancel')
     async adminCancelAppointment(
@@ -114,6 +198,38 @@ export class AppointmentController {
     }
 
 
+    @Post('manual-availability/month')
+    getManualAvailabilityMonth(
+        @Body()
+        body: {
+            doctorId: string;
+            serviceId: string;
+            month: string;
+        },
+    ) {
+        return this.appointmentService.getManualAvailabilityMonth(
+            body.doctorId,
+            body.serviceId,
+            body.month,
+        );
+    }
+
+    @Post('manual-availability/day')
+    getManualAvailabilityDay(
+        @Body()
+        body: {
+            doctorId: string;
+            serviceId: string;
+            date: string;
+        },
+    ) {
+        return this.appointmentService.getManualAvailabilityDay(
+            body.doctorId,
+            body.serviceId,
+            body.date,
+        );
+    }
+
     @Get(':id')
     findById(@Param('id') id: string) {
         return this.appointmentService.findById(id);
@@ -123,6 +239,51 @@ export class AppointmentController {
     @UseGuards(JwtAuthGuard)
     createPaidGooglePayTest(@Req() req, @Body() dto: CreatePaidGooglePayTestBookingDto) {
         return this.appointmentService.createPaidGooglePayTestBooking(req.user.id, dto);
+    }
+
+
+    @UseGuards(JwtAuthGuard)
+    @Get('doctor/:id')
+    getDoctorAppointmentById(
+        @Req() req: { user: { id: string } },
+        @Param('id') id: string,
+    ) {
+        return this.appointmentService.getDoctorAppointmentById(req.user.id, id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/doctor-complete')
+    completeDoctorAppointment(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+        @Body()
+        body: {
+            consultationConclusion?: string;
+            treatmentPlanItems?: string[];
+            recommendationItems?: string[];
+            medicationItems?: string[];
+            email?: string;
+            nextVisitDate?: string | null;
+        },
+    ) {
+        return this.appointmentService.completeDoctorAppointment(id, req.user, body);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/doctor-follow-up')
+    createDoctorFollowUp(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+        @Body()
+        body: {
+            doctorId: string;
+            serviceId: string;
+            appointmentDate: string;
+            cabinetId?: string | null;
+            email?: string;
+        },
+    ) {
+        return this.appointmentService.createDoctorFollowUpAppointment(id, req.user, body);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -153,6 +314,7 @@ export class AppointmentController {
                 serviceId: string;
                 doctorId: string;
                 appointmentDate: string;
+                cabinetId?: string;
             }>;
             paymentMethod?: 'CASH';
             phoneVerificationSessionId?: string;
@@ -179,6 +341,7 @@ export class AppointmentController {
                 serviceId: string;
                 doctorId: string;
                 appointmentDate: string;
+                cabinetId?: string;
             }>;
             paymentMethod?: 'CASH';
         },
@@ -199,6 +362,7 @@ export class AppointmentController {
                 serviceId: string;
                 doctorId: string;
                 appointmentDate: string;
+                cabinetId?: string;
             }>;
             googleTransactionId?: string;
             googlePaymentToken?: string;

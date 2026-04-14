@@ -133,6 +133,86 @@ export class ServicesService {
         return specialties;
     }
 
+
+    private async resolveServiceIds(serviceIds?: string[] | null, exceptId?: string): Promise<string[]> {
+        if (!serviceIds || !serviceIds.length) {
+            return [];
+        }
+
+        const uniqueIds = [...new Set(serviceIds.map((id) => id.trim()).filter(Boolean))];
+
+        if (exceptId && uniqueIds.includes(exceptId)) {
+            throw new BadRequestException('Послуга не може залежати сама від себе');
+        }
+
+        const services = await this.clinicServiceRepository.find({
+            where: uniqueIds.map((id) => ({ id })),
+        });
+
+        if (services.length !== uniqueIds.length) {
+            const foundIds = new Set(services.map((item) => item.id));
+            const missing = uniqueIds.filter((id) => !foundIds.has(id));
+            throw new BadRequestException(`Не знайдено послуг: ${missing.join(', ')}`);
+        }
+
+        return uniqueIds;
+    }
+
+    private normalizeNullableInterval(value?: number | null): number | null {
+        if (value === undefined || value === null || Number.isNaN(Number(value))) {
+            return null;
+        }
+        return Number(value);
+    }
+
+    private validateServiceRules(params: {
+        prerequisiteServiceIds?: string[] | null;
+        requiredServiceIds?: string[] | null;
+        minIntervalDays?: number | null;
+        maxIntervalDays?: number | null;
+        currentServiceId?: string;
+        allowMultipleInCart?: boolean;
+        maxCartQuantity?: number | null;
+    }) {
+        const { prerequisiteServiceIds, requiredServiceIds, minIntervalDays, maxIntervalDays, currentServiceId, allowMultipleInCart, maxCartQuantity } = params;
+
+        if (currentServiceId && prerequisiteServiceIds?.includes(currentServiceId)) {
+            throw new BadRequestException('Послуга не може бути залежною від самої себе');
+        }
+
+        if (currentServiceId && requiredServiceIds?.includes(currentServiceId)) {
+            throw new BadRequestException('Послуга не може вимагати сама себе');
+        }
+
+        if (
+            maxIntervalDays !== undefined &&
+            maxIntervalDays !== null &&
+            minIntervalDays !== undefined &&
+            minIntervalDays !== null &&
+            maxIntervalDays < minIntervalDays
+        ) {
+            throw new BadRequestException('Максимальний інтервал не може бути меншим за мінімальний');
+        }
+
+        if (
+            (minIntervalDays !== undefined && minIntervalDays !== null) ||
+            (maxIntervalDays !== undefined && maxIntervalDays !== null)
+        ) {
+            if (!prerequisiteServiceIds || !prerequisiteServiceIds.length) {
+                throw new BadRequestException('Інтервал між процедурами можна задати лише разом із базовими послугами');
+            }
+        }
+
+        if (!allowMultipleInCart && maxCartQuantity !== null && maxCartQuantity !== undefined && maxCartQuantity > 1) {
+            throw new BadRequestException('Максимальна кількість має бути 1, якщо множинний вибір вимкнений');
+        }
+
+        if (allowMultipleInCart && maxCartQuantity !== null && maxCartQuantity !== undefined && maxCartQuantity < 2) {
+            throw new BadRequestException('Для множинного вибору максимальна кількість має бути не меншою за 2');
+        }
+
+    }
+
     private mapCategory(category: ServiceCategoryEntity) {
         return {
             id: category.id,
@@ -171,6 +251,14 @@ export class ServicesService {
             specialties: Array.isArray(service.specialties)
                 ? service.specialties.map((s) => this.mapSpecialty(s))
                 : [],
+            requiredServiceIds: Array.isArray(service.requiredServiceIds)
+                ? service.requiredServiceIds
+                : [],
+            prerequisiteServiceIds: Array.isArray(service.prerequisiteServiceIds) ? service.prerequisiteServiceIds : [],
+            allowMultipleInCart: Boolean(service.allowMultipleInCart),
+            maxCartQuantity: service.maxCartQuantity ?? null,
+            minIntervalDays: service.minIntervalDays ?? null,
+            maxIntervalDays: service.maxIntervalDays ?? null,
             createdAt: service.createdAt,
             updatedAt: service.updatedAt,
         };
@@ -185,7 +273,7 @@ export class ServicesService {
         const category = this.categoryRepository.create({
             name,
             description: this.normalizeDescription(dto.description),
-            sortOrder: dto.sortOrder ?? 0,
+            sortOrder: dto.sortOrder ?? 1,
             isActive: dto.isActive ?? true,
         });
 
@@ -284,17 +372,38 @@ export class ServicesService {
 
         const category = await this.getCategoryOrThrow(dto.categoryId);
         const specialties = await this.resolveSpecialties(dto.specialtyIds);
+        const requiredServiceIds = await this.resolveServiceIds(dto.requiredServiceIds);
+        const prerequisiteServiceIds = await this.resolveServiceIds(dto.prerequisiteServiceIds);
+        const minIntervalDays = this.normalizeNullableInterval(dto.minIntervalDays);
+        const maxIntervalDays = this.normalizeNullableInterval(dto.maxIntervalDays);
+        const allowMultipleInCart = Boolean(dto.allowMultipleInCart);
+        const maxCartQuantity = this.normalizeNullableInterval(dto.maxCartQuantity);
+
+        this.validateServiceRules({
+            prerequisiteServiceIds,
+            requiredServiceIds,
+            minIntervalDays,
+            maxIntervalDays,
+            allowMultipleInCart,
+            maxCartQuantity,
+        });
 
         const service = this.clinicServiceRepository.create({
             name,
             description: this.normalizeDescription(dto.description),
             durationMinutes: dto.durationMinutes,
             priceUah: this.normalizePriceUah(dto.priceUah),
-            sortOrder: dto.sortOrder ?? 0,
+            sortOrder: dto.sortOrder ?? 1,
             isActive: dto.isActive ?? true,
             categoryId: category.id,
             category,
             specialties,
+            requiredServiceIds,
+            prerequisiteServiceIds,
+            minIntervalDays,
+            maxIntervalDays,
+            allowMultipleInCart,
+            maxCartQuantity: allowMultipleInCart ? maxCartQuantity ?? 2 : 1,
         });
 
         const saved = await this.clinicServiceRepository.save(service);
@@ -454,6 +563,92 @@ export class ServicesService {
                 service.specialties = specialties;
                 hasChanges = true;
             }
+        }
+
+        const nextRequiredServiceIds =
+            dto.requiredServiceIds !== undefined
+                ? await this.resolveServiceIds(dto.requiredServiceIds, service.id)
+                : Array.isArray(service.requiredServiceIds)
+                    ? [...service.requiredServiceIds]
+                    : [];
+
+        const nextPrerequisiteServiceIds =
+            dto.prerequisiteServiceIds !== undefined
+                ? await this.resolveServiceIds(dto.prerequisiteServiceIds, service.id)
+                : Array.isArray(service.prerequisiteServiceIds)
+                    ? [...service.prerequisiteServiceIds]
+                    : [];
+
+        const nextMinIntervalDays =
+            dto.minIntervalDays !== undefined
+                ? this.normalizeNullableInterval(dto.minIntervalDays)
+                : service.minIntervalDays ?? null;
+
+        const nextMaxIntervalDays =
+            dto.maxIntervalDays !== undefined
+                ? this.normalizeNullableInterval(dto.maxIntervalDays)
+                : service.maxIntervalDays ?? null;
+
+        const nextAllowMultipleInCart =
+            dto.allowMultipleInCart !== undefined ? dto.allowMultipleInCart : Boolean(service.allowMultipleInCart);
+
+        const nextMaxCartQuantity =
+            dto.maxCartQuantity !== undefined
+                ? this.normalizeNullableInterval(dto.maxCartQuantity)
+                : service.maxCartQuantity ?? null;
+
+        this.validateServiceRules({
+            prerequisiteServiceIds: nextPrerequisiteServiceIds,
+            requiredServiceIds: nextRequiredServiceIds,
+            minIntervalDays: nextMinIntervalDays,
+            maxIntervalDays: nextMaxIntervalDays,
+            currentServiceId: service.id,
+            allowMultipleInCart: nextAllowMultipleInCart,
+            maxCartQuantity: nextMaxCartQuantity,
+        });
+
+        if (dto.requiredServiceIds !== undefined) {
+            const currentIds = Array.isArray(service.requiredServiceIds)
+                ? [...service.requiredServiceIds].sort()
+                : [];
+            const nextIds = [...nextRequiredServiceIds].sort();
+
+            if (JSON.stringify(currentIds) !== JSON.stringify(nextIds)) {
+                service.requiredServiceIds = nextRequiredServiceIds;
+                hasChanges = true;
+            }
+        }
+
+        if (dto.prerequisiteServiceIds !== undefined) {
+            const currentIds = Array.isArray(service.prerequisiteServiceIds)
+                ? [...service.prerequisiteServiceIds].sort()
+                : [];
+            const nextIds = [...nextPrerequisiteServiceIds].sort();
+
+            if (JSON.stringify(currentIds) !== JSON.stringify(nextIds)) {
+                service.prerequisiteServiceIds = nextPrerequisiteServiceIds;
+                hasChanges = true;
+            }
+        }
+
+        if (dto.minIntervalDays !== undefined && nextMinIntervalDays !== (service.minIntervalDays ?? null)) {
+            service.minIntervalDays = nextMinIntervalDays;
+            hasChanges = true;
+        }
+
+        if (dto.maxIntervalDays !== undefined && nextMaxIntervalDays !== (service.maxIntervalDays ?? null)) {
+            service.maxIntervalDays = nextMaxIntervalDays;
+            hasChanges = true;
+        }
+
+        if (dto.allowMultipleInCart !== undefined && nextAllowMultipleInCart !== Boolean(service.allowMultipleInCart)) {
+            service.allowMultipleInCart = nextAllowMultipleInCart;
+            hasChanges = true;
+        }
+
+        if (dto.maxCartQuantity !== undefined && nextMaxCartQuantity !== (service.maxCartQuantity ?? null)) {
+            service.maxCartQuantity = nextAllowMultipleInCart ? nextMaxCartQuantity ?? 2 : 1;
+            hasChanges = true;
         }
 
         if (!hasChanges) {

@@ -13,7 +13,7 @@ import {
     type ClinicService,
     type ServiceCategory,
     type ServiceSpecialty,
-} from '../../shared/api/servicesApi';
+} from '../../shared/api/servicesApi.ts';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import { useI18n } from '../../shared/i18n/I18nProvider';
@@ -48,6 +48,12 @@ type ServiceFormState = {
     categoryId: string;
     isActive: boolean;
     specialtyIds: string[];
+    requiredServiceIds: string[];
+    prerequisiteServiceIds: string[];
+    allowMultipleInCart: boolean;
+    maxCartQuantity: string;
+    minIntervalDays: string;
+    maxIntervalDays: string;
 };
 
 const LANGS: Array<{ key: Lang; label: string }> = [
@@ -70,7 +76,7 @@ function createEmptyCategoryForm(): CategoryFormState {
     return {
         name: emptyLocalized(),
         description: emptyLocalized(),
-        sortOrder: '0',
+        sortOrder: '1',
         isActive: true,
     };
 }
@@ -79,12 +85,18 @@ function createEmptyServiceForm(categoryId = ''): ServiceFormState {
     return {
         name: emptyLocalized(),
         description: emptyLocalized(),
-        sortOrder: '0',
+        sortOrder: '1',
         durationMinutes: '30',
         priceUah: '1000',
         categoryId,
         isActive: true,
         specialtyIds: [],
+        requiredServiceIds: [],
+        prerequisiteServiceIds: [],
+        allowMultipleInCart: false,
+        maxCartQuantity: '1',
+        minIntervalDays: '',
+        maxIntervalDays: '',
     };
 }
 
@@ -251,6 +263,48 @@ function getServiceSpecialtyLabel(
     return '';
 }
 
+
+function buildServiceRulesSummary(
+    service: ClinicService,
+    services: ClinicService[],
+    lang: Lang,
+    t: (key: string) => string,
+) {
+    const parts: string[] = [];
+
+    const requiredNames = (service.requiredServiceIds || [])
+        .map((id) => services.find((item) => item.id === id))
+        .filter(Boolean)
+        .map((item) => pickI18nText((item as ClinicService).name, lang));
+
+    if (requiredNames.length) {
+        parts.push(`${t('servicesAdmin.requiredWithLabel')}: ${requiredNames.join(', ')}`);
+    }
+
+    const prerequisiteNames = (service.prerequisiteServiceIds || [])
+        .map((id) => services.find((item) => item.id === id))
+        .filter(Boolean)
+        .map((item) => pickI18nText((item as ClinicService).name, lang));
+
+    if (prerequisiteNames.length) {
+        parts.push(`${t('servicesAdmin.afterServiceLabel')}: ${prerequisiteNames.join(', ')}`);
+    }
+
+    if (service.allowMultipleInCart) {
+        parts.push(`${t('servicesAdmin.cartMultiplicityLabel')}: ${service.maxCartQuantity || '∞'}`);
+    }
+
+    if (service.minIntervalDays !== null && service.minIntervalDays !== undefined) {
+        parts.push(`${t('servicesAdmin.minIntervalLabel')}: ${service.minIntervalDays}`);
+    }
+
+    if (service.maxIntervalDays !== null && service.maxIntervalDays !== undefined) {
+        parts.push(`${t('servicesAdmin.maxIntervalLabel')}: ${service.maxIntervalDays}`);
+    }
+
+    return parts.join(' · ');
+}
+
 function tt(
     t: (key: string) => string,
     key: string,
@@ -355,6 +409,12 @@ export default function ServicesAdminPage() {
         });
     }, [services, search, activeOnly, categoryFilter, currentLang]);
 
+    const dependencyOptions = useMemo(() => {
+        return services
+            .filter((item) => item.id !== editingServiceId)
+            .sort((a, b) => pickI18nText(a.name, currentLang).localeCompare(pickI18nText(b.name, currentLang), 'uk'));
+    }, [services, editingServiceId, currentLang]);
+
     function openCreateCategoryModal() {
         setCategoryModalMode('create');
         setEditingCategoryId(null);
@@ -396,6 +456,12 @@ export default function ServicesAdminPage() {
             categoryId: item.categoryId,
             isActive: item.isActive,
             specialtyIds: item.specialtyIds || [],
+            requiredServiceIds: item.requiredServiceIds || [],
+            prerequisiteServiceIds: item.prerequisiteServiceIds || [],
+            allowMultipleInCart: Boolean(item.allowMultipleInCart),
+            maxCartQuantity: item.maxCartQuantity !== null && item.maxCartQuantity !== undefined ? String(item.maxCartQuantity) : '1',
+            minIntervalDays: item.minIntervalDays !== null && item.minIntervalDays !== undefined ? String(item.minIntervalDays) : '',
+            maxIntervalDays: item.maxIntervalDays !== null && item.maxIntervalDays !== undefined ? String(item.maxIntervalDays) : '',
         });
         setServiceLang('ua');
         setServiceModalOpen(true);
@@ -444,6 +510,7 @@ export default function ServicesAdminPage() {
                 name: { ...prev.name, en: nameEn, de: nameDe, fr: nameFr },
                 description: { ...prev.description, en: descEn, de: descDe, fr: descFr },
             }));
+            setAlert({ variant: 'success', message: tt(t, 'servicesAdmin.translated', 'Успішно перекладено') });
         } catch (err) {
             setAlert({
                 variant: 'error',
@@ -483,6 +550,7 @@ export default function ServicesAdminPage() {
                 name: { ...prev.name, en: nameEn, de: nameDe, fr: nameFr },
                 description: { ...prev.description, en: descEn, de: descDe, fr: descFr },
             }));
+            setAlert({ variant: 'success', message: tt(t, 'servicesAdmin.translated', 'Успішно перекладено') });
         } catch (err) {
             setAlert({
                 variant: 'error',
@@ -546,6 +614,12 @@ export default function ServicesAdminPage() {
                 categoryId: serviceForm.categoryId,
                 isActive: serviceForm.isActive,
                 specialtyIds: serviceForm.specialtyIds,
+                requiredServiceIds: serviceForm.requiredServiceIds,
+                prerequisiteServiceIds: serviceForm.prerequisiteServiceIds,
+                allowMultipleInCart: serviceForm.allowMultipleInCart,
+                maxCartQuantity: serviceForm.allowMultipleInCart ? Number(serviceForm.maxCartQuantity || '1') : 1,
+                minIntervalDays: serviceForm.minIntervalDays !== '' ? Number(serviceForm.minIntervalDays) : null,
+                maxIntervalDays: serviceForm.maxIntervalDays !== '' ? Number(serviceForm.maxIntervalDays) : null,
             };
 
             if (serviceModalMode === 'edit' && editingServiceId) {
@@ -605,6 +679,24 @@ export default function ServicesAdminPage() {
             specialtyIds: prev.specialtyIds.includes(id)
                 ? prev.specialtyIds.filter((item) => item !== id)
                 : [...prev.specialtyIds, id],
+        }));
+    }
+
+    function toggleRequiredService(id: string) {
+        setServiceForm((prev) => ({
+            ...prev,
+            requiredServiceIds: prev.requiredServiceIds.includes(id)
+                ? prev.requiredServiceIds.filter((item) => item !== id)
+                : [...prev.requiredServiceIds, id],
+        }));
+    }
+
+    function togglePrerequisiteService(id: string) {
+        setServiceForm((prev) => ({
+            ...prev,
+            prerequisiteServiceIds: prev.prerequisiteServiceIds.includes(id)
+                ? prev.prerequisiteServiceIds.filter((item) => item !== id)
+                : [...prev.prerequisiteServiceIds, id],
         }));
     }
 
@@ -744,6 +836,9 @@ export default function ServicesAdminPage() {
                                             {' · '}
                                             {item.durationMinutes} хв
                                         </p>
+                                        {buildServiceRulesSummary(item, services, currentLang, t) ? (
+                                            <p>{buildServiceRulesSummary(item, services, currentLang, t)}</p>
+                                        ) : null}
                                     </div>
 
                                     <div className="services-admin-page__item-actions">
@@ -794,9 +889,12 @@ export default function ServicesAdminPage() {
                                         onClick={handleAutoTranslateCategory}
                                         disabled={translatingCategory}
                                     >
-                                        {translatingCategory
-                                            ? tt(t, 'common.translating', 'Перекладаємо...')
-                                            : tt(t, 'common.autoTranslate', 'Автопереклад')}
+                                        {translatingCategory ? (
+                                            <span className="services-admin-page__button-loading">
+                                                <span className="services-admin-page__button-spinner" />
+                                                {tt(t, 'common.translating', 'Перекладаємо...')}
+                                            </span>
+                                        ) : tt(t, 'common.autoTranslate', 'Автопереклад')}
                                     </button>
                                 </div>
 
@@ -906,9 +1004,12 @@ export default function ServicesAdminPage() {
                                         onClick={handleAutoTranslateService}
                                         disabled={translatingService}
                                     >
-                                        {translatingService
-                                            ? tt(t, 'common.translating', 'Перекладаємо...')
-                                            : tt(t, 'common.autoTranslate', 'Автопереклад')}
+                                        {translatingService ? (
+                                            <span className="services-admin-page__button-loading">
+                                                <span className="services-admin-page__button-spinner" />
+                                                {tt(t, 'common.translating', 'Перекладаємо...')}
+                                            </span>
+                                        ) : tt(t, 'common.autoTranslate', 'Автопереклад')}
                                     </button>
                                 </div>
 
@@ -1040,6 +1141,110 @@ export default function ServicesAdminPage() {
                                             })}
                                         </div>
                                     </div>
+
+                                    <div className="services-admin-page__field services-admin-page__field--full">
+                                        <span>{tt(t, 'servicesAdmin.requiredWith', 'Обов’язково разом')}</span>
+                                        <div className="services-admin-page__specialties services-admin-page__specialties--scroll">
+                                            {dependencyOptions.map((serviceOption) => {
+                                                const active = serviceForm.requiredServiceIds.includes(serviceOption.id);
+                                                return (
+                                                    <button
+                                                        key={serviceOption.id}
+                                                        type="button"
+                                                        className={active ? 'is-active' : ''}
+                                                        onClick={() => toggleRequiredService(serviceOption.id)}
+                                                    >
+                                                        {pickI18nText(serviceOption.name, currentLang)}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className="services-admin-page__field services-admin-page__field--full">
+                                        <span>{tt(t, 'servicesAdmin.afterService', 'Виконується після послуги')}</span>
+                                        <div className="services-admin-page__specialties services-admin-page__specialties--scroll">
+                                            {dependencyOptions.map((serviceOption) => {
+                                                const active = serviceForm.prerequisiteServiceIds.includes(serviceOption.id);
+                                                return (
+                                                    <button
+                                                        key={serviceOption.id}
+                                                        type="button"
+                                                        className={active ? 'is-active' : ''}
+                                                        onClick={() => togglePrerequisiteService(serviceOption.id)}
+                                                    >
+                                                        {pickI18nText(serviceOption.name, currentLang)}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <label className="services-admin-page__field services-admin-page__field--compact">
+                                        <span>{tt(t, 'servicesAdmin.allowMultipleInCart', 'Можна обрати кілька разів')}</span>
+                                        <div className="services-admin-page__switch services-admin-page__switch--compact">
+                                            <span>{tt(t, 'servicesAdmin.allowMultipleInCart', 'Можна обрати кілька разів')}</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={serviceForm.allowMultipleInCart}
+                                                onChange={(e) =>
+                                                    setServiceForm((prev) => ({
+                                                        ...prev,
+                                                        allowMultipleInCart: e.target.checked,
+                                                        maxCartQuantity: e.target.checked
+                                                            ? (Number(prev.maxCartQuantity || '1') > 1 ? prev.maxCartQuantity : '2')
+                                                            : '1',
+                                                    }))
+                                                }
+                                            />
+                                        </div>
+                                    </label>
+
+                                    <label className="services-admin-page__field services-admin-page__field--compact">
+                                        <span>{tt(t, 'servicesAdmin.maxCartQuantity', 'Макс. кількість у кошику')}</span>
+                                        <input
+                                            type="number"
+                                            min={serviceForm.allowMultipleInCart ? '2' : '1'}
+                                            value={serviceForm.maxCartQuantity}
+                                            disabled={!serviceForm.allowMultipleInCart}
+                                            onChange={(e) =>
+                                                setServiceForm((prev) => ({
+                                                    ...prev,
+                                                    maxCartQuantity: e.target.value,
+                                                }))
+                                            }
+                                        />
+                                    </label>
+
+                                    <label className="services-admin-page__field">
+                                        <span>{tt(t, 'servicesAdmin.minIntervalDays', 'Мін. інтервал (днів)')}</span>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={serviceForm.minIntervalDays}
+                                            onChange={(e) =>
+                                                setServiceForm((prev) => ({
+                                                    ...prev,
+                                                    minIntervalDays: e.target.value,
+                                                }))
+                                            }
+                                        />
+                                    </label>
+
+                                    <label className="services-admin-page__field">
+                                        <span>{tt(t, 'servicesAdmin.maxIntervalDays', 'Макс. інтервал (днів)')}</span>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={serviceForm.maxIntervalDays}
+                                            onChange={(e) =>
+                                                setServiceForm((prev) => ({
+                                                    ...prev,
+                                                    maxIntervalDays: e.target.value,
+                                                }))
+                                            }
+                                        />
+                                    </label>
                                 </div>
 
                                 <div className="services-admin-page__form-actions">

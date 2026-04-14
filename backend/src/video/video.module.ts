@@ -8,9 +8,11 @@ import { VideoTsaService } from './video-tsa.service';
 import { VideoEncryptionService } from './video-encryption.service';
 import { Appointment } from '../appointment/entities/appointment.entity';
 import { User } from '../user/entities/user.entity';
+import { Doctor } from '../doctor/entities/doctor.entity';
+import { VideoAccessGrant } from './entities/video-access-grant.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Video, Appointment, User])],
+    imports: [TypeOrmModule.forFeature([Video, Appointment, User, Doctor, VideoAccessGrant])],
     controllers: [VideoController],
     providers: [
         VideoService,

@@ -77,7 +77,8 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
     const staffItems: StaffMenuItem[] = [
         { to: '/', label: t('header.home') },
         { to: '/profile', label: t('header.profile') },
-        ...(isDoctor ? [{ to: '/doctor/smart-appointment', label: t('header.myAppointments') }] : []),
+        ...(isDoctor ? [{ to: '/doctor/appointments', label: t('header.myAppointments') }] : []),
+        ...(isDoctor ? [{ to: '/doctor/appointments-week', label: t('header.weeklyAppointments') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/smart-appointment', label: t('header.records') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/services', label: t('header.services') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/doctors/list', label: t('header.doctors') }] : []),
@@ -86,6 +87,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
         ...(isSuperAdmin ? [{ to: '/admins/create', label: t('header.adminsCreate') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/patients', label: t('header.patients') }] : []),
         ...(isAdminOrSuperAdmin ? [{ to: '/admin/cabinets', label: t('header.cabinets') }] : []),
+        ...(isAdminOrSuperAdmin ? [{ to: '/admin/appointments-week', label: t('header.weeklyAppointments') }] : []),
     ];
 
     useEffect(() => {

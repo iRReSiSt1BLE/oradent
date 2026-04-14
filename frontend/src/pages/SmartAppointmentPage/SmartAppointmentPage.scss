@@ -1330,14 +1330,16 @@
 }
 
 .smart-appointment-page__slot {
-  min-height: 46px;
-  height: 46px;
-  padding: 0 10px;
+  min-height: 56px;
+  padding: 6px 10px;
   border: 1px solid #d7dde3;
   background: #79ddc8;
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   box-sizing: border-box;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 13px;
@@ -1346,6 +1348,14 @@
   transition: background 0.18s ease, border-color 0.18s ease, filter 0.18s ease, opacity 0.18s ease;
   box-shadow: none;
   transform: none;
+  text-align: center;
+}
+
+.smart-appointment-page__slot small {
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: #476172;
 }
 
 .smart-appointment-page__slot:hover:not(:disabled) {
@@ -1865,4 +1875,19 @@
       width: min(320px, 100%);
     }
   }
+}
+
+.smart-appointment-page__button-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(36, 50, 74, 0.22);
+  border-top-color: #24324a;
+  animation: smart-appointment-page-button-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes smart-appointment-page-button-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

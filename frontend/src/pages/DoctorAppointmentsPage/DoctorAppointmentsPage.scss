@@ -1,145 +1,310 @@
 .doctor-appointments-page {
+  padding: 24px 0 48px;
+
   &__container {
-    display: flex;
-    justify-content: center;
+    display: grid;
   }
 
   &__card {
-    width: 100%;
-    max-width: 980px;
-    background: #f8f8f8;
-    border: 1.5px solid #111;
-    border-radius: 16px;
-    box-shadow: 10px 10px 0 #111;
-    padding: 24px;
+    display: grid;
+    gap: 18px;
+  }
+
+  &__head,
+  &__item-top,
+  &__actions,
+  &__modal-head,
+  &__modal-actions,
+  &__video-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__head,
+  &__item-top,
+  &__modal-head,
+  &__video-head {
+    justify-content: space-between;
   }
 
   &__title {
     margin: 0;
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 28px;
-    letter-spacing: 0.06em;
-    color: #111;
-  }
-
-  &__subtitle {
-    margin: 8px 0 16px;
-    color: #55606d;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-  }
-
-  &__top-alert {
-    margin-bottom: 12px;
-
-    .alert-toast {
-      width: 100%;
-      max-width: none;
-    }
-  }
-
-  &__search {
-    width: 100%;
-    min-height: 44px;
-    border: 2px solid #111;
-    border-radius: 0;
-    background: #fff;
-    padding: 0 12px;
-    font-family: 'IBM Plex Mono', monospace;
-    margin-bottom: 14px;
-  }
-
-  &__state,
-  &__blocked {
-    border: 1.5px solid #d6dce2;
-    background: #fff;
-    border-radius: 12px;
-    padding: 14px 16px;
-    color: #44505d;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
+    font-size: 34px;
     font-weight: 600;
+    color: #5b6671;
+    letter-spacing: 0.04em;
+  }
+
+  &__subtitle,
+  &__item-top p,
+  &__grid span,
+  &__modal-head p,
+  &__video-head span {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7b8591;
+  }
+
+  &__tabs {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__tab,
+  &__ghost-btn,
+  &__primary-btn,
+  &__secondary-btn,
+  &__icon-btn,
+  &__field input,
+  &__field select,
+  &__modal,
+  &__item,
+  &__state,
+  &__skeleton,
+  &__video-card {
+    border: 1px solid #404040;
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  &__tab,
+  &__ghost-btn,
+  &__primary-btn,
+  &__secondary-btn {
+    min-height: 42px;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  &__tab.is-active,
+  &__primary-btn {
+    background: #7fd1c4;
+  }
+
+  &__ghost-btn,
+  &__secondary-btn {
+    color: #24324a;
+  }
+
+  &__secondary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   &__list {
     display: grid;
-    gap: 12px;
+    gap: 14px;
   }
 
   &__item {
-    width: 100%;
-    text-align: left;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    border: 1.5px solid #111;
-    border-radius: 12px;
-    background: #fff;
-    padding: 14px;
-    color: #111;
-    transition: box-shadow 0.12s ease;
-  }
-
-  &__item:hover,
-  &__item:focus-visible {
-    box-shadow: 4px 4px 0 #111;
-  }
-
-  &__item-main {
-    h3 {
-      margin: 0 0 6px;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 30px;
-      color: #111;
-    }
-
-    p {
-      margin: 0;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 12px;
-      color: #5b6674;
-      line-height: 1.45;
-    }
-  }
-
-  &__item-status {
+    padding: 16px;
     display: grid;
-    gap: 6px;
-    justify-items: end;
+    gap: 14px;
+
+    &.is-shared {
+      background: #fbfcfd;
+    }
+  }
+
+  &__item-top h2,
+  &__modal-head h3 {
+    margin: 0 0 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 20px;
+    color: #24324a;
+  }
+
+  &__status-pill {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid #404040;
+    background: #ececec;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+
+    div {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
 
     strong {
       font-family: 'IBM Plex Mono', monospace;
       font-size: 13px;
-      color: #111;
-    }
-
-    strong.is-done {
-      color: #166534;
+      line-height: 1.45;
+      color: #24324a;
+      word-break: break-word;
     }
   }
 
-  &__status-pill {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    font-weight: 700;
-    border: 2px solid #111;
-    padding: 6px 10px;
-    background: #84d8ce;
-    color: #111;
-    text-transform: uppercase;
+  &__actions {
+    flex-wrap: wrap;
+  }
+
+  &__state,
+  &__skeleton {
+    min-height: 84px;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    color: #7b8591;
+    font-size: 13px;
+  }
+
+  &__skeleton {
+    background: linear-gradient(90deg, #f1f4f6 0%, #e6ebef 50%, #f1f4f6 100%);
+    background-size: 220% 100%;
+    animation: doctor-archive-skeleton 1.35s ease-in-out infinite;
+  }
+
+  &__modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.46);
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    z-index: 60;
+  }
+
+  &__modal {
+    width: min(640px, 100%);
+    max-height: min(88vh, 820px);
+    display: grid;
+    gap: 16px;
+    padding: 18px;
+    overflow: auto;
+
+    &--videos {
+      width: min(960px, 100%);
+    }
+  }
+
+  &__icon-btn {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  &__modal-body,
+  &__videos-list {
+    display: grid;
+    gap: 14px;
+  }
+
+  &__field {
+    display: grid;
+    gap: 6px;
+
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: #24324a;
+    }
+
+    input,
+    select {
+      min-height: 44px;
+      padding: 0 12px;
+      color: #24324a;
+      font-size: 13px;
+    }
+  }
+
+  &__video-card {
+    padding: 14px;
+    display: grid;
+    gap: 12px;
+  }
+
+  &__video-player {
+    width: 100%;
+    background: #111827;
+    border: 1px solid #d7dde3;
+  }
+
+  &__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(36, 50, 74, 0.25);
+    border-top-color: #24324a;
+    border-radius: 50%;
+    animation: doctor-archive-spin 0.8s linear infinite;
+    flex: 0 0 auto;
   }
 }
 
-@media (max-width: 760px) {
+@keyframes doctor-archive-skeleton {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes doctor-archive-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
   .doctor-appointments-page {
-    &__item {
-      flex-direction: column;
-      align-items: flex-start;
+    &__grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .doctor-appointments-page {
+    &__title {
+      font-size: 28px;
     }
 
-    &__item-status {
-      justify-items: start;
+    &__grid {
+      grid-template-columns: 1fr;
+    }
+
+    &__head,
+    &__item-top,
+    &__modal-head,
+    &__modal-actions,
+    &__actions,
+    &__video-head {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    &__ghost-btn,
+    &__primary-btn,
+    &__secondary-btn,
+    &__tab {
+      width: 100%;
     }
   }
 }

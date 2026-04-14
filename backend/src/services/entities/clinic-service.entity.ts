@@ -28,7 +28,7 @@ export class ClinicServiceEntity {
     @Column({ type: 'text', nullable: true })
     description: string | null;
 
-    @Column({ type: 'int', default: 0 })
+    @Column({ type: 'int', default: 1 })
     sortOrder: number;
 
     @Column({ type: 'int', default: 30 })
@@ -64,10 +64,27 @@ export class ClinicServiceEntity {
     })
     specialties: DoctorSpecialty[];
 
+    @Column({ type: 'simple-json', nullable: true })
+    requiredServiceIds: string[] | null;
+
+    @Column({ type: 'simple-json', nullable: true })
+    prerequisiteServiceIds: string[] | null;
+
+    @Column({ type: 'boolean', default: false })
+    allowMultipleInCart: boolean;
+
+    @Column({ type: 'int', nullable: true })
+    maxCartQuantity: number | null;
+
+    @Column({ type: 'int', nullable: true })
+    minIntervalDays: number | null;
+
+    @Column({ type: 'int', nullable: true })
+    maxIntervalDays: number | null;
+
     @CreateDateColumn()
     createdAt: Date;
 
     @UpdateDateColumn()
     updatedAt: Date;
-
 }

@@ -296,6 +296,30 @@
     grid-column: 1 / -1;
   }
 
+
+  &__field--compact {
+    max-width: 260px;
+  }
+
+  &__switch--compact {
+    min-height: 46px;
+  }
+
+  &__button-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__button-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #d6dde3;
+    border-top-color: #24324a;
+    border-radius: 50%;
+    animation: services-admin-page-spin 0.8s linear infinite;
+  }
+
   &__switch {
     display: flex !important;
     align-items: center;
@@ -446,4 +470,14 @@
       padding: 0 10px;
     }
   }
+}
+.services-admin-page__specialties--scroll {
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+@keyframes services-admin-page-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }

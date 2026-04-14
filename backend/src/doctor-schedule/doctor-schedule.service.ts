@@ -73,7 +73,7 @@ export class DoctorScheduleService {
         private readonly adminService: AdminService,
     ) {}
 
-    private readonly bookingWindowDays = 30;
+    private readonly bookingWindowDays = 90;
 
 
     private defaultCycleTemplate(): CycleRule {
@@ -221,7 +221,7 @@ export class DoctorScheduleService {
         const { start, end } = this.getBookingWindow();
         if (date < start || date > end) {
             throw new BadRequestException(
-                'Запис доступний лише на 1 місяць наперед',
+                'Запис доступний лише на 3 місяці наперед',
             );
         }
     }
@@ -480,9 +480,11 @@ export class DoctorScheduleService {
             if (appt.status === 'CANCELLED') continue;
 
             const dateKey = this.toDateKey(appt.appointmentDate);
-            const duration = appt.serviceId
-                ? (durationsMap.get(appt.serviceId) || 20)
-                : 20;
+            const duration = appt.durationMinutes
+                ? Number(appt.durationMinutes)
+                : appt.serviceId
+                    ? (durationsMap.get(appt.serviceId) || 20)
+                    : 20;
             const slots = this.expandAppointmentToOccupiedSlots(
                 appt.appointmentDate,
                 duration,

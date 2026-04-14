@@ -8,8 +8,11 @@ import {
     createGuestSmartBooking,
     createGuestPaidGooglePayTestBooking,
     getSmartAppointmentPlan,
+    getManualAvailabilityMonth,
+    getManualAvailabilityDay,
+    type ManualAvailabilityDayResponse,
     type SmartAppointmentPlan,
-} from '../../shared/api/appointmentApi';
+} from '../../shared/api/appointmentApi.ts';
 import {
     buildDoctorAvatarUrl,
     getAllDoctors,
@@ -17,9 +20,6 @@ import {
     type PublicDoctorItem,
 } from '../../shared/api/doctorApi';
 import {
-    getDoctorScheduleDay,
-    getDoctorScheduleMonth,
-    type DayScheduleResponse,
     type MonthDayCell,
 } from '../../shared/api/doctorScheduleApi';
 import {
@@ -31,7 +31,7 @@ import {
     startPhoneVerification,
 } from '../../shared/api/phoneVerificationApi';
 import { getMyProfile } from '../../shared/api/profileApi';
-import { clearCart, getCart, removeServiceFromCart, type CartItem } from '../../shared/utils/cartStorage';
+import { clearCart, getCart, removeServiceFromCart, type CartItem } from '../../shared/utils/cartStorage.ts';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import TelegramQrCard from '../../shared/ui/TelegramQrCard/TelegramQrCard';
 import { useI18n } from '../../shared/i18n/I18nProvider';
@@ -56,6 +56,8 @@ type ManualSelection = {
     doctorBookingRef: string;
     doctorName: string;
     avatarUrl: string | null;
+    cabinetId?: string | null;
+    cabinetName?: string | null;
     date: string;
     time: string;
 };
@@ -531,6 +533,61 @@ function durationLabel(totalMinutes: number) {
     return `${minutes} хв`;
 }
 
+
+type ManualSelectionBounds = {
+    minDate: Date | null;
+    maxDate: Date | null;
+};
+
+function parseManualSelectionStart(selection: ManualSelection | null | undefined) {
+    if (!selection) return null;
+    const date = new Date(`${selection.date}T${selection.time}:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+    return next;
+}
+
+function endOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(23, 59, 59, 999);
+    return next;
+}
+
+function addDaysLocal(date: Date, days: number) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+}
+
+function addMinutesLocal(date: Date, minutes: number) {
+    return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function dateKeyFromDate(date: Date | null | undefined) {
+    if (!date) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function maxDateLocal(...dates: Array<Date | null | undefined>) {
+    const values = dates.filter(Boolean) as Date[];
+    if (!values.length) return null;
+    return values.reduce((latest, current) =>
+        current.getTime() > latest.getTime() ? current : latest,
+    );
+}
+
+function minDateLocal(...dates: Array<Date | null | undefined>) {
+    const values = dates.filter(Boolean) as Date[];
+    if (!values.length) return null;
+    return values.reduce((earliest, current) =>
+        current.getTime() < earliest.getTime() ? current : earliest,
+    );
+}
+
 function resolveDoctorByAnyId(id: string, doctors: PublicDoctorItem[]): PublicDoctorItem | null {
     if (!id) return null;
     return doctors.find((d) => d.id === id || d.userId === id) ?? null;
@@ -601,13 +658,14 @@ export default function SmartAppointmentPage() {
     const [month, setMonth] = useState(currentMonthKey());
     const [monthData, setMonthData] = useState<MonthDayCell[]>([]);
     const [selectedDate, setSelectedDate] = useState<string | null>(null);
-    const [dayData, setDayData] = useState<DayScheduleResponse | null>(null);
+    const [dayData, setDayData] = useState<ManualAvailabilityDayResponse | null>(null);
     const [selectedTime, setSelectedTime] = useState('');
     const [loadingMonth, setLoadingMonth] = useState(false);
     const [loadingDay, setLoadingDay] = useState(false);
 
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('offline');
     const [paying, setPaying] = useState(false);
+    const [offlineConfirming, setOfflineConfirming] = useState(false);
     const [googlePayReady, setGooglePayReady] = useState(false);
 
     const [guestLastName, setGuestLastName] = useState('');
@@ -640,16 +698,99 @@ export default function SmartAppointmentPage() {
 
     const normalizedPhone = useMemo(() => normalizePhone(phoneInput), [phoneInput]);
 
+    const currentManualItem = useMemo(
+        () => cartItems.find((item) => item.serviceId === editingServiceId) || null,
+        [cartItems, editingServiceId],
+    );
+
+    const manualSelectionBounds = useMemo<ManualSelectionBounds>(() => {
+        if (!editingServiceId || !currentManualItem) {
+            return { minDate: null, maxDate: null };
+        }
+
+        const index = cartItems.findIndex((item) => item.serviceId === editingServiceId);
+        if (index === -1) {
+            return { minDate: null, maxDate: null };
+        }
+
+        let previousIndex = index - 1;
+        while (previousIndex >= 0 && !manualSelections[cartItems[previousIndex].serviceId]) {
+            previousIndex -= 1;
+        }
+
+        let nextIndex = index + 1;
+        while (nextIndex < cartItems.length && !manualSelections[cartItems[nextIndex].serviceId]) {
+            nextIndex += 1;
+        }
+
+        const previousItem = previousIndex >= 0 ? cartItems[previousIndex] : null;
+        const previousSelection = previousItem ? manualSelections[previousItem.serviceId] : null;
+        const previousStart = parseManualSelectionStart(previousSelection);
+        const previousEnd = previousStart
+            ? addMinutesLocal(previousStart, Number(previousItem?.durationMinutes || 0))
+            : null;
+
+        const nextItem = nextIndex < cartItems.length ? cartItems[nextIndex] : null;
+        const nextSelection = nextItem ? manualSelections[nextItem.serviceId] : null;
+        const nextStart = parseManualSelectionStart(nextSelection);
+
+        let minDate = maxDateLocal(startOfDay(new Date()), null);
+        let maxDate: Date | null = null;
+
+        if (previousStart && previousItem) {
+            const minIntervalDays = Number(currentManualItem.minIntervalDays ?? 0);
+            const lowerBound =
+                minIntervalDays > 0
+                    ? startOfDay(addDaysLocal(previousStart, minIntervalDays))
+                    : previousEnd;
+
+            minDate = maxDateLocal(minDate, lowerBound);
+
+            if (currentManualItem.maxIntervalDays !== null && currentManualItem.maxIntervalDays !== undefined) {
+                maxDate = minDateLocal(
+                    maxDate,
+                    endOfDay(addDaysLocal(previousStart, Number(currentManualItem.maxIntervalDays))),
+                );
+            }
+        }
+
+        if (nextStart && nextItem) {
+            const upperBound =
+                Number(nextItem.minIntervalDays ?? 0) > 0
+                    ? endOfDay(addDaysLocal(nextStart, -Number(nextItem.minIntervalDays ?? 0)))
+                    : addMinutesLocal(nextStart, -Number(currentManualItem.durationMinutes || 0));
+
+            maxDate = minDateLocal(maxDate, upperBound);
+
+            if (nextItem.maxIntervalDays !== null && nextItem.maxIntervalDays !== undefined) {
+                minDate = maxDateLocal(
+                    minDate,
+                    startOfDay(addDaysLocal(nextStart, -Number(nextItem.maxIntervalDays))),
+                );
+            }
+        }
+
+        if (minDate && maxDate && minDate.getTime() > maxDate.getTime()) {
+            return { minDate, maxDate };
+        }
+
+        return { minDate, maxDate };
+    }, [cartItems, currentManualItem, editingServiceId, manualSelections]);
+
     const weekdayLabels = useMemo(() => getWeekdayLabels(language), [language]);
     const visibleMonthData = useMemo(() => {
         const todayKey = currentDateKey();
+        const minDateKey = dateKeyFromDate(manualSelectionBounds.minDate);
+        const maxDateKey = dateKeyFromDate(manualSelectionBounds.maxDate);
 
         return monthData.filter((day) => {
             if (day.date < todayKey) return false;
             if (day.date === todayKey && day.freeSlots <= 0) return false;
+            if (minDateKey && day.date < minDateKey) return false;
+            if (maxDateKey && day.date > maxDateKey) return false;
             return true;
         });
-    }, [monthData]);
+    }, [manualSelectionBounds.maxDate, manualSelectionBounds.minDate, monthData]);
     const manualCalendarCells = useMemo(
         () => buildManualCalendarCells(visibleMonthData),
         [visibleMonthData],
@@ -668,10 +809,62 @@ export default function SmartAppointmentPage() {
         () => doctorOptionsForService.find((item) => item.id === selectedDoctorId) || null,
         [doctorOptionsForService, selectedDoctorId],
     );
-    const freeDaySlots = useMemo(
-        () => (dayData?.slots || []).filter((slot) => slot.state === 'FREE'),
-        [dayData],
-    );
+    const freeDaySlots = useMemo(() => {
+        if (!dayData || !selectedDate) {
+            return [];
+        }
+
+        return (dayData.slots || []).filter((slot) => {
+            if (slot.state !== 'FREE') return false;
+
+            const slotStart = new Date(`${selectedDate}T${slot.time}:00`);
+            if (Number.isNaN(slotStart.getTime())) return false;
+
+            if (manualSelectionBounds.minDate && slotStart.getTime() < manualSelectionBounds.minDate.getTime()) {
+                return false;
+            }
+
+            if (manualSelectionBounds.maxDate && slotStart.getTime() > manualSelectionBounds.maxDate.getTime()) {
+                return false;
+            }
+
+            return true;
+        });
+    }, [dayData, manualSelectionBounds.maxDate, manualSelectionBounds.minDate, selectedDate]);
+
+
+    useEffect(() => {
+        if (!manualOpen || manualStep !== 'calendar') return;
+
+        const minMonth = manualSelectionBounds.minDate
+            ? `${manualSelectionBounds.minDate.getFullYear()}-${String(manualSelectionBounds.minDate.getMonth() + 1).padStart(2, '0')}`
+            : null;
+        const maxMonth = manualSelectionBounds.maxDate
+            ? `${manualSelectionBounds.maxDate.getFullYear()}-${String(manualSelectionBounds.maxDate.getMonth() + 1).padStart(2, '0')}`
+            : null;
+
+        if (minMonth && month < minMonth) {
+            setMonth(minMonth);
+            return;
+        }
+
+        if (maxMonth && month > maxMonth) {
+            setMonth(maxMonth);
+        }
+    }, [manualOpen, manualSelectionBounds.maxDate, manualSelectionBounds.minDate, manualStep, month]);
+
+    useEffect(() => {
+        if (!selectedDate) return;
+
+        const minDateKey = dateKeyFromDate(manualSelectionBounds.minDate);
+        const maxDateKey = dateKeyFromDate(manualSelectionBounds.maxDate);
+
+        if ((minDateKey && selectedDate < minDateKey) || (maxDateKey && selectedDate > maxDateKey)) {
+            setSelectedDate(null);
+            setSelectedTime('');
+            setDayData(null);
+        }
+    }, [manualSelectionBounds.maxDate, manualSelectionBounds.minDate, selectedDate]);
 
     const paidBookingSteps = useMemo(() => {
         return cartItems
@@ -683,6 +876,7 @@ export default function SmartAppointmentPage() {
                     serviceId: item.serviceId,
                     doctorId: selection.doctorId,
                     appointmentDate: `${selection.date}T${selection.time}:00`,
+                    cabinetId: selection.cabinetId || undefined,
                 };
             })
             .filter(Boolean) as Array<{
@@ -702,6 +896,7 @@ export default function SmartAppointmentPage() {
                     serviceId: item.serviceId,
                     doctorId: selection.doctorBookingRef,
                     appointmentDate: `${selection.date}T${selection.time}:00`,
+                    cabinetId: selection.cabinetId || undefined,
                 };
             })
             .filter(Boolean) as Array<{
@@ -1168,7 +1363,16 @@ export default function SmartAppointmentPage() {
 
             try {
                 setLoadingMonth(true);
-                const response = await getDoctorScheduleMonth(selectedDoctorId, month);
+                if (!editingServiceId) {
+                    setMonthData([]);
+                    return;
+                }
+
+                const response = await getManualAvailabilityMonth({
+                    doctorId: selectedDoctorId,
+                    serviceId: editingServiceId,
+                    month,
+                });
                 setMonthData(Array.isArray(response.days) ? response.days : []);
             } catch (err: any) {
                 setAlert({
@@ -1181,7 +1385,7 @@ export default function SmartAppointmentPage() {
         }
 
         void loadMonth();
-    }, [manualOpen, manualStep, selectedDoctorId, month]);
+    }, [manualOpen, manualStep, selectedDoctorId, editingServiceId, month]);
 
     useEffect(() => {
         async function loadDay() {
@@ -1192,7 +1396,16 @@ export default function SmartAppointmentPage() {
 
             try {
                 setLoadingDay(true);
-                const response = await getDoctorScheduleDay(selectedDoctorId, selectedDate);
+                if (!editingServiceId) {
+                    setDayData(null);
+                    return;
+                }
+
+                const response = await getManualAvailabilityDay({
+                    doctorId: selectedDoctorId,
+                    serviceId: editingServiceId,
+                    date: selectedDate,
+                });
                 setDayData(response);
             } catch (err: any) {
                 setAlert({
@@ -1205,7 +1418,7 @@ export default function SmartAppointmentPage() {
         }
 
         void loadDay();
-    }, [manualOpen, manualStep, selectedDoctorId, selectedDate]);
+    }, [manualOpen, manualStep, selectedDoctorId, editingServiceId, selectedDate]);
 
     function applyManualSelection() {
         if (!editingServiceId || !selectedDoctorId || !selectedDate || !selectedTime) {
@@ -1217,6 +1430,7 @@ export default function SmartAppointmentPage() {
         }
 
         const option = doctorOptionsForService.find((d) => d.id === selectedDoctorId) ?? null;
+        const selectedSlot = (dayData?.slots || []).find((slot) => slot.time === selectedTime) || null;
 
         setManualSelections((prev) => ({
             ...prev,
@@ -1226,6 +1440,8 @@ export default function SmartAppointmentPage() {
                 doctorBookingRef: option?.bookingRef || selectedDoctorId,
                 doctorName: option?.fullName || selectedDoctorId,
                 avatarUrl: option?.avatarUrl || null,
+                cabinetId: selectedSlot?.cabinetId || null,
+                cabinetName: selectedSlot?.cabinetName || null,
                 date: selectedDate,
                 time: selectedTime,
             },
@@ -1260,6 +1476,8 @@ export default function SmartAppointmentPage() {
                 doctorBookingRef: doctor?.userId || step.doctorId,
                 doctorName,
                 avatarUrl,
+                cabinetId: (step as any).cabinetId || null,
+                cabinetName: (step as any).cabinetName || null,
                 date: `${yyyy}-${mm}-${dd}`,
                 time: `${hh}:${min}`,
             };
@@ -1595,6 +1813,8 @@ export default function SmartAppointmentPage() {
 
     async function handleOfflineConfirm() {
         try {
+            setOfflineConfirming(true);
+
             if (!allServicesSelected) {
                 throw new Error('Спочатку оберіть лікарів і час');
             }
@@ -1623,6 +1843,8 @@ export default function SmartAppointmentPage() {
                 variant: 'error',
                 message: err?.message || 'Не вдалося створити запис',
             });
+        } finally {
+            setOfflineConfirming(false);
         }
     }
 
@@ -1715,6 +1937,11 @@ export default function SmartAppointmentPage() {
                                                                 <span className="smart-appointment-page__picked-time">
                                                                     {formatDateOnly(selected.date)} · {selected.time}
                                                                 </span>
+                                                                {selected.cabinetName ? (
+                                                                    <span className="smart-appointment-page__picked-time">
+                                                                        Кабінет: {parseDbI18nValue(selected.cabinetName, language)}
+                                                                    </span>
+                                ) : null}
                                                             </div>
                                                         </div>
 
@@ -1903,6 +2130,12 @@ export default function SmartAppointmentPage() {
                                                                             {formatDateTime(step.startAt)} —{' '}
                                                                             {formatDateTime(step.endAt)}
                                                                         </span>
+
+                                                                        {(step as any).cabinetName ? (
+                                                                            <span className="smart-appointment-page__step-time">
+                                                                                Кабінет: {parseDbI18nValue((step as any).cabinetName, language)}
+                                                                            </span>
+                                        ) : null}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -2222,7 +2455,10 @@ export default function SmartAppointmentPage() {
                                                                 ].join(' ')}
                                                                 onClick={() => setSelectedTime(slot.time)}
                                                             >
-                                                                {slot.time}
+                                                                <span>{slot.time}</span>
+                                                                {slot.cabinetName ? (
+                                                                    <small>{parseDbI18nValue(slot.cabinetName, language)}</small>
+                                ) : null}
                                                             </button>
                                                         ))}
                                                     </div>
@@ -2502,8 +2738,10 @@ export default function SmartAppointmentPage() {
                                         type="button"
                                         className="smart-appointment-page__primary"
                                         onClick={() => void handleOfflineConfirm()}
+                                        disabled={offlineConfirming}
                                     >
-                                        Підтвердити запис
+                                        {offlineConfirming ? <span className="smart-appointment-page__button-spinner" /> : null}
+                                        {offlineConfirming ? 'Створення...' : 'Підтвердити запис'}
                                     </button>
                                 ) : null}
                             </div>

@@ -529,4 +529,274 @@ export class MailService {
             ],
         });
     }
+
+
+    private formatDateOnlyUa(value: Date | string | null | undefined) {
+        if (!value) return 'Дата не вказана';
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return 'Дата не вказана';
+
+        return date.toLocaleDateString('uk-UA', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        });
+    }
+
+    async buildConsultationPdfBuffer(params: {
+        patientName: string;
+        doctorName: string;
+        appointmentDate: Date | string | null;
+        conclusion: string;
+        treatmentPlanItems: string[];
+        recommendationItems: string[];
+        medicationItems: string[];
+        nextVisitDate?: Date | string | null;
+    }) {
+        const {
+            patientName,
+            doctorName,
+            appointmentDate,
+            conclusion,
+            treatmentPlanItems,
+            recommendationItems,
+            medicationItems,
+            nextVisitDate,
+        } = params;
+
+        const fontPath = this.resolvePdfFontPath();
+
+        return await new Promise<Buffer>((resolve, reject) => {
+            const doc = new PDFDocument({
+                size: 'A4',
+                margin: 42,
+                info: {
+                    Title: 'Консультативний висновок ORADENT',
+                    Author: 'ORADENT',
+                    Subject: 'Консультативний висновок',
+                },
+            });
+
+            const chunks: Buffer[] = [];
+            doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+            doc.on('end', () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            doc.font(fontPath);
+
+            const pageWidth = doc.page.width;
+            const left = 42;
+            const right = pageWidth - 42;
+            const width = right - left;
+
+            const colors = {
+                text: '#111827',
+                muted: '#4b5563',
+                line: '#9ca3af',
+            };
+
+            const drawHeader = () => {
+                doc
+                    .font(fontPath)
+                    .fontSize(11)
+                    .fillColor(colors.muted)
+                    .text('ORADENT', left, 32, { width, align: 'right' });
+
+                doc
+                    .font(fontPath)
+                    .fontSize(24)
+                    .fillColor(colors.text)
+                    .text('КОНСУЛЬТАТИВНИЙ ВИСНОВОК', left, 72, {
+                        width,
+                        align: 'left',
+                    });
+
+                doc.moveTo(left, 108).lineTo(right, 108).lineWidth(1).stroke(colors.line);
+                doc.y = 126;
+            };
+
+            const ensureSpace = (requiredHeight: number) => {
+                if (doc.y + requiredHeight <= doc.page.height - 60) return;
+                doc.addPage();
+                drawHeader();
+            };
+
+            const drawInfoRow = (label: string, value: string) => {
+                ensureSpace(22);
+                doc.font(fontPath).fontSize(11).fillColor(colors.muted).text(label, left, doc.y, { continued: true });
+                doc.font(fontPath).fontSize(12).fillColor(colors.text).text(` ${value}`);
+                doc.moveDown(0.25);
+            };
+
+            const drawListSection = (title: string, items: string[]) => {
+                const normalized = items.filter((item) => item.trim());
+                ensureSpace(34);
+                doc.moveDown(0.35);
+                doc.font(fontPath).fontSize(15).fillColor(colors.text).text(title, left, doc.y, { width });
+                doc.moveDown(0.25);
+
+                if (!normalized.length) {
+                    doc.font(fontPath).fontSize(11).fillColor(colors.muted).text('Не вказано', left, doc.y, { width });
+                    doc.moveDown(0.6);
+                    return;
+                }
+
+                normalized.forEach((item, index) => {
+                    const itemText = `${index + 1}. ${item}`;
+                    const itemHeight = doc.heightOfString(itemText, { width, lineGap: 3 });
+                    ensureSpace(itemHeight + 8);
+                    doc.font(fontPath).fontSize(11).fillColor(colors.text).text(itemText, left, doc.y, {
+                        width,
+                        lineGap: 3,
+                    });
+                    doc.moveDown(0.2);
+                });
+
+                doc.moveDown(0.4);
+            };
+
+            drawHeader();
+
+            drawInfoRow('Пацієнт:', patientName);
+            drawInfoRow('Спеціаліст:', doctorName);
+            drawInfoRow('Дата візиту:', this.formatDateTimeUa(appointmentDate));
+
+            ensureSpace(80);
+            doc.moveDown(0.4);
+            doc.font(fontPath).fontSize(15).fillColor(colors.text).text('Консультативний висновок', left, doc.y, { width });
+            doc.moveDown(0.25);
+            doc.font(fontPath).fontSize(11).fillColor(colors.text).text(conclusion || 'Не вказано', left, doc.y, {
+                width,
+                lineGap: 4,
+            });
+            doc.moveDown(0.7);
+
+            drawListSection('План лікування', treatmentPlanItems);
+            drawListSection('Рекомендації', recommendationItems);
+            drawListSection('Призначені ліки', medicationItems);
+
+            ensureSpace(60);
+            if (nextVisitDate) {
+                doc.font(fontPath).fontSize(12).fillColor(colors.text).text(
+                    `Рекомендована дата наступного візиту: ${this.formatDateOnlyUa(nextVisitDate)}`,
+                    left,
+                    doc.y,
+                    { width },
+                );
+                doc.moveDown(0.8);
+            }
+
+            doc.moveTo(left, doc.y).lineTo(right, doc.y).lineWidth(1).stroke(colors.line);
+            doc.moveDown(0.7);
+            doc.font(fontPath).fontSize(11).fillColor(colors.muted).text('Документ сформовано автоматично в системі ORADENT.', left, doc.y, {
+                width,
+                align: 'left',
+            });
+
+            doc.end();
+        });
+    }
+
+    async sendDoctorScheduledVisitEmail(params: {
+        to: string;
+        patientName: string;
+        appointmentLine: string;
+    }) {
+        const { to, patientName, appointmentLine } = params;
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — вас записано на прийом',
+            html: `
+                <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
+                    <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
+                        <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
+                            <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">ORADENT</div>
+                        </div>
+
+                        <div style="padding:28px 24px 24px;">
+                            <h1 style="margin:0 0 18px;text-align:center;font-size:28px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">ЗАПИС СТВОРЕНО</h1>
+
+                            <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+
+                            <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                                <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Вас записано на прийом:</div>
+                                <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(appointmentLine)}</div>
+                            </div>
+
+                            <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Онлайн-оплата для цього запису не потрібна. За деталями зверніться до клініки.</p>
+                        </div>
+                    </div>
+                </div>
+            `,
+        });
+    }
+
+    async sendConsultationConclusionEmail(params: {
+        to: string;
+        patientName: string;
+        doctorName: string;
+        appointmentDate: Date | string | null;
+        conclusion: string;
+        treatmentPlanItems: string[];
+        recommendationItems: string[];
+        medicationItems: string[];
+        nextVisitDate?: Date | string | null;
+    }) {
+        const {
+            to,
+            patientName,
+            doctorName,
+            appointmentDate,
+            conclusion,
+            treatmentPlanItems,
+            recommendationItems,
+            medicationItems,
+            nextVisitDate,
+        } = params;
+
+        const pdfBuffer = await this.buildConsultationPdfBuffer({
+            patientName,
+            doctorName,
+            appointmentDate,
+            conclusion,
+            treatmentPlanItems,
+            recommendationItems,
+            medicationItems,
+            nextVisitDate,
+        });
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — консультативний висновок',
+            html: `
+                <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
+                    <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
+                        <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
+                            <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">ORADENT</div>
+                        </div>
+
+                        <div style="padding:28px 24px 24px;">
+                            <h1 style="margin:0 0 18px;text-align:center;font-size:28px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">КОНСУЛЬТАТИВНИЙ ВИСНОВОК</h1>
+
+                            <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                            <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">До листа прикріплено PDF-файл з висновком лікаря, планом лікування, рекомендаціями та призначеними ліками.</p>
+                            <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Лікар: ${this.escapeHtml(doctorName)} · Дата візиту: ${this.escapeHtml(this.formatDateTimeUa(appointmentDate))}</p>
+                        </div>
+                    </div>
+                </div>
+            `,
+            attachments: [
+                {
+                    filename: 'consultation-conclusion.pdf',
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
+        });
+    }
+
 }

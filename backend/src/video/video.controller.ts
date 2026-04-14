@@ -88,6 +88,20 @@ export class VideoController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @Post('appointment/:appointmentId/share')
+    async shareAppointmentVideos(
+        @Param('appointmentId') appointmentId: string,
+        @Body() body: {
+            sharedWithDoctorId: string;
+            password: string;
+            expiresAt?: string | null;
+        },
+        @Req() req: { user: JwtUser },
+    ) {
+        return this.videoService.shareAppointmentVideos(appointmentId, req.user, body);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Post(':id/stream-auth')
     async streamVideoWithPassword(
         @Param('id') id: string,

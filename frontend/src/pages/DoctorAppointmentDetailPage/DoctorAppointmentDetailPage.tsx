@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
-import { completeAppointmentRecording, getAppointmentById } from '../../shared/api/appointmentApi';
-import type { AppointmentItem } from '../../shared/api/appointmentApi';
-import { getVideosByAppointment, streamVideoWithPassword, uploadVideo } from '../../shared/api/videoApi';
-import type { VideoRecord } from '../../shared/api/videoApi';
-import { getToken, getTokenPayload, getUserRole } from '../../shared/utils/authStorage';
+import {
+    completeDoctorAppointment,
+    createDoctorFollowUpAppointment,
+    getDoctorAppointmentById,
+    getManualAvailabilityDay,
+    getManualAvailabilityMonth,
+    updateAppointmentVisitFlowStatus,
+    type AppointmentCabinetDevice,
+    type AppointmentItem,
+    type ManualAvailabilityDayResponse,
+    type ManualAvailabilityMonthDay,
+} from '../../shared/api/appointmentApi';
+import { uploadVideo } from '../../shared/api/videoApi';
+import { getPublicDoctors, type PublicDoctorItem } from '../../shared/api/doctorApi';
+import { getActivePublicServices, type ClinicService } from '../../shared/api/servicesApi';
+import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import './DoctorAppointmentDetailPage.scss';
 
 type MediaDeviceOption = {
@@ -14,24 +25,146 @@ type MediaDeviceOption = {
 };
 
 type RecorderSlotState = {
-    id: number;
+    id: string;
+    name: string;
     videoDeviceId: string;
     audioDeviceId: string;
+    startMode: 'AUTO_ON_VISIT_START' | 'MANUAL' | string;
     recording: boolean;
     uploading: boolean;
     showPreview: boolean;
+    hasMedia: boolean;
 };
+
+type AlertState = {
+    variant: 'success' | 'error' | 'info';
+    message: string;
+} | null;
+
+type CalendarCell =
+    | { kind: 'empty'; key: string }
+    | { kind: 'day'; key: string; day: ManualAvailabilityMonthDay };
 
 function fullName(a: AppointmentItem | null) {
     if (!a?.patient) return 'Пацієнт не вказаний';
     return `${a.patient.lastName} ${a.patient.firstName}${a.patient.middleName ? ` ${a.patient.middleName}` : ''}`;
 }
 
-function formatDate(value: string | null) {
+function formatDateTime(value: string | null) {
     if (!value) return 'Дата не вказана';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
-    return d.toLocaleString('ua-UA');
+    return d.toLocaleString('uk-UA');
+}
+
+function formatDateOnly(value: string | null) {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString('uk-UA');
+}
+
+function currentMonthKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function parseMonthKey(monthKey: string) {
+    const [year, month] = monthKey.split('-').map(Number);
+    return new Date(year, month - 1, 1);
+}
+
+function shiftMonthKey(monthKey: string, diff: number) {
+    const date = parseMonthKey(monthKey);
+    date.setMonth(date.getMonth() + diff);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function isBeforeCurrentMonth(monthKey: string) {
+    return parseMonthKey(monthKey).getTime() < parseMonthKey(currentMonthKey()).getTime();
+}
+
+function getMonthLabel(monthKey: string) {
+    const [year, month] = monthKey.split('-').map(Number);
+    const date = new Date(year, month - 1, 1);
+    const result = new Intl.DateTimeFormat('uk-UA', {
+        month: 'long',
+        year: 'numeric',
+    }).format(date);
+    return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
+function getWeekdayLabels() {
+    const monday = new Date('2026-04-06T00:00:00');
+    return Array.from({ length: 7 }, (_, index) => {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + index);
+        return new Intl.DateTimeFormat('uk-UA', { weekday: 'short' }).format(d);
+    });
+}
+
+function buildCalendarCells(days: ManualAvailabilityMonthDay[]): CalendarCell[] {
+    if (!days.length) return [];
+
+    const firstDate = new Date(`${days[0].date}T00:00:00`);
+    const jsDay = firstDate.getDay();
+    const mondayBasedIndex = (jsDay + 6) % 7;
+
+    const leading: CalendarCell[] = Array.from({ length: mondayBasedIndex }, (_, i) => ({
+        kind: 'empty',
+        key: `empty-${i}`,
+    }));
+
+    return [
+        ...leading,
+        ...days.map((day) => ({ kind: 'day' as const, key: day.date, day })),
+    ];
+}
+
+function parseDbI18nValue(raw: unknown): string {
+    if (!raw) return '';
+
+    if (typeof raw === 'object' && raw !== null) {
+        const record = raw as Record<string, any>;
+
+        if ('ua' in record || 'en' in record || 'de' in record || 'fr' in record) {
+            return record.ua || record.en || record.de || record.fr || '';
+        }
+
+        if ('i18n' in record && record.i18n && typeof record.i18n === 'object') {
+            const map = record.i18n as Record<string, string>;
+            return map.ua || map.en || map.de || map.fr || '';
+        }
+    }
+
+    if (typeof raw === 'string') {
+        if (!raw.includes('__ORADENT_I18N__')) return raw;
+
+        try {
+            const start = raw.indexOf('{');
+            if (start === -1) return raw;
+            const parsed = JSON.parse(raw.slice(start));
+            const data = parsed?.data;
+            if (data && typeof data === 'object') {
+                return data.ua || data.en || data.de || data.fr || raw;
+            }
+            return raw;
+        } catch {
+            return raw;
+        }
+    }
+
+    return String(raw);
+}
+
+function serviceLabel(service: ClinicService) {
+    const name = parseDbI18nValue((service as any).name) || 'Послуга';
+    const minutes = Number((service as any).durationMinutes || 0);
+    return `${name} · ${minutes} хв · ${Number(service.priceUah || 0)} грн`;
+}
+
+function doctorLabel(doctor: PublicDoctorItem) {
+    return `${doctor.lastName || ''} ${doctor.firstName || ''}${doctor.middleName ? ` ${doctor.middleName}` : ''}`.replace(/\s+/g, ' ').trim();
 }
 
 function pickSupportedMimeType() {
@@ -42,118 +175,150 @@ function pickSupportedMimeType() {
     return '';
 }
 
-function createSlot(id: number, videoDeviceId: string, audioDeviceId: string): RecorderSlotState {
+function resolveConfiguredDeviceId(configuredId: string | null | undefined, label: string | null | undefined, list: MediaDeviceOption[]) {
+    if (configuredId && list.some((item) => item.id === configuredId)) return configuredId;
+    if (label) {
+        const matched = list.find((item) => item.label === label);
+        if (matched) return matched.id;
+    }
+    return list[0]?.id || '';
+}
+
+function buildMediaConstraints(slot: RecorderSlotState): MediaStreamConstraints | null {
+    const hasVideo = Boolean(slot.videoDeviceId);
+    const hasAudio = Boolean(slot.audioDeviceId);
+    if (!hasVideo && !hasAudio) return null;
+
     return {
-        id,
-        videoDeviceId,
-        audioDeviceId,
-        recording: false,
-        uploading: false,
-        showPreview: false,
+        video: hasVideo
+            ? {
+                  deviceId: { exact: slot.videoDeviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30, max: 30 },
+              }
+            : false,
+        audio: hasAudio ? { deviceId: { exact: slot.audioDeviceId } } : false,
     };
+}
+
+function normalizeListText(value: string) {
+    return value
+        .split('\n')
+        .map((item) => item.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, '').trim())
+        .filter(Boolean);
 }
 
 export default function DoctorAppointmentDetailPage() {
     const { id } = useParams();
+    const navigate = useNavigate();
     const role = getUserRole();
-    const payload = getTokenPayload();
     const token = getToken();
-    const doctorUserId = payload?.sub || null;
     const isDoctor = role === 'DOCTOR';
 
     const [appointment, setAppointment] = useState<AppointmentItem | null>(null);
     const [loading, setLoading] = useState(true);
+    const [resourcesLoading, setResourcesLoading] = useState(true);
 
     const [videoDevices, setVideoDevices] = useState<MediaDeviceOption[]>([]);
     const [audioDevices, setAudioDevices] = useState<MediaDeviceOption[]>([]);
     const [slots, setSlots] = useState<RecorderSlotState[]>([]);
+    const [expandedSlots, setExpandedSlots] = useState<Record<string, boolean>>({});
 
-    const [videos, setVideos] = useState<VideoRecord[]>([]);
-    const [videoPassword, setVideoPassword] = useState('');
-    const [openedVideoUrls, setOpenedVideoUrls] = useState<Record<string, string>>({});
+    const [alert, setAlert] = useState<AlertState>(null);
+    const [finishing, setFinishing] = useState(false);
+    const [statusUpdating, setStatusUpdating] = useState(false);
+    const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+    const [createdFollowUpDate, setCreatedFollowUpDate] = useState<string | null>(null);
 
-    const [successMessage, setSuccessMessage] = useState('');
-    const [error, setError] = useState('');
+    const [consultationConclusion, setConsultationConclusion] = useState('');
+    const [treatmentPlanText, setTreatmentPlanText] = useState('');
+    const [recommendationText, setRecommendationText] = useState('');
+    const [medicationText, setMedicationText] = useState('');
+    const [consultationEmail, setConsultationEmail] = useState('');
 
-    const slotSeqRef = useRef(1);
-    const previewRefs = useRef<Record<number, HTMLVideoElement | null>>({});
-    const streamsRef = useRef<Record<number, MediaStream | null>>({});
-    const recordersRef = useRef<Record<number, MediaRecorder | null>>({});
-    const chunksRef = useRef<Record<number, BlobPart[]>>({});
-    const startedAtRef = useRef<Record<number, Date | null>>({});
-    const endedAtRef = useRef<Record<number, Date | null>>({});
+    const [doctors, setDoctors] = useState<PublicDoctorItem[]>([]);
+    const [services, setServices] = useState<ClinicService[]>([]);
+    const [followUpDoctorId, setFollowUpDoctorId] = useState('');
+    const [followUpServiceId, setFollowUpServiceId] = useState('');
+    const [month, setMonth] = useState(currentMonthKey());
+    const [monthDays, setMonthDays] = useState<ManualAvailabilityMonthDay[]>([]);
+    const [loadingMonth, setLoadingMonth] = useState(false);
+    const [selectedDate, setSelectedDate] = useState('');
+    const [dayData, setDayData] = useState<ManualAvailabilityDayResponse | null>(null);
+    const [loadingDay, setLoadingDay] = useState(false);
+    const [selectedTime, setSelectedTime] = useState('');
+    const [selectedCabinetId, setSelectedCabinetId] = useState<string | null>(null);
 
-    const isMyAppointment = useMemo(() => {
-        if (!appointment || !doctorUserId) return false;
-        return appointment.doctorId === doctorUserId;
-    }, [appointment, doctorUserId]);
+    const previewRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+    const streamsRef = useRef<Record<string, MediaStream | null>>({});
+    const recordersRef = useRef<Record<string, MediaRecorder | null>>({});
+    const chunksRef = useRef<Record<string, BlobPart[]>>({});
+    const startedAtRef = useRef<Record<string, Date | null>>({});
+    const endedAtRef = useRef<Record<string, Date | null>>({});
+    const autoStartedRef = useRef<Set<string>>(new Set());
+    const finishAfterUploadsRef = useRef(false);
 
-    const hasAnyRecording = useMemo(() => slots.some((s) => s.recording), [slots]);
-    const hasAnyUploading = useMemo(() => slots.some((s) => s.uploading), [slots]);
+    const hasAnyRecording = useMemo(() => slots.some((slot) => slot.recording), [slots]);
+    const hasAnyUploading = useMemo(() => slots.some((slot) => slot.uploading), [slots]);
+    const calendarCells = useMemo(() => buildCalendarCells(monthDays), [monthDays]);
+    const weekdayLabels = useMemo(() => getWeekdayLabels(), []);
+    const freeSlots = useMemo(
+        () => (dayData?.slots || []).filter((slot) => slot.state === 'FREE'),
+        [dayData],
+    );
+    const isCompleted = useMemo(() => {
+        const visitCompleted = String(appointment?.visitFlowStatus || '').toUpperCase() === 'COMPLETED';
+        const statusCompleted = String(appointment?.status || '').toUpperCase() === 'COMPLETED';
+        return visitCompleted || statusCompleted;
+    }, [appointment?.status, appointment?.visitFlowStatus]);
 
     useEffect(() => {
         async function loadAppointment() {
-            if (!id || !isDoctor || !doctorUserId) {
+            if (!id || !isDoctor || !token) {
                 setLoading(false);
                 return;
             }
 
             try {
-                const item = await getAppointmentById(id);
+                const item = await getDoctorAppointmentById(token, id);
                 setAppointment(item);
+                setConsultationConclusion(item.consultationConclusion || '');
+                setTreatmentPlanText((item.treatmentPlanItems || []).map((value, index) => `${index + 1}. ${value}`).join('\n'));
+                setRecommendationText((item.recommendationItems || []).map((value, index) => `${index + 1}. ${value}`).join('\n'));
+                setMedicationText((item.medicationItems || []).map((value, index) => `${index + 1}. ${value}`).join('\n'));
+                setConsultationEmail(item.consultationEmail || item.patient?.email || '');
             } catch (err) {
-                setError(err instanceof Error ? err.message : 'Не вдалося завантажити запис');
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завантажити прийом' });
             } finally {
                 setLoading(false);
             }
         }
 
         void loadAppointment();
-    }, [id, isDoctor, doctorUserId]);
+    }, [id, isDoctor, token]);
 
     useEffect(() => {
         async function bootstrapDevices() {
             try {
                 const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                temp.getTracks().forEach((t) => t.stop());
+                temp.getTracks().forEach((track) => track.stop());
             } catch {}
 
             try {
                 const list = await navigator.mediaDevices.enumerateDevices();
-
-                const videosList = list
-                    .filter((d) => d.kind === 'videoinput')
-                    .map((d, i) => ({
-                        id: d.deviceId,
-                        label: d.label || `Камера ${i + 1}`,
-                    }));
-
-                const audiosList = list
-                    .filter((d) => d.kind === 'audioinput')
-                    .map((d, i) => ({
-                        id: d.deviceId,
-                        label: d.label || `Мікрофон ${i + 1}`,
-                    }));
-
-                setVideoDevices(videosList);
-                setAudioDevices(audiosList);
-
-                const defaultVideo = videosList[0]?.id || '';
-                const defaultAudio = audiosList[0]?.id || '';
-
-                setSlots((prev) => {
-                    if (prev.length > 0) {
-                        return prev.map((s) => ({
-                            ...s,
-                            videoDeviceId: s.videoDeviceId || defaultVideo,
-                            audioDeviceId: s.audioDeviceId || defaultAudio,
-                        }));
-                    }
-
-                    return [createSlot(slotSeqRef.current, defaultVideo, defaultAudio)];
-                });
+                setVideoDevices(
+                    list
+                        .filter((item) => item.kind === 'videoinput')
+                        .map((item, index) => ({ id: item.deviceId, label: item.label || `Камера ${index + 1}` })),
+                );
+                setAudioDevices(
+                    list
+                        .filter((item) => item.kind === 'audioinput')
+                        .map((item, index) => ({ id: item.deviceId, label: item.label || `Мікрофон ${index + 1}` })),
+                );
             } catch {
-                setError('Не вдалося отримати список пристроїв');
+                setAlert({ variant: 'error', message: 'Не вдалося отримати список камер і мікрофонів' });
             }
         }
 
@@ -161,40 +326,153 @@ export default function DoctorAppointmentDetailPage() {
     }, []);
 
     useEffect(() => {
-        if (!appointment?.id || !token) return;
-        void refreshVideos();
-    }, [appointment?.id, token]);
+        async function loadResources() {
+            try {
+                setResourcesLoading(true);
+                const [doctorsRes, servicesRes] = await Promise.all([getPublicDoctors(), getActivePublicServices()]);
+                setDoctors(Array.isArray((doctorsRes as any)?.doctors) ? (doctorsRes as any).doctors : []);
+                setServices(Array.isArray((servicesRes as any)?.services) ? (servicesRes as any).services : []);
+            } catch {
+                setAlert({ variant: 'error', message: 'Не вдалося завантажити дані для повторного запису' });
+            } finally {
+                setResourcesLoading(false);
+            }
+        }
+
+        if (isDoctor) {
+            void loadResources();
+        }
+    }, [isDoctor]);
+
+    useEffect(() => {
+        const cabinetDevices = appointment?.cabinet?.devices || [];
+        const preparedSlots = cabinetDevices.map((device: AppointmentCabinetDevice) => ({
+            id: device.id,
+            name: device.name,
+            videoDeviceId: resolveConfiguredDeviceId(device.cameraDeviceId, device.cameraLabel, videoDevices),
+            audioDeviceId: resolveConfiguredDeviceId(device.microphoneDeviceId, device.microphoneLabel, audioDevices),
+            startMode: device.startMode || 'MANUAL',
+            recording: false,
+            uploading: false,
+            showPreview: false,
+            hasMedia: Boolean(
+                resolveConfiguredDeviceId(device.cameraDeviceId, device.cameraLabel, videoDevices) ||
+                    resolveConfiguredDeviceId(device.microphoneDeviceId, device.microphoneLabel, audioDevices),
+            ),
+        }));
+
+        setSlots(preparedSlots);
+        setExpandedSlots(Object.fromEntries(preparedSlots.map((slot) => [slot.id, false])));
+    }, [appointment?.cabinet?.devices, videoDevices, audioDevices]);
+
+    useEffect(() => {
+        if (!appointment?.id || !token || appointment.recordingCompleted || statusUpdating || isCompleted) return;
+        if (String(appointment.visitFlowStatus || '').toUpperCase() === 'IN_PROGRESS') return;
+
+        setStatusUpdating(true);
+        void updateAppointmentVisitFlowStatus(token, appointment.id, 'IN_PROGRESS')
+            .then(() => setAppointment((prev) => (prev ? { ...prev, visitFlowStatus: 'IN_PROGRESS' } : prev)))
+            .catch(() => null)
+            .finally(() => setStatusUpdating(false));
+    }, [appointment?.id, appointment?.recordingCompleted, appointment?.visitFlowStatus, isCompleted, statusUpdating, token]);
+
+    useEffect(() => {
+        if (!appointment || appointment.recordingCompleted || isCompleted) return;
+        slots.forEach((slot) => {
+            if (slot.startMode !== 'AUTO_ON_VISIT_START') return;
+            if (slot.recording || slot.uploading || !slot.hasMedia) return;
+            if (autoStartedRef.current.has(slot.id)) return;
+            void startRecording(slot.id, { auto: true });
+        });
+    }, [appointment, slots, isCompleted]);
 
     useEffect(() => {
         return () => {
-            Object.values(recordersRef.current).forEach((rec) => {
-                if (rec && rec.state !== 'inactive') rec.stop();
+            Object.values(recordersRef.current).forEach((recorder) => {
+                if (recorder && recorder.state !== 'inactive') recorder.stop();
             });
-
             Object.values(streamsRef.current).forEach((stream) => {
-                if (stream) stream.getTracks().forEach((t) => t.stop());
+                if (stream) stream.getTracks().forEach((track) => track.stop());
             });
-
-            Object.values(openedVideoUrls).forEach((url) => URL.revokeObjectURL(url));
         };
-    }, [openedVideoUrls]);
+    }, []);
 
-    async function refreshVideos() {
-        if (!appointment?.id || !token) return;
+    useEffect(() => {
+        if (!finishAfterUploadsRef.current) return;
+        if (hasAnyRecording || hasAnyUploading) return;
+        finishAfterUploadsRef.current = false;
+        void finalizeAppointment();
+    }, [hasAnyRecording, hasAnyUploading]);
 
-        try {
-            const res = await getVideosByAppointment(token, appointment.id);
-            setVideos(res.data);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Не вдалося завантажити відео прийому');
+    useEffect(() => {
+        if (!followUpDoctorId || !followUpServiceId) {
+            setMonthDays([]);
+            setSelectedDate('');
+            setSelectedTime('');
+            setDayData(null);
+            setSelectedCabinetId(null);
+            return;
         }
+
+        async function loadMonth() {
+            try {
+                setLoadingMonth(true);
+                const response = await getManualAvailabilityMonth({
+                    doctorId: followUpDoctorId,
+                    serviceId: followUpServiceId,
+                    month,
+                });
+                setMonthDays(Array.isArray(response.days) ? response.days : []);
+            } catch (err) {
+                setMonthDays([]);
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завантажити календар' });
+            } finally {
+                setLoadingMonth(false);
+            }
+        }
+
+        setSelectedDate('');
+        setSelectedTime('');
+        setDayData(null);
+        setSelectedCabinetId(null);
+        void loadMonth();
+    }, [followUpDoctorId, followUpServiceId, month]);
+
+    useEffect(() => {
+        if (!followUpDoctorId || !followUpServiceId || !selectedDate) {
+            setDayData(null);
+            setSelectedTime('');
+            setSelectedCabinetId(null);
+            return;
+        }
+
+        async function loadDay() {
+            try {
+                setLoadingDay(true);
+                const response = await getManualAvailabilityDay({
+                    doctorId: followUpDoctorId,
+                    serviceId: followUpServiceId,
+                    date: selectedDate,
+                });
+                setDayData(response);
+            } catch (err) {
+                setDayData(null);
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завантажити слоти' });
+            } finally {
+                setLoadingDay(false);
+            }
+        }
+
+        setSelectedTime('');
+        setSelectedCabinetId(null);
+        void loadDay();
+    }, [followUpDoctorId, followUpServiceId, selectedDate]);
+
+    function updateSlot(slotId: string, patch: Partial<RecorderSlotState>) {
+        setSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
 
-    function updateSlot(slotId: number, patch: Partial<RecorderSlotState>) {
-        setSlots((prev) => prev.map((s) => (s.id === slotId ? { ...s, ...patch } : s)));
-    }
-
-    function attachStreamToPreview(slotId: number, stream: MediaStream) {
+    function attachStreamToPreview(slotId: string, stream: MediaStream) {
         const videoEl = previewRefs.current[slotId];
         if (!videoEl) return;
         videoEl.srcObject = stream;
@@ -204,58 +482,34 @@ export default function DoctorAppointmentDetailPage() {
         void videoEl.play().catch(() => null);
     }
 
-    function addSlot() {
-        if (slots.length >= 5) return;
-        const defaultVideo = videoDevices[0]?.id || '';
-        const defaultAudio = audioDevices[0]?.id || '';
-        slotSeqRef.current += 1;
-        setSlots((prev) => [...prev, createSlot(slotSeqRef.current, defaultVideo, defaultAudio)]);
+    function toggleSlotExpanded(slotId: string) {
+        setExpandedSlots((prev) => ({ ...prev, [slotId]: !prev[slotId] }));
     }
 
-    function removeSlot(slotId: number) {
-        const slot = slots.find((s) => s.id === slotId);
-        if (!slot || slot.recording || slot.uploading) return;
-
-        setSlots((prev) => prev.filter((s) => s.id !== slotId));
-        delete previewRefs.current[slotId];
-        delete chunksRef.current[slotId];
-        delete startedAtRef.current[slotId];
-        delete endedAtRef.current[slotId];
-
-        if (streamsRef.current[slotId]) {
-            streamsRef.current[slotId]?.getTracks().forEach((t) => t.stop());
-            delete streamsRef.current[slotId];
-        }
-        delete recordersRef.current[slotId];
-    }
-
-    async function startRecording(slotId: number) {
-        if (!appointment?.id || !token) {
-            setError('Потрібна авторизація');
+    async function startRecording(slotId: string, options?: { auto?: boolean }) {
+        if (!appointment?.id || !token || isCompleted) {
+            setAlert({ variant: 'error', message: 'Потрібна авторизація або прийом уже завершено' });
             return;
         }
 
-        const slot = slots.find((s) => s.id === slotId);
+        const slot = slots.find((item) => item.id === slotId);
         if (!slot || slot.recording || slot.uploading) return;
-
-        setError('');
 
         try {
             if (streamsRef.current[slotId]) {
-                streamsRef.current[slotId]?.getTracks().forEach((t) => t.stop());
+                streamsRef.current[slotId]?.getTracks().forEach((track) => track.stop());
                 streamsRef.current[slotId] = null;
             }
 
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    deviceId: slot.videoDeviceId ? { exact: slot.videoDeviceId } : undefined,
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30, max: 30 },
-                },
-                audio: slot.audioDeviceId ? { deviceId: { exact: slot.audioDeviceId } } : true,
-            });
+            const constraints = buildMediaConstraints(slot);
+            if (!constraints) {
+                if (!options?.auto) {
+                    setAlert({ variant: 'error', message: 'Для цього джерела не знайдено доступних пристроїв запису' });
+                }
+                return;
+            }
 
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
             streamsRef.current[slotId] = stream;
             chunksRef.current[slotId] = [];
             startedAtRef.current[slotId] = new Date();
@@ -276,7 +530,7 @@ export default function DoctorAppointmentDetailPage() {
 
             recorder.onerror = () => {
                 updateSlot(slotId, { recording: false, showPreview: false });
-                setError('Помилка запису відео. Спробуй іншу камеру або мікрофон.');
+                setAlert({ variant: 'error', message: 'Помилка запису відео. Спробуй іншу камеру або мікрофон.' });
             };
 
             recorder.onstop = async () => {
@@ -285,20 +539,20 @@ export default function DoctorAppointmentDetailPage() {
 
                 const streamToStop = streamsRef.current[slotId];
                 if (streamToStop) {
-                    streamToStop.getTracks().forEach((t) => t.stop());
+                    streamToStop.getTracks().forEach((track) => track.stop());
                     streamsRef.current[slotId] = null;
                 }
 
-                const videoElInner = previewRefs.current[slotId];
-                if (videoElInner) {
-                    videoElInner.srcObject = null;
-                    videoElInner.src = '';
+                const videoEl = previewRefs.current[slotId];
+                if (videoEl) {
+                    videoEl.srcObject = null;
+                    videoEl.src = '';
                 }
 
                 updateSlot(slotId, { recording: false, showPreview: false });
 
                 if (blob.size === 0) {
-                    setError('Отримано порожнє відео. Спробуй іншу камеру або перезапусти DroidCam.');
+                    setAlert({ variant: 'error', message: 'Отримано порожній файл запису. Спробуй ще раз.' });
                     return;
                 }
 
@@ -307,24 +561,23 @@ export default function DoctorAppointmentDetailPage() {
 
             recordersRef.current[slotId] = recorder;
             recorder.start(1000);
+            if (options?.auto) autoStartedRef.current.add(slotId);
         } catch (err) {
             updateSlot(slotId, { recording: false, showPreview: false });
-            setError(err instanceof Error ? err.message : 'Не вдалося почати запис');
+            if (!options?.auto) {
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис' });
+            }
         }
     }
 
-    function stopRecording(slotId: number) {
-        const slot = slots.find((s) => s.id === slotId);
-        if (!slot || !slot.recording) return;
-
+    function stopRecording(slotId: string) {
         const recorder = recordersRef.current[slotId];
         if (!recorder || recorder.state === 'inactive') return;
         recorder.stop();
     }
 
-    async function uploadSlotRecording(slotId: number, blob: Blob) {
+    async function uploadSlotRecording(slotId: string, blob: Blob) {
         if (!appointment?.id || !token) return;
-
         updateSlot(slotId, { uploading: true });
 
         try {
@@ -336,54 +589,87 @@ export default function DoctorAppointmentDetailPage() {
             const formData = new FormData();
             formData.append('video', file);
             formData.append('appointmentId', appointment.id);
-
             if (startedAtRef.current[slotId]) formData.append('startedAt', startedAtRef.current[slotId]!.toISOString());
             if (endedAtRef.current[slotId]) formData.append('endedAt', endedAtRef.current[slotId]!.toISOString());
 
             await uploadVideo(token, formData);
-            setSuccessMessage('Відео успішно завантажено');
-            await refreshVideos();
+            setAlert({ variant: 'success', message: 'Відео успішно завантажено' });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Не вдалося завантажити відео');
+            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завантажити відео' });
         } finally {
             updateSlot(slotId, { uploading: false });
         }
     }
 
-    async function finishRecording() {
+    async function finalizeAppointment() {
         if (!appointment?.id || !token) return;
-        if (hasAnyRecording || hasAnyUploading) return;
 
+        const treatmentPlanItems = normalizeListText(treatmentPlanText);
+        const recommendationItems = normalizeListText(recommendationText);
+        const medicationItems = normalizeListText(medicationText);
+
+        if (!consultationConclusion.trim()) {
+            setAlert({ variant: 'error', message: 'Заповни консультативний висновок' });
+            return;
+        }
+
+        setFinishing(true);
         try {
-            const result = await completeAppointmentRecording(token, appointment.id);
+            const result = await completeDoctorAppointment(token, appointment.id, {
+                consultationConclusion: consultationConclusion.trim(),
+                treatmentPlanItems,
+                recommendationItems,
+                medicationItems,
+                email: consultationEmail.trim() || undefined,
+                nextVisitDate: createdFollowUpDate,
+            });
+
             setAppointment(result.appointment);
-            await refreshVideos();
+            setAlert({ variant: 'success', message: result.message || 'Прийом завершено' });
+            window.setTimeout(() => {
+                navigate('/doctor/appointments-week');
+            }, 650);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Не вдалося завершити запис');
+            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завершити прийом' });
+        } finally {
+            setFinishing(false);
         }
     }
 
-    async function openDecryptedVideo(videoId: string) {
-        if (!token) {
-            setError('Потрібна авторизація');
+    function finishAppointment() {
+        if (hasAnyUploading || finishing) return;
+        if (hasAnyRecording) {
+            finishAfterUploadsRef.current = true;
+            slots.filter((slot) => slot.recording).forEach((slot) => stopRecording(slot.id));
+            return;
+        }
+        void finalizeAppointment();
+    }
+
+    async function submitFollowUpBooking() {
+        if (!token || !appointment?.id) return;
+        if (!followUpDoctorId || !followUpServiceId || !selectedDate || !selectedTime) {
+            setAlert({ variant: 'error', message: 'Оберіть лікаря, послугу, дату і час повторного візиту' });
             return;
         }
 
-        if (!videoPassword.trim()) {
-            setError('Введи пароль від акаунту для перегляду');
-            return;
-        }
-
+        setFollowUpSubmitting(true);
         try {
-            const blob = await streamVideoWithPassword(token, videoId, videoPassword.trim());
-            const url = URL.createObjectURL(blob);
-
-            setOpenedVideoUrls((prev) => {
-                if (prev[videoId]) URL.revokeObjectURL(prev[videoId]);
-                return { ...prev, [videoId]: url };
+            const result = await createDoctorFollowUpAppointment(token, appointment.id, {
+                doctorId: followUpDoctorId,
+                serviceId: followUpServiceId,
+                appointmentDate: `${selectedDate}T${selectedTime}`,
+                cabinetId: selectedCabinetId || undefined,
+                email: consultationEmail.trim() || undefined,
             });
+
+            const nextDate = result.appointment?.appointmentDate || `${selectedDate}T${selectedTime}`;
+            setCreatedFollowUpDate(nextDate);
+            setAlert({ variant: 'success', message: result.message || 'Пацієнта записано на наступний візит' });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Не вдалося відкрити відео');
+            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося створити повторний запис' });
+        } finally {
+            setFollowUpSubmitting(false);
         }
     }
 
@@ -404,186 +690,405 @@ export default function DoctorAppointmentDetailPage() {
         <div className="page-shell doctor-appointment-detail">
             <div className="container doctor-appointment-detail__container">
                 <section className="doctor-appointment-detail__card">
-                    {error && <AlertToast message={error} variant="error" onClose={() => setError('')} />}
-                    {successMessage && (
-                        <AlertToast message={successMessage} variant="success" onClose={() => setSuccessMessage('')} />
-                    )}
+                    {alert ? <AlertToast message={alert.message} variant={alert.variant} onClose={() => setAlert(null)} /> : null}
+
+                    <h1 className="doctor-appointment-detail__title">ПРИЙОМ</h1>
 
                     {loading ? (
-                        <div className="doctor-appointment-detail__state">Завантаження...</div>
+                        <>
+                            <div className="doctor-appointment-detail__meta doctor-appointment-detail__meta--skeleton">
+                                {Array.from({ length: 3 }).map((_, index) => (
+                                    <div key={`meta-skeleton-${index}`} className="doctor-appointment-detail__skeleton-card" />
+                                ))}
+                            </div>
+                            <div className="doctor-appointment-detail__panel doctor-appointment-detail__panel--skeleton" />
+                            <div className="doctor-appointment-detail__panel doctor-appointment-detail__panel--skeleton" />
+                        </>
                     ) : !appointment ? (
                         <div className="doctor-appointment-detail__state">Запис не знайдено</div>
-                    ) : !isMyAppointment ? (
-                        <div className="doctor-appointment-detail__state">Цей запис не належить поточному лікарю.</div>
                     ) : (
                         <>
-                            <h1 className="doctor-appointment-detail__title">ПРИЙОМ</h1>
-
                             <div className="doctor-appointment-detail__meta">
                                 <div>
                                     <span>Пацієнт</span>
                                     <strong>{fullName(appointment)}</strong>
                                 </div>
                                 <div>
-                                    <span>Телефон</span>
-                                    <strong>{appointment.patient?.phone || 'Не вказано'}</strong>
-                                </div>
-                                <div>
                                     <span>Дата та час</span>
-                                    <strong>{formatDate(appointment.appointmentDate)}</strong>
+                                    <strong>{formatDateTime(appointment.appointmentDate)}</strong>
                                 </div>
                                 <div>
-                                    <span>Статус</span>
-                                    <strong>{appointment.recordingCompleted ? 'Запис завершено' : appointment.status}</strong>
+                                    <span>Кабінет</span>
+                                    <strong>{appointment.cabinet?.name || appointment.cabinetName || 'Не вказано'}</strong>
                                 </div>
                             </div>
 
-                            <div className="doctor-appointment-detail__video-block">
-                                <div className="doctor-appointment-detail__video-head">
-                                    <h2>Відеозапис прийому</h2>
-                                    <button type="button" onClick={addSlot} disabled={slots.length >= 5 || hasAnyUploading}>
-                                        Додати камеру
-                                    </button>
+                            {isCompleted ? (
+                                <div className="doctor-appointment-detail__state doctor-appointment-detail__state--done">
+                                    Прийом уже завершено. Повторно відкривати його для редагування не можна.
+                                </div>
+                            ) : null}
+
+                            <div className="doctor-appointment-detail__panel">
+                                <div className="doctor-appointment-detail__section-head">
+                                    <div>
+                                        <h2>Відеозапис</h2>
+                                        <p>{appointment.cabinet?.devices?.length ? 'Камери доступні для запису цього прийому.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
+                                    </div>
                                 </div>
 
-                                <div className="doctor-appointment-detail__slots">
-                                    {slots.map((slot) => (
-                                        <div key={slot.id} className="doctor-appointment-detail__slot">
-                                            <div className="doctor-appointment-detail__slot-top">
-                                                <strong>Камера {slot.id}</strong>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeSlot(slot.id)}
-                                                    disabled={slots.length === 1 || slot.recording || slot.uploading}
-                                                >
-                                                    Видалити
-                                                </button>
-                                            </div>
+                                <div className="doctor-appointment-detail__video-list">
+                                    {slots.length === 0 ? (
+                                        <div className="doctor-appointment-detail__state">Немає джерел запису для цього кабінету.</div>
+                                    ) : (
+                                        slots.map((slot) => {
+                                            const expanded = Boolean(expandedSlots[slot.id]);
+                                            return (
+                                                <div key={slot.id} className="doctor-appointment-detail__video-item">
+                                                    <div className="doctor-appointment-detail__video-item-top">
+                                                        <div className="doctor-appointment-detail__video-item-meta">
+                                                            <strong>{slot.name}</strong>
+                                                            <span>{slot.startMode === 'AUTO_ON_VISIT_START' ? 'Автозапуск' : 'Ручний запуск'}</span>
+                                                        </div>
 
-                                            <div className="doctor-appointment-detail__device-row">
-                                                <label className="doctor-appointment-detail__field">
-                                                    <span>Камера</span>
-                                                    <select
-                                                        value={slot.videoDeviceId}
-                                                        onChange={(e) => updateSlot(slot.id, { videoDeviceId: e.target.value })}
-                                                        disabled={slot.recording || slot.uploading}
-                                                    >
-                                                        {videoDevices.length === 0 ? (
-                                                            <option value="">Камери не знайдено</option>
-                                                        ) : (
-                                                            videoDevices.map((d) => (
-                                                                <option key={d.id} value={d.id}>
-                                                                    {d.label}
-                                                                </option>
-                                                            ))
-                                                        )}
-                                                    </select>
-                                                </label>
+                                                        <div className="doctor-appointment-detail__video-item-actions">
+                                                            <span className={`doctor-appointment-detail__status-dot ${slot.recording ? 'is-active' : ''}`} />
+                                                            <button
+                                                                type="button"
+                                                                className={`doctor-appointment-detail__toggle ${expanded ? 'is-open' : ''}`}
+                                                                onClick={() => toggleSlotExpanded(slot.id)}
+                                                                aria-label={expanded ? 'Сховати прев’ю' : 'Показати прев’ю'}
+>
+                                                                <span className="doctor-appointment-detail__toggle-icon" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
 
-                                                <label className="doctor-appointment-detail__field">
-                                                    <span>Мікрофон</span>
-                                                    <select
-                                                        value={slot.audioDeviceId}
-                                                        onChange={(e) => updateSlot(slot.id, { audioDeviceId: e.target.value })}
-                                                        disabled={slot.recording || slot.uploading}
-                                                    >
-                                                        {audioDevices.length === 0 ? (
-                                                            <option value="">Мікрофони не знайдено</option>
-                                                        ) : (
-                                                            audioDevices.map((d) => (
-                                                                <option key={d.id} value={d.id}>
-                                                                    {d.label}
-                                                                </option>
-                                                            ))
-                                                        )}
-                                                    </select>
-                                                </label>
-                                            </div>
+                                                    <div className={`doctor-appointment-detail__preview-panel ${expanded ? 'is-open' : ''}`}>
+                                                        <div className="doctor-appointment-detail__preview-inner">
+                                                            {slot.showPreview ? (
+                                                                <video
+                                                                    ref={(element) => {
+                                                                        previewRefs.current[slot.id] = element;
+                                                                    }}
+                                                                    className="doctor-appointment-detail__preview"
+                                                                    playsInline
+                                                                    autoPlay
+                                                                    muted
+                                                                />
+                                                            ) : (
+                                                                <div className="doctor-appointment-detail__preview-placeholder">
+                                                                    Камера вимкнена. Вона вмикається тільки під час запису.
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
 
-                                            <video
-                                                ref={(el) => {
-                                                    previewRefs.current[slot.id] = el;
-                                                }}
-                                                className={`doctor-appointment-detail__preview ${slot.showPreview ? '' : 'is-hidden'}`}
-                                                playsInline
-                                                autoPlay
-                                                muted
-                                                onLoadedMetadata={(e) => {
-                                                    void e.currentTarget.play().catch(() => null);
-                                                }}
-                                            />
-
-                                            <div className="doctor-appointment-detail__video-actions">
-                                                {!slot.recording ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => startRecording(slot.id)}
-                                                        disabled={slot.uploading || appointment.recordingCompleted}
-                                                    >
-                                                        Почати запис
-                                                    </button>
-                                                ) : (
-                                                    <button type="button" onClick={() => stopRecording(slot.id)} disabled={slot.uploading}>
-                                                        Зупинити запис
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="doctor-appointment-detail__finish-row">
-                                    <button
-                                        type="button"
-                                        onClick={finishRecording}
-                                        disabled={hasAnyRecording || hasAnyUploading || Boolean(appointment.recordingCompleted)}
-                                    >
-                                        Завершити запис
-                                    </button>
+                                                    {slot.startMode === 'MANUAL' ? (
+                                                        <div className="doctor-appointment-detail__button-row">
+                                                            {!slot.recording ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="doctor-appointment-detail__ghost-btn"
+                                                                    onClick={() => void startRecording(slot.id)}
+                                                                    disabled={slot.uploading || isCompleted || !slot.hasMedia}
+                                                                >
+                                                                    {slot.uploading ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                                                    {slot.uploading ? 'Завантаження...' : 'Почати запис'}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    className="doctor-appointment-detail__danger-btn"
+                                                                    onClick={() => stopRecording(slot.id)}
+                                                                    disabled={slot.uploading || isCompleted}
+                                                                >
+                                                                    Зупинити запис
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="doctor-appointment-detail__auto-note">
+                                                            {slot.recording ? 'Автозапис активний' : slot.hasMedia ? 'Очікуємо автозапуск' : 'Немає доступного пристрою'}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
                                 </div>
                             </div>
 
-                            {appointment.recordingCompleted && (
-                                <div className="doctor-appointment-detail__history">
-                                    <h2>Розшифровані відео візиту</h2>
+                            <div className="doctor-appointment-detail__panel">
+                                <div className="doctor-appointment-detail__section-head">
+                                    <div>
+                                        <h2>Консультативний висновок</h2>
+                                        <p>Лікар заповнює висновок, план лікування, рекомендації та перелік ліків.</p>
+                                    </div>
+                                </div>
 
-                                    <label className="doctor-appointment-detail__field">
-                                        <span>Пароль від акаунту</span>
-                                        <input
-                                            type="password"
-                                            value={videoPassword}
-                                            onChange={(e) => setVideoPassword(e.target.value)}
-                                            placeholder="Введи пароль для доступу до відео"
+                                <div className="doctor-appointment-detail__form-grid">
+                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                        <span>Висновок</span>
+                                        <textarea
+                                            value={consultationConclusion}
+                                            onChange={(event) => setConsultationConclusion(event.target.value)}
+                                            placeholder="Опиши суть консультативного висновку"
+                                            disabled={isCompleted}
                                         />
                                     </label>
 
-                                    {videos.length === 0 ? (
-                                        <div className="doctor-appointment-detail__state">Відео ще не завантажувалися.</div>
-                                    ) : (
-                                        <div className="doctor-appointment-detail__video-list">
-                                            {videos.map((v) => (
-                                                <div key={v.id} className="doctor-appointment-detail__video-item">
-                                                    <div className="doctor-appointment-detail__video-item-head">
-                                                        <strong>{new Date(v.createdAt).toLocaleString('ua-UA')}</strong>
-                                                        <button type="button" onClick={() => openDecryptedVideo(v.id)}>
-                                                            Відкрити
-                                                        </button>
-                                                    </div>
+                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                        <span>План лікування</span>
+                                        <textarea
+                                            value={treatmentPlanText}
+                                            onChange={(event) => setTreatmentPlanText(event.target.value)}
+                                            placeholder={`1. ...\n2. ...`}
+                                            disabled={isCompleted}
+                                        />
+                                    </label>
 
-                                                    {openedVideoUrls[v.id] && (
-                                                        <video
-                                                            className="doctor-appointment-detail__history-player"
-                                                            src={openedVideoUrls[v.id]}
-                                                            controls
-                                                            playsInline
-                                                        />
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                        <span>Рекомендації</span>
+                                        <textarea
+                                            value={recommendationText}
+                                            onChange={(event) => setRecommendationText(event.target.value)}
+                                            placeholder={`1. ...\n2. ...`}
+                                            disabled={isCompleted}
+                                        />
+                                    </label>
+
+                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                        <span>Ліки / препарати</span>
+                                        <textarea
+                                            value={medicationText}
+                                            onChange={(event) => setMedicationText(event.target.value)}
+                                            placeholder={`1. ...\n2. ...`}
+                                            disabled={isCompleted}
+                                        />
+                                    </label>
+
+                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                        <span>Email для надсилання висновку</span>
+                                        <input
+                                            type="email"
+                                            value={consultationEmail}
+                                            onChange={(event) => setConsultationEmail(event.target.value)}
+                                            placeholder="patient@example.com"
+                                            disabled={isCompleted}
+                                        />
+                                    </label>
                                 </div>
-                            )}
+                            </div>
+
+                            <div className="doctor-appointment-detail__panel">
+                                <div className="doctor-appointment-detail__section-head">
+                                    <div>
+                                        <h2>Записати на наступний візит</h2>
+                                        <p>Можна записати до себе або до іншого лікаря без онлайн-оплати.</p>
+                                    </div>
+                                    {createdFollowUpDate ? (
+                                        <div className="doctor-appointment-detail__next-visit-badge">
+                                            Наступний візит: {formatDateTime(createdFollowUpDate)}
+                                        </div>
+                                    ) : null}
+                                </div>
+
+                                {resourcesLoading ? (
+                                    <div className="doctor-appointment-detail__follow-up-skeleton">
+                                        <div className="doctor-appointment-detail__skeleton-line" />
+                                        <div className="doctor-appointment-detail__skeleton-line" />
+                                        <div className="doctor-appointment-detail__skeleton-line" />
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="doctor-appointment-detail__booking-grid">
+                                            <label className="doctor-appointment-detail__field">
+                                                <span>Лікар</span>
+                                                <select
+                                                    value={followUpDoctorId}
+                                                    onChange={(event) => setFollowUpDoctorId(event.target.value)}
+                                                    disabled={isCompleted}
+                                                >
+                                                    <option value="">Оберіть лікаря</option>
+                                                    {doctors.map((doctor) => (
+                                                        <option key={doctor.userId || doctor.id} value={doctor.userId || doctor.id}>
+                                                            {doctorLabel(doctor)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+
+                                            <label className="doctor-appointment-detail__field">
+                                                <span>Послуга</span>
+                                                <select
+                                                    value={followUpServiceId}
+                                                    onChange={(event) => setFollowUpServiceId(event.target.value)}
+                                                    disabled={isCompleted}
+                                                >
+                                                    <option value="">Оберіть послугу</option>
+                                                    {services.map((service) => (
+                                                        <option key={service.id} value={service.id}>
+                                                            {serviceLabel(service)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                        </div>
+
+                                        {followUpDoctorId && followUpServiceId ? (
+                                            <div className="doctor-appointment-detail__calendar-card">
+                                                {!selectedDate ? (
+                                                    <>
+                                                        <div className="doctor-appointment-detail__calendar-top">
+                                                            <h3>Календар</h3>
+                                                            <div className="doctor-appointment-detail__month-nav">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setMonth((prev) => shiftMonthKey(prev, -1))}
+                                                                    disabled={isBeforeCurrentMonth(month) || isCompleted}
+                                                                >
+                                                                    ‹
+                                                                </button>
+                                                                <span>{getMonthLabel(month)}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setMonth((prev) => shiftMonthKey(prev, 1))}
+                                                                    disabled={isCompleted}
+                                                                >
+                                                                    ›
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="doctor-appointment-detail__weekday-row">
+                                                            {weekdayLabels.map((label) => (
+                                                                <div key={label}>{label}</div>
+                                                            ))}
+                                                        </div>
+
+                                                        {loadingMonth ? (
+                                                            <div className="doctor-appointment-detail__calendar-skeleton-grid">
+                                                                {Array.from({ length: 35 }).map((_, index) => (
+                                                                    <div key={`day-skeleton-${index}`} className="doctor-appointment-detail__calendar-skeleton-cell" />
+                                                                ))}
+                                                            </div>
+                                                        ) : calendarCells.length ? (
+                                                            <div className="doctor-appointment-detail__month-grid">
+                                                                {calendarCells.map((cell) =>
+                                                                    cell.kind === 'empty' ? (
+                                                                        <div key={cell.key} className="doctor-appointment-detail__day doctor-appointment-detail__day--empty" />
+                                                                    ) : (
+                                                                        <button
+                                                                            key={cell.key}
+                                                                            type="button"
+                                                                            className={[
+                                                                                'doctor-appointment-detail__day',
+                                                                                cell.day.date === selectedDate ? 'is-selected' : '',
+                                                                                !cell.day.isWorking ? 'is-off' : cell.day.freeSlots > 0 ? 'is-free' : 'is-busy',
+                                                                            ].join(' ')}
+                                                                            onClick={() => {
+                                                                                if (!cell.day.isWorking || cell.day.freeSlots <= 0) return;
+                                                                                setSelectedDate(cell.day.date);
+                                                                            }}
+                                                                            disabled={!cell.day.isWorking || cell.day.freeSlots <= 0 || isCompleted}
+                                                                        >
+                                                                            <span>{cell.day.date.slice(-2)}</span>
+                                                                            <small>{cell.day.freeSlots}/{cell.day.totalSlots}</small>
+                                                                        </button>
+                                                                    ),
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="doctor-appointment-detail__state">На цей період вільних дат немає.</div>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <div className="doctor-appointment-detail__slots-wrap">
+                                                        <div className="doctor-appointment-detail__slots-head">
+                                                            <strong>{formatDateOnly(selectedDate)}</strong>
+                                                            <button
+                                                                type="button"
+                                                                className="doctor-appointment-detail__ghost-btn"
+                                                                onClick={() => {
+                                                                    setSelectedDate('');
+                                                                    setSelectedTime('');
+                                                                    setSelectedCabinetId(null);
+                                                                }}
+                                                                disabled={isCompleted}
+                                                            >
+                                                                Назад до календаря
+                                                            </button>
+                                                        </div>
+
+                                                        {loadingDay ? (
+                                                            <div className="doctor-appointment-detail__slots-skeleton-grid">
+                                                                {Array.from({ length: 16 }).map((_, index) => (
+                                                                    <div key={`slot-skeleton-${index}`} className="doctor-appointment-detail__calendar-skeleton-cell doctor-appointment-detail__calendar-skeleton-cell--slot" />
+                                                                ))}
+                                                            </div>
+                                                        ) : !dayData?.isWorking ? (
+                                                            <div className="doctor-appointment-detail__state">У цей день лікар не працює або день заблоковано.</div>
+                                                        ) : freeSlots.length ? (
+                                                            <div className="doctor-appointment-detail__slots-grid">
+                                                                {freeSlots.map((slot) => (
+                                                                    <button
+                                                                        key={slot.time}
+                                                                        type="button"
+                                                                        className={`doctor-appointment-detail__slot ${selectedTime === slot.time ? 'is-selected' : ''}`}
+                                                                        onClick={() => {
+                                                                            setSelectedTime(slot.time);
+                                                                            setSelectedCabinetId(slot.cabinetId || null);
+                                                                        }}
+                                                                        disabled={isCompleted}
+                                                                    >
+                                                                        <span>{slot.time}</span>
+                                                                        {slot.cabinetName ? <small>{parseDbI18nValue(slot.cabinetName)}</small> : null}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="doctor-appointment-detail__state">На цю дату вільного часу немає.</div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : null}
+
+                                        <div className="doctor-appointment-detail__button-row doctor-appointment-detail__button-row--right">
+                                            <button
+                                                type="button"
+                                                className="doctor-appointment-detail__primary-btn"
+                                                onClick={() => void submitFollowUpBooking()}
+                                                disabled={followUpSubmitting || isCompleted || !followUpDoctorId || !followUpServiceId || !selectedDate || !selectedTime}
+                                            >
+                                                {followUpSubmitting ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                                {followUpSubmitting ? 'Створення...' : 'Записати на візит'}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            <div className="doctor-appointment-detail__finish-row">
+                                <button
+                                    type="button"
+                                    className="doctor-appointment-detail__finish-btn"
+                                    onClick={finishAppointment}
+                                    disabled={isCompleted || hasAnyUploading || finishing}
+                                >
+                                    {finishing ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                    {finishing ? 'Завершення...' : 'Завершити прийом'}
+                                </button>
+                            </div>
+
+                            {isCompleted ? (
+                                <div className="doctor-appointment-detail__button-row doctor-appointment-detail__button-row--center">
+                                    <button type="button" className="doctor-appointment-detail__ghost-btn" onClick={() => navigate('/doctor/appointments-week')}>
+                                        Повернутися до розкладу
+                                    </button>
+                                </div>
+                            ) : null}
                         </>
                     )}
                 </section>
