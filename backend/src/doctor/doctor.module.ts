@@ -10,10 +10,11 @@ import { MailModule } from '../mail/mail.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { PatientModule } from '../patient/patient.module';
 import { AdminModule } from '../admin/admin.module';
+import { Appointment } from '../appointment/entities/appointment.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([Doctor, DoctorSpecialty]),
+        TypeOrmModule.forFeature([Doctor, DoctorSpecialty, Appointment]),
         UserModule,
         VerificationModule,
         MailModule,

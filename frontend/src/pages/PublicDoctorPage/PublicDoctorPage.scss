@@ -1,0 +1,271 @@
+.public-doctor-page {
+  padding: 28px 0 56px;
+
+  &__container {
+    display: grid;
+    gap: 28px;
+  }
+
+  &__hero {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  &__photo-wrap {
+    width: 100%;
+  }
+
+  &__photo {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    background: #dde4ea;
+    display: block;
+  }
+
+  &__photo--placeholder {
+    display: grid;
+    place-items: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 58px;
+    font-weight: 700;
+    color: #5f6f85;
+  }
+
+  &__eyebrow,
+  &__specialties,
+  &__description,
+  &__section-head p,
+  &__empty-reviews,
+  &__review-card span,
+  &__review-card p,
+  &__state,
+  &__stat-card span,
+  &__stat-card small {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    line-height: 1.6;
+    color: #6b7280;
+  }
+
+  &__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
+
+  &__title {
+    margin: 0 0 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: clamp(30px, 4.5vw, 52px);
+    line-height: 1.04;
+    color: #24324a;
+  }
+
+  &__specialties {
+    font-size: 14px;
+    color: #24324a;
+    margin-bottom: 10px;
+  }
+
+  &__description {
+    max-width: 780px;
+    white-space: pre-line;
+    font-size: 13px;
+  }
+
+  &__stats {
+    margin-top: 22px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  &__stat-card {
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #d7dee5;
+    display: grid;
+    gap: 8px;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 28px;
+      color: #24324a;
+    }
+  }
+
+  &__actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__primary-btn,
+  &__ghost-btn {
+    min-height: 46px;
+    padding: 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #404040;
+    text-decoration: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #24324a;
+    transition: box-shadow .18s ease, transform .18s ease;
+  }
+
+  &__primary-btn {
+    background: #84d8ce;
+  }
+
+  &__ghost-btn {
+    background: #ffffff;
+  }
+
+  &__primary-btn:hover,
+  &__ghost-btn:hover {
+    box-shadow: 4px 4px 0 #111111;
+    transform: translate(-1px, -1px);
+  }
+
+  &__section-head {
+    display: grid;
+    gap: 8px;
+
+    h2 {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 28px;
+      color: #24324a;
+    }
+  }
+
+  &__review-list {
+    display: grid;
+    gap: 16px;
+  }
+
+  &__review-card {
+    background: #ffffff;
+    border: 1px solid #d7dee5;
+    padding: 18px;
+    display: grid;
+    gap: 12px;
+
+    strong,
+    b {
+      font-family: 'IBM Plex Mono', monospace;
+      color: #24324a;
+    }
+
+    p {
+      font-size: 13px;
+      color: #24324a;
+    }
+
+    .is-muted {
+      color: #7b8591;
+    }
+  }
+
+  &__review-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+
+    > div:first-child {
+      display: grid;
+      gap: 4px;
+    }
+  }
+
+  &__review-rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__state,
+  &__empty-reviews {
+    padding: 24px;
+    background: #ffffff;
+    border: 1px solid #d7dee5;
+  }
+
+  &__skeleton {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: 28px;
+  }
+
+  &__skeleton-photo,
+  &__skeleton-lines span {
+    background: linear-gradient(90deg, #eef2f6 0%, #f7f9fb 50%, #eef2f6 100%);
+    background-size: 200% 100%;
+    animation: public-doctor-skeleton 1.2s linear infinite;
+  }
+
+  &__skeleton-photo {
+    aspect-ratio: 1 / 1;
+  }
+
+  &__skeleton-lines {
+    display: grid;
+    gap: 14px;
+
+    span:nth-child(1) { height: 18px; width: 160px; }
+    span:nth-child(2) { height: 54px; width: min(100%, 560px); }
+    span:nth-child(3) { height: 20px; width: min(100%, 340px); }
+    span:nth-child(4) { height: 120px; width: 100%; }
+  }
+}
+
+@keyframes public-doctor-skeleton {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .public-doctor-page {
+    &__hero,
+    &__skeleton {
+      grid-template-columns: 1fr;
+    }
+
+    &__photo-wrap,
+    &__skeleton-photo {
+      max-width: 360px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .public-doctor-page {
+    &__stats {
+      grid-template-columns: 1fr;
+    }
+
+    &__actions {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    &__primary-btn,
+    &__ghost-btn {
+      width: 100%;
+    }
+
+    &__review-top {
+      display: grid;
+    }
+  }
+}

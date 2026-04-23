@@ -215,10 +215,20 @@
   }
 
   &__row-subtitle {
+    display: grid;
+    gap: 6px;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
     line-height: 1.6;
     color: #6f7d8b;
+  }
+
+  &__row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    font-size: 12px;
+    color: #4c5d6f;
   }
 
   &__row-side {
@@ -474,6 +484,80 @@
     }
   }
 
+
+  &__field--compact {
+    max-width: 340px;
+  }
+
+
+
+  &__setup-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  &__setup-info-card {
+    background: #fff;
+    border: 1px solid #d7dde4;
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  &__connection-code-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid #d7dde4;
+    background: #f7fbfc;
+    padding: 14px;
+
+    strong {
+      display: block;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: clamp(24px, 4vw, 34px);
+      line-height: 1;
+      color: #24324a;
+      word-break: break-word;
+    }
+  }
+
+  &__setup-copy {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #6f7d8b;
+  }
+
+  &__summary-value-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 24px;
+      color: #24324a;
+      line-height: 1;
+    }
+  }
+
+  &__agent-inline-status {
+    display: grid;
+    gap: 8px;
+    align-items: start;
+  }
+
+  &__agent-inline-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: #4c5d6f;
+    line-height: 1.55;
+  }
+
   &__selector-card,
   &__devices-section {
     background: #fff;
@@ -577,6 +661,92 @@
     line-height: 1.55;
   }
 
+  &__agent-pair-picker {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__agent-pair-option {
+    border: 1px solid #e6edf2;
+    background: #fcfdfe;
+    padding: 14px;
+    display: grid;
+    gap: 12px;
+
+    &.is-selected {
+      border-color: #8ecfc7;
+      background: #f2fffb;
+    }
+  }
+
+  &__agent-pair-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+
+    input {
+      width: 18px;
+      height: 18px;
+      margin: 2px 0 0;
+      accent-color: #7fd1c4;
+      flex: 0 0 18px;
+    }
+  }
+
+  &__agent-pair-text {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 15px;
+      color: #24324a;
+    }
+
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #6f7d8b;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+  }
+
+  &__agent-pair-config {
+    display: grid;
+    gap: 12px;
+  }
+
+  &__agent-preview-note {
+    border: 1px dashed #d7dde4;
+    background: #f8fbfc;
+    padding: 12px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #6f7d8b;
+  }
+
+  &__pair-summary {
+    display: grid;
+    gap: 8px;
+
+    span {
+      display: block;
+      min-height: 40px;
+      border: 1px solid #e6edf2;
+      background: #fff;
+      padding: 10px 12px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: #4c5d6f;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+  }
+
   &__device-list {
     display: grid;
     gap: 12px;
@@ -632,15 +802,27 @@
     border-radius: 0;
     background: #eff5f8;
     padding: 12px;
+    display: grid;
+    gap: 8px;
 
+    img,
     video {
       display: block;
       width: 100%;
-      max-height: 220px;
+      max-height: 260px;
       object-fit: cover;
       background: #111111;
-      border-radius: 10px;
+      border-radius: 0;
+      border: 1px solid #d7dde4;
     }
+  }
+
+  &__camera-preview-empty,
+  &__camera-preview-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #6f7d8b;
+    line-height: 1.5;
   }
 
   &__mic-monitor {
@@ -725,14 +907,16 @@
     &__devices-head,
     &__selector-head,
     &__modal-header,
-    &__device-head {
+    &__device-head,
+    &__agent-pair-check {
       flex-direction: column;
       align-items: stretch;
     }
 
     &__grid--top,
     &__grid--selectors,
-    &__device-grid {
+    &__device-grid,
+    &__setup-info-grid {
       grid-template-columns: 1fr;
     }
 
@@ -768,6 +952,7 @@
     &__row,
     &__selector-card,
     &__devices-section,
+    &__setup-info-card,
     &__device-card,
     &__skeleton-row {
       padding: 14px;
@@ -849,10 +1034,12 @@
 .cabinets-admin-page__field--checkbox,
 .cabinets-admin-page__selector-card,
 .cabinets-admin-page__devices-section,
+.cabinets-admin-page__setup-info-card,
 .cabinets-admin-page__selector-empty,
 .cabinets-admin-page__devices-empty,
 .cabinets-admin-page__checkbox-item,
 .cabinets-admin-page__devices-note,
+.cabinets-admin-page__connection-code-box,
 .cabinets-admin-page__device-card,
 .cabinets-admin-page__camera-preview,
 .cabinets-admin-page__camera-preview video,
@@ -863,4 +1050,13 @@
 .cabinets-admin-page__ghost-btn,
 .cabinets-admin-page__skeleton-row {
   border-radius: 0;
+}
+
+
+@media (max-width: 900px) {
+  .cabinets-admin-page {
+    &__agent-summary {
+      grid-template-columns: 1fr;
+    }
+  }
 }

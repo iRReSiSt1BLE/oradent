@@ -313,7 +313,6 @@ export default function AppointmentPage() {
                     doctorId: bookingDoctorUserId,
                     serviceId,
                     appointmentDate: toIso(finalDateTime),
-                    phoneVerificationSessionId: undefined,
                 });
             }
 

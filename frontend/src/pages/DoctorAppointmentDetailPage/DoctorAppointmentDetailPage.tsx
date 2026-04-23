@@ -397,6 +397,15 @@ export default function DoctorAppointmentDetailPage() {
         };
     }, []);
 
+
+    useEffect(() => {
+        slots.forEach((slot) => {
+            if (!slot.showPreview) return;
+            const stream = streamsRef.current[slot.id];
+            if (stream) attachStreamToPreview(slot.id, stream);
+        });
+    }, [slots, expandedSlots]);
+
     useEffect(() => {
         if (!finishAfterUploadsRef.current) return;
         if (hasAnyRecording || hasAnyUploading) return;
@@ -472,9 +481,14 @@ export default function DoctorAppointmentDetailPage() {
         setSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
 
-    function attachStreamToPreview(slotId: string, stream: MediaStream) {
+    function attachStreamToPreview(slotId: string, stream: MediaStream, attempt = 0) {
         const videoEl = previewRefs.current[slotId];
-        if (!videoEl) return;
+        if (!videoEl) {
+            if (attempt < 8) {
+                window.setTimeout(() => attachStreamToPreview(slotId, stream, attempt + 1), 60);
+            }
+            return;
+        }
         videoEl.srcObject = stream;
         videoEl.muted = true;
         videoEl.autoplay = true;
@@ -515,6 +529,7 @@ export default function DoctorAppointmentDetailPage() {
             startedAtRef.current[slotId] = new Date();
             endedAtRef.current[slotId] = null;
 
+            setExpandedSlots((prev) => ({ ...prev, [slotId]: true }));
             updateSlot(slotId, { recording: true, showPreview: true });
             requestAnimationFrame(() => attachStreamToPreview(slotId, stream));
 
@@ -530,6 +545,7 @@ export default function DoctorAppointmentDetailPage() {
 
             recorder.onerror = () => {
                 updateSlot(slotId, { recording: false, showPreview: false });
+                setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
                 setAlert({ variant: 'error', message: 'Помилка запису відео. Спробуй іншу камеру або мікрофон.' });
             };
 
@@ -550,6 +566,7 @@ export default function DoctorAppointmentDetailPage() {
                 }
 
                 updateSlot(slotId, { recording: false, showPreview: false });
+                setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
 
                 if (blob.size === 0) {
                     setAlert({ variant: 'error', message: 'Отримано порожній файл запису. Спробуй ще раз.' });
@@ -564,6 +581,7 @@ export default function DoctorAppointmentDetailPage() {
             if (options?.auto) autoStartedRef.current.add(slotId);
         } catch (err) {
             updateSlot(slotId, { recording: false, showPreview: false });
+            setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
             if (!options?.auto) {
                 setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис' });
             }
@@ -752,7 +770,10 @@ export default function DoctorAppointmentDetailPage() {
                                                         </div>
 
                                                         <div className="doctor-appointment-detail__video-item-actions">
-                                                            <span className={`doctor-appointment-detail__status-dot ${slot.recording ? 'is-active' : ''}`} />
+                                                            <span className={`doctor-appointment-detail__status-dot ${slot.recording ? 'is-active' : ''} ${slot.uploading ? 'is-uploading' : ''}`} />
+                                                            <span className={`doctor-appointment-detail__status-label ${slot.recording ? 'is-recording' : ''} ${slot.uploading ? 'is-uploading' : ''}`}>
+                                                                {slot.uploading ? 'Завантаження' : slot.recording ? 'Йде запис' : 'Готово'}
+                                                            </span>
                                                             <button
                                                                 type="button"
                                                                 className={`doctor-appointment-detail__toggle ${expanded ? 'is-open' : ''}`}

@@ -708,14 +708,6 @@ export default function DoctorDetailPage() {
         );
     }
 
-    const doctorSpecialties = doctor
-        ? doctor.specialties && doctor.specialties.length > 0
-            ? doctor.specialties
-            : doctor.specialty
-                ? [doctor.specialty]
-                : []
-        : [];
-
     return (
         <div className="page-shell doctor-detail-page">
             <div className="container doctor-detail-page__container">

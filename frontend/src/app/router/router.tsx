@@ -17,6 +17,7 @@ import DoctorAppointmentsPage from '../../pages/DoctorAppointmentsPage/DoctorApp
 import DoctorAppointmentDetailPage from '../../pages/DoctorAppointmentDetailPage/DoctorAppointmentDetailPage';
 import DoctorScheduleAdminPage from '../../pages/DoctorScheduleAdminPage/DoctorScheduleAdminPage';
 import DoctorSchedulePage from '../../pages/DoctorSchedulePage/DoctorSchedulePage';
+import PublicDoctorPage from '../../pages/PublicDoctorPage/PublicDoctorPage';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import SmartAppointmentPage from '../../pages/SmartAppointmentPage/SmartAppointmentPage';
 import MyAppointmentsPage from '../../pages/MyAppointmentsPage/MyAppointmentsPage';
@@ -63,6 +64,7 @@ export const router = createBrowserRouter([
             { index: true, element: <HomePage /> },
             { path: 'services/:serviceId', element: <ServiceDetailPage /> },
             { path: 'doctors/:doctorId/schedule', element: <DoctorSchedulePage /> },
+            { path: 'doctors/:doctorId', element: <PublicDoctorPage /> },
 
             { path: 'register', element: <RegisterPage /> },
             { path: 'login', element: <LoginPage /> },

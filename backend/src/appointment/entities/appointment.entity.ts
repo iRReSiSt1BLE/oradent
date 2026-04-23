@@ -66,6 +66,18 @@ export class Appointment {
     @Column({ type: 'varchar', length: 255, nullable: true })
     consultationEmail: string | null;
 
+    @Column({ type: 'boolean', default: false })
+    reviewAnonymous: boolean;
+
+    @Column({ type: 'decimal', precision: 2, scale: 1, nullable: true })
+    reviewRating: number | null;
+
+    @Column({ type: 'text', nullable: true })
+    reviewText: string | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    reviewCreatedAt: Date | null;
+
     @Column({ type: 'datetime', nullable: true })
     completedAt: Date | null;
 

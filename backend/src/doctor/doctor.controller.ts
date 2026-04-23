@@ -35,6 +35,11 @@ export class DoctorController {
         return this.doctorService.getPublicDoctors();
     }
 
+    @Get('public/:id')
+    getPublicById(@Param('id', new ParseUUIDPipe()) id: string) {
+        return this.doctorService.getPublicDoctorById(id);
+    }
+
     @UseGuards(JwtAuthGuard)
     @Get('specialties')
     getSpecialties(@Req() req: { user: { id: string } }) {

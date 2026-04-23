@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http: https: ws: wss:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ORADENT Dental Capture Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="agent-shell">
+      <header class="agent-header site-brand-header">
+        <div class="brand-lockup">
+          <div class="brand-mark">ORADENT</div>
+          <div class="brand-tagline">DENTAL CLINIC MANAGEMENT SYSTEM</div>
+          <div class="agent-name">Dental Capture Agent</div>
+          <div class="agent-subtitle">Локальне підключення обладнання кабінету</div>
+        </div>
+        <span id="globalStatusBadge" class="status-pill status-pill--idle">Очікування</span>
+      </header>
+
+      <main class="agent-layout">
+        <aside class="agent-sidebar">
+          <section class="panel">
+            <div class="panel-title">Підключення</div>
+            <div class="field-group">
+              <label class="field">
+                <span>Backend URL</span>
+                <input id="backendUrlInput" type="text" placeholder="https://api.example.com" />
+              </label>
+              <label class="field">
+                <span>Cabinet code</span>
+                <input id="cabinetCodeInput" type="text" placeholder="CAB-XXXXXX" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">Стан</div>
+            <div class="status-grid">
+              <div class="status-item">
+                <span>Server</span>
+                <span id="backendStateBadge" class="status-pill status-pill--idle">Не перевірено</span>
+              </div>
+              <div class="status-item">
+                <span>Agent</span>
+                <span id="registrationStateBadge" class="status-pill status-pill--idle">Не зареєстровано</span>
+              </div>
+              <div class="status-item">
+                <span>Socket</span>
+                <span id="socketStateBadge" class="status-pill status-pill--idle">Не підключено</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">Дії</div>
+            <div class="actions-grid actions-grid--stacked">
+              <button id="refreshDevicesBtn" class="button button--secondary" type="button">Оновити</button>
+              <button id="connectAgentBtn" class="button button--primary-dark" type="button">Підключити</button>
+              <button id="disconnectSocketBtn" class="button button--ghost" type="button">Відключити</button>
+            </div>
+            <div class="meta-block">
+              <div class="meta-row">
+                <span class="meta-label">Налаштованих пар</span>
+                <span id="pairsCountText" class="meta-value">0</span>
+              </div>
+            </div>
+            <div id="persistentNote" class="status-line">Готово</div>
+          </section>
+        </aside>
+
+        <section class="agent-main">
+          <section class="panel panel--wide">
+            <div class="section-head">
+              <div>
+                <h2>Пари обладнання</h2>
+                <p>Обери камеру й мікрофон, створи потрібні комбінації та надішли їх у систему.</p>
+              </div>
+            </div>
+
+            <div class="access-strip">
+              <div class="access-strip__badges">
+                <span id="cameraPermissionBadge" class="status-pill status-pill--idle">Камера: немає доступу</span>
+                <span id="microphonePermissionBadge" class="status-pill status-pill--idle">Мікрофон: немає доступу</span>
+              </div>
+              <button id="grantAccessBtn" class="button button--primary" type="button">Надати доступ</button>
+            </div>
+
+            <div class="pair-builder">
+              <label class="field field--compact">
+                <span>Камера</span>
+                <select id="videoSelect"></select>
+              </label>
+              <label class="field field--compact">
+                <span>Мікрофон</span>
+                <select id="audioSelect"></select>
+              </label>
+              <input id="pairNameInput" type="hidden" />
+              <div class="pair-builder__actions">
+                <button id="addPairBtn" class="button button--primary" type="button">Додати</button>
+                <button id="autofillPairsBtn" class="button button--secondary" type="button">Усі комбінації</button>
+              </div>
+            </div>
+
+            <div id="pairsContainer" class="pairs-grid"></div>
+          </section>
+
+          <div class="media-grid">
+            <section class="panel panel--wide">
+              <div class="section-head">
+                <div>
+                  <h2>Preview</h2>
+                  <p>Попередній перегляд активної камери</p>
+                </div>
+                <button id="stopPreviewBtn" class="button button--ghost button--small" type="button">Стоп</button>
+              </div>
+              <div class="video-frame">
+                <video id="previewVideo" autoplay muted playsinline></video>
+                <div id="previewPlaceholder" class="video-placeholder">Оберіть активну пару</div>
+              </div>
+            </section>
+
+            <section class="panel panel--wide panel--mic">
+              <div class="section-head">
+                <div>
+                  <h2>Мікрофон</h2>
+                  <p>Тест активного мікрофона</p>
+                </div>
+                <button id="startMicTestBtn" class="button button--primary button--small button--record" type="button">
+                  <span id="recordDot" class="record-dot"></span>
+                  <span id="recordButtonText">Почати тест</span>
+                </button>
+              </div>
+              <div class="meter-row">
+                <div class="meter-track"><div id="micMeterFill" class="meter-fill"></div></div>
+                <div id="meterPercentText" class="meter-value">0%</div>
+              </div>
+              <div class="listen-row">
+                <button id="playMicTestBtn" class="button button--secondary button--small" type="button" disabled>Слухати запис</button>
+                <span id="micTestMeta" class="meta-text">Немає запису</span>
+              </div>
+              <div id="micPlaybackWrap" class="mic-playback" hidden>
+                <audio id="micPlaybackAudio" controls hidden></audio>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

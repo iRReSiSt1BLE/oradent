@@ -25,6 +25,7 @@ import { MailService } from '../mail/mail.service';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
 import { PatientService } from '../patient/patient.service';
 import { AdminService } from '../admin/admin.service';
+import { Appointment } from '../appointment/entities/appointment.entity';
 
 type AvatarSize = 'sm' | 'md' | 'lg';
 type DbI18nMap = {
@@ -40,6 +41,8 @@ export class DoctorService {
         private readonly doctorRepository: Repository<Doctor>,
         @InjectRepository(DoctorSpecialty)
         private readonly specialtyRepository: Repository<DoctorSpecialty>,
+        @InjectRepository(Appointment)
+        private readonly appointmentRepository: Repository<Appointment>,
         private readonly userService: UserService,
         private readonly verificationService: VerificationService,
         private readonly mailService: MailService,
@@ -560,6 +563,85 @@ export class DoctorService {
                     }
                     : null,
             })),
+        };
+    }
+
+
+    private buildPatientReviewName(appointment: Appointment) {
+        if (appointment.reviewAnonymous) return 'Анонім';
+        const patient = appointment.patient;
+        if (!patient) return 'Пацієнт';
+        const firstInitial = patient.firstName ? `${patient.firstName.trim().charAt(0)}.` : '';
+        const middleInitial = patient.middleName ? `${patient.middleName.trim().charAt(0)}.` : '';
+        const lastName = patient.lastName?.trim() || 'Пацієнт';
+        return `${lastName} ${firstInitial}${middleInitial}`.trim();
+    }
+
+    async getPublicDoctorById(doctorId: string) {
+        const doctor = await this.doctorRepository.findOne({
+            where: { id: doctorId, isActive: true },
+            relations: ['user'],
+        });
+
+        if (!doctor) {
+            throw new NotFoundException('Лікаря не знайдено');
+        }
+
+        const doctorRefIds = [doctor.id, doctor.user?.id].filter(Boolean) as string[];
+        const reviewAppointments = await this.appointmentRepository.find({
+            where: doctorRefIds.map((id) => ({ doctorId: id })),
+            relations: ['patient'],
+            order: {
+                reviewCreatedAt: 'DESC',
+                appointmentDate: 'DESC',
+                createdAt: 'DESC',
+            },
+        });
+
+        const reviews = reviewAppointments
+            .filter((item) => item.reviewRating !== null && item.reviewCreatedAt)
+            .map((item) => ({
+                appointmentId: item.id,
+                rating: Number(item.reviewRating || 0),
+                text: item.reviewText || '',
+                anonymous: Boolean(item.reviewAnonymous),
+                authorName: this.buildPatientReviewName(item),
+                createdAt: item.reviewCreatedAt,
+            }));
+
+        const averageRating = reviews.length
+            ? Math.round((reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / reviews.length) * 10) / 10
+            : 0;
+
+        return {
+            ok: true,
+            doctor: {
+                id: doctor.id,
+                userId: doctor.user?.id ?? null,
+                lastName: doctor.lastName,
+                firstName: doctor.firstName,
+                middleName: doctor.middleName,
+                specialty: this.getLocalizedDbText(doctor.specialty, 'ua'),
+                specialtyI18n: this.mapDbI18n(doctor.specialty),
+                specialties: (doctor.specialties || (doctor.specialty ? [doctor.specialty] : [])).map((item) => ({
+                    value: this.getLocalizedDbText(item, 'ua'),
+                    i18n: this.mapDbI18n(item),
+                })),
+                infoBlock: this.getLocalizedDbText(doctor.infoBlock, 'ua'),
+                infoBlockI18n: this.mapDbI18n(doctor.infoBlock),
+                hasAvatar: doctor.hasAvatar,
+                avatarVersion: doctor.avatarVersion,
+                avatar: doctor.hasAvatar
+                    ? {
+                        sm: this.buildAvatarUrl(doctor.id, 'sm', doctor.avatarVersion),
+                        md: this.buildAvatarUrl(doctor.id, 'md', doctor.avatarVersion),
+                        lg: this.buildAvatarUrl(doctor.id, 'lg', doctor.avatarVersion),
+                    }
+                    : null,
+                reviews,
+                reviewsCount: reviews.length,
+                averageRating,
+            },
         };
     }
 

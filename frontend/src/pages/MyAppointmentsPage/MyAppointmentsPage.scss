@@ -6,24 +6,33 @@
     gap: 18px;
   }
 
+  &__head {
+    display: grid;
+    gap: 8px;
+  }
+
   &__title {
     margin: 0;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 34px;
     font-weight: 700;
-    letter-spacing: 0.02em;
     color: #24324a;
   }
 
   &__subtitle,
   &__state,
-  &__doctor,
-  &__label {
+  &__grid span,
+  &__card-top p,
+  &__date-card small,
+  &__date-card strong,
+  &__review-chip small,
+  &__modal-card p,
+  &__modal-error {
     margin: 0;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
-    line-height: 1.5;
-    color: #7b8591;
+    line-height: 1.6;
+    color: #6b7280;
   }
 
   &__tabs {
@@ -40,17 +49,172 @@
     color: #24324a;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: box-shadow .18s ease, transform .18s ease, background .18s ease;
 
     &.is-active {
-      background: #79ddc8;
+      background: #84d8ce;
+    }
+  }
+
+  &__list {
+    display: grid;
+    gap: 18px;
+  }
+
+  &__card {
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 18px;
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #404040;
+
+    &.is-completed {
+      border-color: #b9c3cc;
     }
 
-    &:hover {
-      box-shadow: 4px 4px 0 #1e1e1e;
-      transform: translate(-1px, -1px);
+    &.is-muted {
+      opacity: 0.9;
+      background: #fbfbfb;
+    }
+  }
+
+  &__card--skeleton {
+    align-items: stretch;
+  }
+
+  &__date-wrap {
+    display: flex;
+  }
+
+  &__date-card {
+    width: 100%;
+    min-height: 126px;
+    border: 1px solid #84d8ce;
+    background: #eef8f6;
+    padding: 14px;
+    display: grid;
+    align-content: start;
+    gap: 8px;
+
+    span,
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      color: #24324a;
+    }
+
+    span {
+      font-size: 34px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    strong {
+      font-size: 16px;
+    }
+  }
+
+  &__card-body {
+    display: grid;
+    gap: 18px;
+  }
+
+  &__card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+
+    h2 {
+      margin: 0 0 8px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      color: #24324a;
+    }
+  }
+
+  &__badges {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  &__badge {
+    min-height: 36px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #84d8ce;
+    background: #eef8f6;
+    color: #1c6b57;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  &__badge--soft {
+    border-color: #d2dae1;
+    background: #ffffff;
+    color: #5f6f85;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+
+    div {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 16px;
+      color: #24324a;
+      word-break: break-word;
+    }
+  }
+
+  &__footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__action-btn {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid #404040;
+    background: #ffffff;
+    color: #24324a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  &__action-btn--primary {
+    background: #84d8ce;
+  }
+
+  &__review-chip {
+    min-height: 42px;
+    padding: 8px 12px;
+    border: 1px solid #d2dae1;
+    background: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+
+    span {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: #24324a;
     }
   }
 
@@ -60,192 +224,129 @@
     padding: 24px;
   }
 
-  &__list {
-    display: grid;
-    gap: 18px;
-  }
-
-  &__item {
-    border: 1px solid #404040;
-    background: #fff;
-    padding: 18px;
-    display: grid;
-    grid-template-columns: 120px minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
-  }
-
-  &__left {
-    min-width: 0;
-  }
-
-  &__date-card {
-    min-height: 140px;
-    border: 1px solid #d7dde3;
-    background: #e7fbf2;
-    display: grid;
-    align-content: center;
-    justify-items: center;
-    gap: 8px;
-    padding: 12px;
-    text-align: center;
-  }
-
-  &__date-day,
-  &__service,
-  &__value,
-  &__badge {
-    font-family: 'IBM Plex Mono', monospace;
-    color: #24324a;
-  }
-
-  &__date-day {
-    font-size: 36px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  &__date-month {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    color: #5f6d79;
-  }
-
-  &__date-time {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 16px;
-    font-weight: 700;
-    color: #24324a;
-  }
-
-  &__right {
+  &__skeleton-body {
     display: grid;
     gap: 14px;
-    min-width: 0;
+
+    span,
+    &::before {
+      background: linear-gradient(90deg, #eef2f6 0%, #f7f9fb 50%, #eef2f6 100%);
+      background-size: 200% 100%;
+      animation: my-appointments-skeleton 1.2s linear infinite;
+    }
+
+    span:nth-child(1) { height: 22px; width: 46%; }
+    span:nth-child(2) { height: 18px; width: 32%; }
+    span:nth-child(3) { height: 90px; width: 100%; }
   }
 
-  &__item-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-    flex-wrap: wrap;
+  &__modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
   }
 
-  &__item-head-main {
+  &__modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.42);
+  }
+
+  &__modal-card {
+    position: relative;
+    width: min(94vw, 520px);
+    margin: 10vh auto 0;
+    background: #f8f8f8;
+    border: 1.5px solid #111111;
+    box-shadow: 10px 10px 0 #111111;
+    padding: 22px;
     display: grid;
-    gap: 6px;
-    min-width: 0;
+    gap: 14px;
+
+    h3 {
+      margin: 0;
+      padding-right: 28px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 26px;
+      color: #24324a;
+    }
+
+    input {
+      min-height: 44px;
+      border: 1px solid #404040;
+      background: #ffffff;
+      padding: 0 14px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: #24324a;
+      outline: none;
+    }
   }
 
-  &__service {
-    margin: 0;
-    font-size: 26px;
-    font-weight: 700;
-    line-height: 1.2;
-    word-break: break-word;
+  &__modal-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #d2dae1;
+    background: #ffffff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    cursor: pointer;
   }
 
-  &__doctor {
-    font-size: 14px;
+  &__modal-error {
+    color: #b42318;
   }
 
-  &__badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: flex-end;
-  }
-
-  &__badge {
-    min-height: 34px;
-    padding: 0 12px;
+  &__modal-submit {
+    min-height: 44px;
     border: 1px solid #404040;
+    background: #84d8ce;
+    color: #24324a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: #fff;
-
-    &.is-booked {
-      background: #e7fbf2;
-    }
-
-    &.is-completed {
-      background: #edf6f2;
-    }
-
-    &.is-cancelled {
-      background: #ffe6e6;
-      color: #8a1f1f;
-      border-color: #cf4d4d;
-    }
-
-    &--payment.is-paid {
-      background: #dff9f1;
-    }
-
-    &--payment.is-pending {
-      background: #fff1bf;
-      color: #5b4800;
-      border-color: #d6b656;
-    }
-
-    &--payment.is-failed {
-      background: #ffe6e6;
-      color: #8a1f1f;
-      border-color: #cf4d4d;
-    }
+    gap: 10px;
+    cursor: pointer;
   }
 
-  &__grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+  &__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(17, 17, 17, 0.24);
+    border-top-color: #111111;
+    border-radius: 50%;
+    animation: my-appointments-spin 0.75s linear infinite;
   }
+}
 
-  &__field {
-    border: 1px solid #d7dde3;
-    background: #fff;
-    padding: 14px;
-    display: grid;
-    gap: 8px;
+@keyframes my-appointments-spin {
+  to { transform: rotate(360deg); }
+}
 
-    &--wide {
-      grid-column: 1 / -1;
-    }
-  }
-
-  &__label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  &__value {
-    font-size: 16px;
-    font-weight: 700;
-    word-break: break-word;
-  }
+@keyframes my-appointments-skeleton {
+  to { background-position: -200% 0; }
 }
 
 @media (max-width: 900px) {
   .my-appointments-page {
-    &__item {
+    &__card {
       grid-template-columns: 1fr;
     }
 
     &__date-card {
-      min-height: 100px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      min-height: 96px;
+      grid-template-columns: 1fr 1fr 1fr;
       align-items: center;
     }
 
-    &__date-day {
-      font-size: 28px;
+    &__grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 }
@@ -253,40 +354,32 @@
 @media (max-width: 640px) {
   .my-appointments-page {
     &__title {
-      font-size: 28px;
+      font-size: 26px;
+    }
+
+    &__card-top {
+      display: grid;
+    }
+
+    &__badges,
+    &__footer,
+    &__tabs {
+      justify-content: stretch;
+    }
+
+    &__tab,
+    &__action-btn,
+    &__modal-submit {
+      width: 100%;
     }
 
     &__grid {
       grid-template-columns: 1fr;
     }
 
-    &__item {
-      padding: 14px;
-    }
-
-    &__service {
-      font-size: 22px;
-    }
-  }
-}
-
-@media (max-width: 320px) {
-  .my-appointments-page {
-    &__title {
-      font-size: 24px;
-    }
-
-    &__tab {
-      width: 100%;
-    }
-
-    &__badge {
-      width: 100%;
-    }
-
-    &__badges {
-      width: 100%;
-      justify-content: stretch;
+    &__date-card {
+      grid-template-columns: 1fr;
+      min-height: 120px;
     }
   }
 }

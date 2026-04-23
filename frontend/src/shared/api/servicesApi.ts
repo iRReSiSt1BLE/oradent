@@ -17,6 +17,11 @@ export type ServiceCategory = {
     updatedAt: string;
 };
 
+export type ServiceDoctor = {
+    id: string;
+    email: string;
+};
+
 export type ClinicService = {
     id: string;
     name: string;
@@ -29,6 +34,7 @@ export type ClinicService = {
     category: ServiceCategory | null;
     specialtyIds: string[];
     specialties: ServiceSpecialty[];
+    doctorIds: string[];
     requiredServiceIds: string[];
     prerequisiteServiceIds: string[];
     allowMultipleInCart: boolean;
@@ -113,10 +119,11 @@ export async function createService(
         description?: string;
         durationMinutes: number;
         sortOrder?: number;
-        priceUah: number;
-        categoryId: string;
+        priceUah?: number;
+        categoryId?: string;
         isActive?: boolean;
         specialtyIds?: string[];
+        doctorIds?: string[];
         requiredServiceIds?: string[];
         prerequisiteServiceIds?: string[];
         allowMultipleInCart?: boolean;
@@ -135,8 +142,8 @@ export async function createService(
                 description: payload.description,
                 durationMinutes: payload.durationMinutes,
                 sortOrder: payload.sortOrder,
-                priceUah: String(payload.priceUah),
-                categoryId: payload.categoryId,
+                priceUah: String(payload.priceUah ?? 0),
+                categoryId: payload.categoryId ?? '',
                 isActive: payload.isActive,
                 specialtyIds: payload.specialtyIds ?? [],
                 requiredServiceIds: payload.requiredServiceIds ?? [],
@@ -162,6 +169,7 @@ export async function updateService(
         categoryId?: string;
         isActive?: boolean;
         specialtyIds?: string[];
+        doctorIds?: string[];
         requiredServiceIds?: string[];
         prerequisiteServiceIds?: string[];
         allowMultipleInCart?: boolean;
@@ -223,5 +231,17 @@ export async function getPublicServiceById(serviceId: string) {
 export async function getActivePublicServices() {
     return http<{ ok: boolean; services: ClinicService[] }>('/services/public/active', {
         method: 'GET',
+    });
+}
+
+
+export async function getAllServices(token: string) {
+    return getAdminServices(token);
+}
+
+export async function getDoctorsOptions(token: string) {
+    return http<{ doctors: ServiceDoctor[] }>('/cabinets/doctors/options', {
+        method: 'GET',
+        token,
     });
 }

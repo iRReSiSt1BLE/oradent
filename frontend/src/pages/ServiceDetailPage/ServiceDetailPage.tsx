@@ -9,7 +9,6 @@ export default function ServiceDetailPage() {
     const { serviceId } = useParams();
 
     const [service, setService] = useState<ClinicService | null>(null);
-    const [pricingRate, setPricingRate] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -27,7 +26,6 @@ export default function ServiceDetailPage() {
             try {
                 const result = await getPublicServiceById(serviceId);
                 setService(result.service);
-                setPricingRate(result.pricing.usdBuyRate);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Не вдалося завантажити послугу');
             } finally {
@@ -73,17 +71,7 @@ export default function ServiceDetailPage() {
                                 <span>Ціна</span>
                                 <strong>{Math.round(service.priceUah)} грн</strong>
                             </div>
-                            <div className="service-detail-page__meta-item">
-                                <span>Еквівалент</span>
-                                <strong>${service.priceUsd.toFixed(2)}</strong>
-                            </div>
                         </div>
-
-                        {pricingRate !== null && (
-                            <p className="service-detail-page__pricing-note">
-                                Курс Monobank (buy): {pricingRate.toFixed(2)} грн за $1. Округлення ціни до 10 грн.
-                            </p>
-                        )}
 
                         <div className="service-detail-page__actions">
                             <Link className="service-detail-page__btn" to="/appointment">

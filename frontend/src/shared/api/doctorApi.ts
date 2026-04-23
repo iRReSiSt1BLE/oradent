@@ -73,6 +73,25 @@ export type PublicDoctorItem = {
         lg: string;
     } | null;
 };
+
+export type PublicDoctorReviewItem = {
+    appointmentId: string;
+    rating: number;
+    text: string;
+    anonymous: boolean;
+    authorName: string;
+    createdAt: string;
+};
+
+export type PublicDoctorDetailsResponse = {
+    ok: boolean;
+    doctor: PublicDoctorItem & {
+        reviews: PublicDoctorReviewItem[];
+        reviewsCount: number;
+        averageRating: number;
+    };
+};
+
 export async function getDoctorSpecialties(token: string | null) {
     return http<{ ok: boolean; specialties: DoctorSpecialtyItem[] }>('/doctors/specialties', {
         method: 'GET',
@@ -105,6 +124,12 @@ export async function deleteDoctorSpecialty(token: string, specialtyId: string) 
 
 export async function getPublicDoctors() {
     return http<{ ok: boolean; doctors: PublicDoctorItem[] }>('/doctors/public', {
+        method: 'GET',
+    });
+}
+
+export async function getPublicDoctorById(doctorId: string) {
+    return http<PublicDoctorDetailsResponse>(`/doctors/public/${doctorId}`, {
         method: 'GET',
     });
 }

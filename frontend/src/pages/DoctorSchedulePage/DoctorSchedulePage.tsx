@@ -123,7 +123,7 @@ export default function DoctorSchedulePage() {
     const localizedSpecialties = useMemo(() => {
         if (!doctor) return [];
         return (doctor.specialties || [])
-            .map((s) => pickDoctorSpecialtyByLanguage(s, language))
+            .map((s) => pickDoctorSpecialtyByLanguage(typeof s === 'string' ? s : s?.value, language))
             .filter(Boolean);
     }, [doctor, language]);
 

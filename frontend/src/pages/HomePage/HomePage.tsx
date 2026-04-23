@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { addServiceToCartWithRules, getCart } from '../../shared/utils/cartStorage.ts';
 import {
     getPublicDoctors,
@@ -12,6 +13,8 @@ import {
 } from '../../shared/api/servicesApi.ts';
 import { useI18n } from '../../shared/i18n/I18nProvider';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
+import ReviewModal from '../../shared/ui/ReviewModal/ReviewModal';
+import { getToken } from '../../shared/utils/authStorage';
 import './HomePage.scss';
 
 type CatalogCategory = ServiceCategory & { services: ClinicService[] };
@@ -71,6 +74,8 @@ function serviceHasRules(service: ClinicService) {
 
 export default function HomePage() {
     const { t, language } = useI18n();
+    const token = getToken();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const tx = (key: string, fallback: string) => {
         const value = t(key);
@@ -84,6 +89,7 @@ export default function HomePage() {
     const [alert, setAlert] = useState<AlertState>(null);
     const [pendingServiceId, setPendingServiceId] = useState<string | null>(null);
     const [hoveredServiceId, setHoveredServiceId] = useState<string | null>(null);
+    const [reviewAppointmentId, setReviewAppointmentId] = useState<string | null>(null);
 
     useEffect(() => {
         async function load() {
@@ -103,6 +109,27 @@ export default function HomePage() {
         }
         void load();
     }, [language]);
+
+    useEffect(() => {
+        const reviewId = searchParams.get('reviewAppointmentId');
+        if (!reviewId) return;
+
+        if (!token) {
+            setAlert({ variant: 'info', message: 'Щоб залишити відгук, увійдіть у свій акаунт.' });
+            return;
+        }
+
+        setReviewAppointmentId(reviewId);
+    }, [searchParams, token]);
+
+    const closeReviewFromHome = () => {
+        setReviewAppointmentId(null);
+        if (searchParams.get('reviewAppointmentId')) {
+            const next = new URLSearchParams(searchParams);
+            next.delete('reviewAppointmentId');
+            setSearchParams(next, { replace: true });
+        }
+    };
 
     const visibleDoctors = useMemo(() => doctors.slice(0, 8), [doctors]);
     const allServices = useMemo(() => categories.flatMap((category) => category.services || []), [categories]);
@@ -194,6 +221,18 @@ export default function HomePage() {
     return (
         <main className="home-page">
             {alert && <AlertToast variant={alert.variant} message={alert.message} onClose={() => setAlert(null)} />}
+            {token ? (
+                <ReviewModal
+                    open={Boolean(reviewAppointmentId)}
+                    token={token}
+                    appointmentId={reviewAppointmentId}
+                    onClose={closeReviewFromHome}
+                    onSubmitted={(_, message) => {
+                        setAlert({ variant: 'success', message });
+                        closeReviewFromHome();
+                    }}
+                />
+            ) : null}
 
             <section className="home-page__doctors container">
                 <div className="home-page__doctors-grid">
@@ -207,10 +246,12 @@ export default function HomePage() {
                         const infoBlock = parseDbI18nValue(doctor.infoBlockI18n || doctor.infoBlock, language);
                         return (
                             <article key={doctor.id} className="home-page__doctor-card">
-                                <div className="home-page__doctor-photo-wrap">
-                                    {imageUrl ? <img className="home-page__doctor-photo" src={imageUrl} alt={name} /> : <div className="home-page__doctor-photo home-page__doctor-photo--placeholder">X0</div>}
-                                </div>
-                                <h3 className="home-page__doctor-name">{name}</h3>
+                                <Link to={`/doctors/${doctor.id}`} className="home-page__doctor-photo-wrap home-page__doctor-photo-link">
+                                    {imageUrl ? <img className="home-page__doctor-photo" src={imageUrl} alt={name} /> : <div className="home-page__doctor-photo home-page__doctor-photo--placeholder">OR</div>}
+                                </Link>
+                                <h3 className="home-page__doctor-name">
+                                    <Link to={`/doctors/${doctor.id}`} className="home-page__doctor-link">{name}</Link>
+                                </h3>
                                 {specialtyText ? <p className="home-page__doctor-specialty">{specialtyText}</p> : null}
                                 {infoBlock ? <p className="home-page__doctor-description">{infoBlock}</p> : null}
                             </article>

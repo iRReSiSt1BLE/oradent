@@ -168,6 +168,18 @@ export class AppointmentService {
         return status === 'COMPLETED' || visitStatus === 'COMPLETED' || status === 'CANCELLED' || visitStatus === 'NO_SHOW' || time < Date.now();
     }
 
+    private isAppointmentReviewable(appointment: Appointment) {
+        const status = String(appointment.status || '').toUpperCase();
+        const visitStatus = String(appointment.visitFlowStatus || '').toUpperCase();
+        return status === 'COMPLETED' || visitStatus === 'COMPLETED';
+    }
+
+    private buildFrontendReviewLink(appointmentId: string) {
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const normalized = frontendUrl.replace(/\/$/, '');
+        return `${normalized}/?reviewAppointmentId=${encodeURIComponent(appointmentId)}`;
+    }
+
     private cabinetAllowsDoctor(cabinet: Cabinet, doctor: Doctor | null) {
         const assignments = cabinet.doctorAssignments || [];
         if (!assignments.length) return true;
@@ -752,6 +764,25 @@ export class AppointmentService {
         );
     }
 
+
+    private async buildAppointmentLineFromEntity(appointment: Appointment) {
+        if (!appointment.serviceId || !appointment.doctorId || !appointment.appointmentDate) {
+            return 'Запис на прийом';
+        }
+
+        const [line] = await this.buildAppointmentLines([
+            {
+                serviceId: appointment.serviceId,
+                doctorId: appointment.doctorId,
+                appointmentDate: new Date(appointment.appointmentDate).toISOString(),
+                cabinetId: appointment.cabinetId || null,
+                durationMinutes: appointment.durationMinutes || undefined,
+            },
+        ]);
+
+        return line || 'Запис на прийом';
+    }
+
     async createAuthenticatedAppointment(
         userId: string,
         dto: CreateAuthenticatedAppointmentDto,
@@ -946,6 +977,7 @@ export class AppointmentService {
                 recommendationItems,
                 medicationItems,
                 nextVisitDate,
+                reviewLink: this.buildFrontendReviewLink(appointment.id),
             });
         }
 
@@ -1052,6 +1084,65 @@ export class AppointmentService {
         };
     }
 
+
+    async submitAppointmentReview(
+        actor: JwtUser,
+        appointmentId: string,
+        payload: {
+            rating: number;
+            text?: string;
+            anonymous?: boolean;
+        },
+    ) {
+        if (actor.role !== UserRole.PATIENT) {
+            throw new ForbiddenException('Лише пацієнт може залишити відгук');
+        }
+
+        const appointment = await this.appointmentRepository.findOne({
+            where: { id: appointmentId },
+            relations: ['patient'],
+        });
+
+        if (!appointment) {
+            throw new NotFoundException('Запис не знайдено');
+        }
+
+        if (!actor.patientId || appointment.patient?.id !== actor.patientId) {
+            throw new ForbiddenException('Немає доступу до цього запису');
+        }
+
+        if (!this.isAppointmentReviewable(appointment)) {
+            throw new BadRequestException('Відгук можна залишити лише після завершеного прийому');
+        }
+
+        if (appointment.reviewCreatedAt || appointment.reviewRating !== null) {
+            throw new BadRequestException('Відгук для цього запису вже залишено');
+        }
+
+        const rating = Number(payload.rating || 0);
+        if (!Number.isFinite(rating) || rating < 0.5 || rating > 5 || Math.round(rating * 2) !== rating * 2) {
+            throw new BadRequestException('Оцінка має бути від 0.5 до 5 з кроком 0.5');
+        }
+
+        const reviewText = String(payload.text || '').trim();
+        if (reviewText.length > 2000) {
+            throw new BadRequestException('Текст відгуку занадто довгий');
+        }
+
+        appointment.reviewRating = rating;
+        appointment.reviewText = reviewText || null;
+        appointment.reviewAnonymous = Boolean(payload.anonymous);
+        appointment.reviewCreatedAt = new Date();
+
+        await this.appointmentRepository.save(appointment);
+
+        return {
+            ok: true,
+            message: 'Дякуємо, відгук збережено',
+            appointment: await this.findById(appointmentId),
+        };
+    }
+
     async getDoctorAppointmentById(userId: string, appointmentId: string) {
         const user = await this.userService.findById(userId);
 
@@ -1127,6 +1218,10 @@ export class AppointmentService {
             medicationItems: appointment.medicationItems || [],
             consultationEmail: appointment.consultationEmail || appointment.patient?.email || null,
             completedAt: appointment.completedAt,
+            reviewAnonymous: appointment.reviewAnonymous,
+            reviewRating: appointment.reviewRating != null ? Number(appointment.reviewRating) : null,
+            reviewText: appointment.reviewText,
+            reviewCreatedAt: appointment.reviewCreatedAt,
             createdAt: appointment.createdAt,
             updatedAt: appointment.updatedAt,
             paymentStatus: (appointment as any).paymentStatus ?? 'PENDING',
@@ -1203,6 +1298,10 @@ export class AppointmentService {
             medicationItems: appointment.medicationItems || [],
             consultationEmail: appointment.consultationEmail || appointment.patient?.email || null,
             completedAt: appointment.completedAt,
+            reviewAnonymous: appointment.reviewAnonymous,
+            reviewRating: appointment.reviewRating != null ? Number(appointment.reviewRating) : null,
+            reviewText: appointment.reviewText,
+            reviewCreatedAt: appointment.reviewCreatedAt,
             doctorName: doctor ? this.getDoctorDisplayName(doctor) : null,
             serviceName: this.parseDbI18nValueBackend(service?.name, 'ua') || service?.name || null,
             cabinetName: cabinet ? this.parseDbI18nValueBackend(cabinet.name, 'ua') || cabinet.name : null,
@@ -1674,6 +1773,16 @@ export class AppointmentService {
                     source: item.source,
                     recordingCompleted: item.recordingCompleted,
                     recordingCompletedAt: item.recordingCompletedAt,
+                    consultationConclusion: item.consultationConclusion,
+                    treatmentPlanItems: item.treatmentPlanItems || [],
+                    recommendationItems: item.recommendationItems || [],
+                    medicationItems: item.medicationItems || [],
+                    consultationEmail: item.consultationEmail || item.patient?.email || null,
+                    completedAt: item.completedAt,
+                    reviewAnonymous: item.reviewAnonymous,
+                    reviewRating: item.reviewRating != null ? Number(item.reviewRating) : null,
+                    reviewText: item.reviewText,
+                    reviewCreatedAt: item.reviewCreatedAt,
                     createdAt: item.createdAt,
                     updatedAt: item.updatedAt,
                     paymentStatus: (item as any).paymentStatus ?? 'PENDING',
@@ -2898,6 +3007,10 @@ export class AppointmentService {
             medicationItems: appointment.medicationItems || [],
             consultationEmail: appointment.consultationEmail || appointment.patient?.email || null,
             completedAt: appointment.completedAt,
+            reviewAnonymous: appointment.reviewAnonymous,
+            reviewRating: appointment.reviewRating != null ? Number(appointment.reviewRating) : null,
+            reviewText: appointment.reviewText,
+            reviewCreatedAt: appointment.reviewCreatedAt,
             consultationPdfReady: Boolean(
                 appointment.consultationConclusion ||
                 (appointment.treatmentPlanItems || []).length ||
@@ -3129,6 +3242,15 @@ export class AppointmentService {
 
         appointment.visitFlowStatus = normalized;
         const saved = await this.appointmentRepository.save(appointment);
+
+        if (normalized === 'NO_SHOW' && appointment.patient?.email) {
+            const appointmentLine = await this.buildAppointmentLineFromEntity(saved);
+            await this.mailService.sendAppointmentNoShowEmail({
+                to: appointment.patient.email,
+                patientName: this.buildPatientDisplayName(appointment.patient),
+                appointmentLine,
+            });
+        }
 
         return {
             ok: true,
@@ -3374,6 +3496,16 @@ export class AppointmentService {
 
         await this.appointmentRepository.save(appointment);
 
+        if (appointment.patient?.email) {
+            const appointmentLine = await this.buildAppointmentLineFromEntity(appointment);
+            await this.mailService.sendAppointmentCancelledEmail({
+                to: appointment.patient.email,
+                patientName: this.buildPatientDisplayName(appointment.patient),
+                appointmentLine,
+                reason: appointment.cancelReason || undefined,
+            });
+        }
+
         return {
             ok: true,
             message: 'Запис успішно скасовано',
@@ -3413,6 +3545,8 @@ export class AppointmentService {
             })
             : null;
 
+        const previousLine = await this.buildAppointmentLineFromEntity(appointment);
+
         const resolvedStep = service
             ? await this.ensureScheduleAllowsBooking(
                 nextDoctorId,
@@ -3429,6 +3563,16 @@ export class AppointmentService {
         appointment.appointmentDate = nextDate;
 
         await this.appointmentRepository.save(appointment);
+
+        if (appointment.patient?.email) {
+            const nextLine = await this.buildAppointmentLineFromEntity(appointment);
+            await this.mailService.sendAppointmentRescheduledEmail({
+                to: appointment.patient.email,
+                patientName: this.buildPatientDisplayName(appointment.patient),
+                previousAppointmentLine: previousLine,
+                nextAppointmentLine: nextLine,
+            });
+        }
 
         return {
             ok: true,

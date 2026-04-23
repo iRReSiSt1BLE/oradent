@@ -1,0 +1,26 @@
+{
+  "name": "oradent-capture-agent",
+  "version": "0.6.0",
+  "description": "Local desktop capture agent for Oradent",
+  "main": "dist/main.js",
+  "author": "OpenAI",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.js",
+    "start": "npm run build && electron .",
+    "make": "npm run build && electron-forge make",
+    "package": "npm run build && electron-forge package"
+  },
+  "dependencies": {
+    "electron": "35.7.5",
+    "ws": "8.20.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.1",
+    "@electron-forge/maker-squirrel": "7.11.1",
+    "@electron-forge/maker-zip": "7.11.1",
+    "@types/node": "22.14.1",
+    "typescript": "5.8.3"
+  }
+}

@@ -17,6 +17,7 @@ import { ServicesModule } from './services/services.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { DoctorScheduleModule } from './doctor-schedule/doctor-schedule.module';
 import { CabinetModule } from './cabinet/cabinet.module';
+import { CaptureAgentModule } from './capture-agent/capture-agent.module';
 
 @Module({
     imports: [
@@ -35,6 +36,19 @@ import { CabinetModule } from './cabinet/cabinet.module';
                 database: configService.get<string>('DB_NAME'),
                 autoLoadEntities: true,
                 synchronize: true,
+                retryAttempts: 8,
+                retryDelay: 3000,
+                connectorPackage: 'mysql2',
+                extra: {
+                    waitForConnections: true,
+                    connectionLimit: 10,
+                    maxIdle: 10,
+                    idleTimeout: 60000,
+                    queueLimit: 0,
+                    enableKeepAlive: true,
+                    keepAliveInitialDelay: 0,
+                    connectTimeout: 10000,
+                },
             }),
         }),
         ScheduleModule.forRoot(),
@@ -53,6 +67,7 @@ import { CabinetModule } from './cabinet/cabinet.module';
         ServicesModule,
         DoctorScheduleModule,
         CabinetModule,
+        CaptureAgentModule,
     ],
     controllers: [],
     providers: [],

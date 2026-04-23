@@ -1,0 +1,171 @@
+.review-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+
+  &__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.42);
+  }
+
+  &__card {
+    position: relative;
+    width: min(96vw, 620px);
+    margin: 6vh auto 0;
+    background: #f8f8f8;
+    border: 1.5px solid #111111;
+    box-shadow: 10px 10px 0 #111111;
+    padding: 24px;
+    display: grid;
+    gap: 18px;
+  }
+
+  &__close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #cfd8df;
+    background: #ffffff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    cursor: pointer;
+  }
+
+  &__head h3 {
+    margin: 0 0 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 32px;
+    color: #24324a;
+  }
+
+  &__head p,
+  &__label,
+  &__checkbox span,
+  &__error {
+    margin: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #6b7280;
+  }
+
+  &__field {
+    display: grid;
+    gap: 10px;
+  }
+
+  &__rating-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+
+    strong {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 18px;
+      color: #24324a;
+    }
+  }
+
+  &__checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+
+    input {
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  textarea {
+    min-height: 140px;
+    resize: vertical;
+    border: 1px solid #404040;
+    background: #ffffff;
+    padding: 12px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: #24324a;
+    outline: none;
+  }
+
+  textarea:focus {
+    box-shadow: 4px 4px 0 #111111;
+  }
+
+  &__error {
+    color: #b42318;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__ghost,
+  &__primary {
+    min-height: 44px;
+    padding: 0 18px;
+    border: 1px solid #404040;
+    background: #ffffff;
+    color: #24324a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  &__primary {
+    background: #84d8ce;
+  }
+
+  &__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(17, 17, 17, 0.22);
+    border-top-color: #111111;
+    border-radius: 50%;
+    animation: review-modal-spin 0.75s linear infinite;
+  }
+}
+
+@keyframes review-modal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .review-modal {
+    &__card {
+      margin-top: 2vh;
+      padding: 18px;
+    }
+
+    &__head h3 {
+      font-size: 24px;
+      padding-right: 38px;
+    }
+
+    &__actions {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    &__ghost,
+    &__primary {
+      width: 100%;
+    }
+  }
+}

@@ -446,6 +446,134 @@ export class MailService {
     }
 
 
+
+    private buildEmailShell(title: string, bodyHtml: string) {
+        return `
+            <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
+                <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
+                    <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
+                        <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">ORADENT</div>
+                    </div>
+                    <div style="padding:28px 24px 24px;">
+                        <h1 style="margin:0 0 18px;text-align:center;font-size:28px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">${title}</h1>
+                        ${bodyHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    private async buildAppointmentNoticePdfBuffer(params: {
+        title: string;
+        patientName: string;
+        summary?: string;
+        appointmentLines: string[];
+        footerNote?: string;
+        extraRows?: Array<{ label: string; value: string }>;
+    }) {
+        const { title, patientName, summary, appointmentLines, footerNote, extraRows = [] } = params;
+        const fontPath = this.resolvePdfFontPath();
+
+        return await new Promise<Buffer>((resolve, reject) => {
+            const doc = new PDFDocument({
+                size: 'A4',
+                margin: 42,
+                info: {
+                    Title: `${title} ORADENT`,
+                    Author: 'ORADENT',
+                    Subject: title,
+                },
+            });
+
+            const chunks: Buffer[] = [];
+            doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+            doc.on('end', () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            doc.font(fontPath);
+
+            const pageWidth = doc.page.width;
+            const left = 42;
+            const right = pageWidth - 42;
+            const width = right - left;
+            const colors = {
+                text: '#111827',
+                muted: '#4b5563',
+                line: '#9ca3af',
+            };
+
+            const drawHeader = () => {
+                doc.font(fontPath).fontSize(11).fillColor(colors.muted).text('ORADENT', left, 32, { width, align: 'right' });
+                doc.font(fontPath).fontSize(24).fillColor(colors.text).text(title, left, 72, { width, align: 'left' });
+                doc.moveTo(left, 108).lineTo(right, 108).lineWidth(1).stroke(colors.line);
+                doc.y = 126;
+            };
+
+            const ensureSpace = (requiredHeight: number) => {
+                if (doc.y + requiredHeight <= doc.page.height - 60) return;
+                doc.addPage();
+                drawHeader();
+            };
+
+            const drawInfoRow = (label: string, value: string) => {
+                ensureSpace(22);
+                doc.font(fontPath).fontSize(11).fillColor(colors.muted).text(label, left, doc.y, { continued: true });
+                doc.font(fontPath).fontSize(12).fillColor(colors.text).text(` ${value}`);
+                doc.moveDown(0.25);
+            };
+
+            const drawListSection = (sectionTitle: string, items: string[]) => {
+                const normalized = items.filter((item) => item.trim());
+                ensureSpace(34);
+                doc.moveDown(0.35);
+                doc.font(fontPath).fontSize(15).fillColor(colors.text).text(sectionTitle, left, doc.y, { width });
+                doc.moveDown(0.25);
+
+                if (!normalized.length) {
+                    doc.font(fontPath).fontSize(11).fillColor(colors.muted).text('Не вказано', left, doc.y, { width });
+                    doc.moveDown(0.6);
+                    return;
+                }
+
+                normalized.forEach((item, index) => {
+                    const itemText = `${index + 1}. ${item}`;
+                    const itemHeight = doc.heightOfString(itemText, { width, lineGap: 3 });
+                    ensureSpace(itemHeight + 8);
+                    doc.font(fontPath).fontSize(11).fillColor(colors.text).text(itemText, left, doc.y, { width, lineGap: 3 });
+                    doc.moveDown(0.2);
+                });
+
+                doc.moveDown(0.4);
+            };
+
+            drawHeader();
+            drawInfoRow('Пацієнт:', patientName);
+            extraRows.forEach((row) => drawInfoRow(row.label, row.value));
+
+            if (summary) {
+                ensureSpace(72);
+                doc.moveDown(0.4);
+                doc.font(fontPath).fontSize(15).fillColor(colors.text).text('Опис', left, doc.y, { width });
+                doc.moveDown(0.25);
+                doc.font(fontPath).fontSize(11).fillColor(colors.text).text(summary, left, doc.y, { width, lineGap: 4 });
+                doc.moveDown(0.7);
+            }
+
+            drawListSection('Деталі запису', appointmentLines);
+
+            if (footerNote) {
+                ensureSpace(40);
+                doc.font(fontPath).fontSize(11).fillColor(colors.muted).text(footerNote, left, doc.y, { width, lineGap: 3 });
+                doc.moveDown(0.6);
+            }
+
+            doc.moveTo(left, doc.y).lineTo(right, doc.y).lineWidth(1).stroke(colors.line);
+            doc.moveDown(0.7);
+            doc.font(fontPath).fontSize(11).fillColor(colors.muted).text('Документ сформовано автоматично в системі ORADENT.', left, doc.y, { width, align: 'left' });
+            doc.end();
+        });
+    }
+
     async sendPaidAppointmentConfirmation(params: {
         to: string;
         patientName: string;
@@ -467,68 +595,49 @@ export class MailService {
             receiptNumber ||
             `ORADENT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
 
-        const linesHtml = appointmentLines.length
-            ? appointmentLines
-                .map((line) => `<li style="margin:0 0 10px;">${this.escapeHtml(line)}</li>`)
-                .join('')
-            : '<li>Дані про послуги не вказані</li>';
-
-        const pdfBuffer = await this.buildReceiptPdf({
+        const pdfBuffer = await this.buildAppointmentNoticePdfBuffer({
+            title: 'ПІДТВЕРДЖЕННЯ ЗАПИСУ',
             patientName,
-            receiptNumber: resolvedReceiptNumber,
-            appointmentDate,
-            amountUah,
+            summary: 'Ваш запис успішно створено. Нижче наведено деталі візиту та параметри підтвердження.',
             appointmentLines,
+            footerNote: 'PDF-файл можна використовувати як підтвердження запису.',
+            extraRows: [
+                { label: 'Дата першого візиту:', value: this.formatDateTimeUa(appointmentDate) },
+                { label: 'Сума:', value: `${Number(amountUah || 0).toFixed(2).replace('.00', '')} грн` },
+                { label: 'Номер документа:', value: resolvedReceiptNumber },
+            ],
         });
+
+        const linesHtml = appointmentLines.length
+            ? appointmentLines.map((line) => `<li style="margin:0 0 10px;">${this.escapeHtml(line)}</li>`).join('')
+            : '<li>Дані про послуги не вказані</li>';
 
         await this.transporter.sendMail({
             from: this.configService.get('MAIL_FROM'),
             to,
             subject: 'ORADENT — підтвердження запису',
-            html: `
-            <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
-                <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
-                    <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
-                        <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">
-                            ORADENT
-                        </div>
+            html: this.buildEmailShell(
+                'ПІДТВЕРДЖЕННЯ ЗАПИСУ',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">До листа прикріплено PDF-файл з підтвердженням запису.</p>
+                    <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                        <div style="margin:0 0 10px;font-size:15px;font-weight:700;color:#111111;">Деталі запису:</div>
+                        <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.7;color:#111111;">${linesHtml}</ul>
                     </div>
-
-                    <div style="padding:28px 24px 24px;">
-                        <h1 style="margin:0 0 18px;text-align:center;font-size:30px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">
-                            ЗАПИС ПІДТВЕРДЖЕНО
-                        </h1>
-
-                        <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#111111;">
-                            Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.
-                        </p>
-
-                        <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
-                            <div style="margin:0 0 10px;font-size:15px;font-weight:700;color:#111111;">
-                                Обрані послуги, дата та лікарі:
-                            </div>
-
-                            <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.7;color:#111111;">
-                                ${linesHtml}
-                            </ul>
-                        </div>
-
-                        <p style="margin:0;font-size:14px;line-height:1.7;color:#6b7280;text-align:center;">
-                            PDF-квитанція прикріплена до цього листа.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        `,
+                    <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Дата першого візиту: ${this.escapeHtml(this.formatDateTimeUa(appointmentDate))} · Сума: ${this.escapeHtml(`${Number(amountUah || 0).toFixed(2).replace('.00', '')} грн`)}</p>
+                `,
+            ),
             attachments: [
                 {
-                    filename: `receipt-${resolvedReceiptNumber}.pdf`,
+                    filename: `appointment-confirmation-${resolvedReceiptNumber}.pdf`,
                     content: pdfBuffer,
                     contentType: 'application/pdf',
                 },
             ],
         });
     }
+
 
 
     private formatDateOnlyUa(value: Date | string | null | undefined) {
@@ -705,34 +814,164 @@ export class MailService {
     }) {
         const { to, patientName, appointmentLine } = params;
 
+        const pdfBuffer = await this.buildAppointmentNoticePdfBuffer({
+            title: 'ПІДТВЕРДЖЕННЯ ЗАПИСУ',
+            patientName,
+            summary: 'Лікар або адміністратор створив для вас запис без онлайн-оплати.',
+            appointmentLines: [appointmentLine],
+            footerNote: 'За деталями зверніться до клініки.',
+        });
+
         await this.transporter.sendMail({
             from: this.configService.get('MAIL_FROM'),
             to,
             subject: 'ORADENT — вас записано на прийом',
-            html: `
-                <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
-                    <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
-                        <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
-                            <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">ORADENT</div>
-                        </div>
-
-                        <div style="padding:28px 24px 24px;">
-                            <h1 style="margin:0 0 18px;text-align:center;font-size:28px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">ЗАПИС СТВОРЕНО</h1>
-
-                            <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
-
-                            <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
-                                <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Вас записано на прийом:</div>
-                                <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(appointmentLine)}</div>
-                            </div>
-
-                            <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Онлайн-оплата для цього запису не потрібна. За деталями зверніться до клініки.</p>
-                        </div>
+            html: this.buildEmailShell(
+                'ПІДТВЕРДЖЕННЯ ЗАПИСУ',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">Для вас створено новий запис на прийом. PDF-файл з деталями прикріплено до листа.</p>
+                    <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                        <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Деталі запису:</div>
+                        <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(appointmentLine)}</div>
                     </div>
-                </div>
-            `,
+                    <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Онлайн-оплата для цього запису не потрібна.</p>
+                `,
+            ),
+            attachments: [
+                {
+                    filename: 'appointment-confirmation.pdf',
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
         });
     }
+
+    async sendAppointmentCancelledEmail(params: {
+        to: string;
+        patientName: string;
+        appointmentLine: string;
+        reason?: string;
+    }) {
+        const { to, patientName, appointmentLine, reason } = params;
+        const pdfBuffer = await this.buildAppointmentNoticePdfBuffer({
+            title: 'СКАСУВАННЯ ЗАПИСУ',
+            patientName,
+            summary: reason ? `Запис було скасовано. Причина: ${reason}` : 'Запис було скасовано адміністрацією клініки.',
+            appointmentLines: [appointmentLine],
+            footerNote: 'За потреби зверніться до клініки для повторного запису.',
+        });
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — запис скасовано',
+            html: this.buildEmailShell(
+                'СКАСУВАННЯ ЗАПИСУ',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">Ваш запис було скасовано. PDF-файл з деталями прикріплено до листа.</p>
+                    <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                        <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Скасований запис:</div>
+                        <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(appointmentLine)}</div>
+                        ${reason ? `<div style="margin-top:10px;font-size:13px;line-height:1.7;color:#6b7280;">Причина: ${this.escapeHtml(reason)}</div>` : ''}
+                    </div>
+                `,
+            ),
+            attachments: [
+                {
+                    filename: 'appointment-cancelled.pdf',
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
+        });
+    }
+
+    async sendAppointmentRescheduledEmail(params: {
+        to: string;
+        patientName: string;
+        previousAppointmentLine: string;
+        nextAppointmentLine: string;
+    }) {
+        const { to, patientName, previousAppointmentLine, nextAppointmentLine } = params;
+        const pdfBuffer = await this.buildAppointmentNoticePdfBuffer({
+            title: 'ПЕРЕНЕСЕННЯ ЗАПИСУ',
+            patientName,
+            summary: 'Ваш запис було перенесено. Нові деталі наведено нижче.',
+            appointmentLines: [
+                `Було: ${previousAppointmentLine}`,
+                `Стало: ${nextAppointmentLine}`,
+            ],
+            footerNote: 'Будь ласка, перевірте нову дату та час візиту.',
+        });
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — запис перенесено',
+            html: this.buildEmailShell(
+                'ПЕРЕНЕСЕННЯ ЗАПИСУ',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                        <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Було:</div>
+                        <div style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(previousAppointmentLine)}</div>
+                        <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Стало:</div>
+                        <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(nextAppointmentLine)}</div>
+                    </div>
+                `,
+            ),
+            attachments: [
+                {
+                    filename: 'appointment-rescheduled.pdf',
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
+        });
+    }
+
+    async sendAppointmentNoShowEmail(params: {
+        to: string;
+        patientName: string;
+        appointmentLine: string;
+    }) {
+        const { to, patientName, appointmentLine } = params;
+        const pdfBuffer = await this.buildAppointmentNoticePdfBuffer({
+            title: 'ПРИЙОМ НЕ ВІДБУВСЯ',
+            patientName,
+            summary: 'Адміністратор позначив, що пацієнт не з’явився на прийом.',
+            appointmentLines: [appointmentLine],
+            footerNote: 'За потреби ви можете записатися повторно.',
+        });
+
+        await this.transporter.sendMail({
+            from: this.configService.get('MAIL_FROM'),
+            to,
+            subject: 'ORADENT — запис позначено як неявка',
+            html: this.buildEmailShell(
+                'ПРИЙОМ НЕ ВІДБУВСЯ',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">Запис було позначено як неявка</p>
+                    <div style="margin:0 0 18px;padding:18px;border:1.5px solid #111111;background:#ffffff;">
+                        <div style="margin:0 0 8px;font-size:15px;font-weight:700;color:#111111;">Деталі запису:</div>
+                        <div style="font-size:14px;line-height:1.7;color:#111111;">${this.escapeHtml(appointmentLine)}</div>
+                    </div>
+                `,
+            ),
+            attachments: [
+                {
+                    filename: 'appointment-no-show.pdf',
+                    content: pdfBuffer,
+                    contentType: 'application/pdf',
+                },
+            ],
+        });
+    }
+
 
     async sendConsultationConclusionEmail(params: {
         to: string;
@@ -744,6 +983,7 @@ export class MailService {
         recommendationItems: string[];
         medicationItems: string[];
         nextVisitDate?: Date | string | null;
+        reviewLink?: string;
     }) {
         const {
             to,
@@ -755,6 +995,7 @@ export class MailService {
             recommendationItems,
             medicationItems,
             nextVisitDate,
+            reviewLink,
         } = params;
 
         const pdfBuffer = await this.buildConsultationPdfBuffer({
@@ -772,23 +1013,19 @@ export class MailService {
             from: this.configService.get('MAIL_FROM'),
             to,
             subject: 'ORADENT — консультативний висновок',
-            html: `
-                <div style="margin:0;padding:32px 12px;background:#eceff1;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;">
-                    <div style="max-width:640px;margin:0 auto;background:#f8f8f8;border:1.5px solid #111111;border-radius:14px;box-shadow:8px 8px 0 #111111;overflow:hidden;">
-                        <div style="background:#84d8ce;padding:14px 20px;text-align:center;border-bottom:1.5px solid #111111;">
-                            <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;">ORADENT</div>
+            html: this.buildEmailShell(
+                'КОНСУЛЬТАТИВНИЙ ВИСНОВОК',
+                `
+                    <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
+                    <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">До листа прикріплено PDF-файл з висновком лікаря, планом лікування, рекомендаціями та призначеними ліками.</p>
+                    <p style="margin:0 0 18px;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Лікар: ${this.escapeHtml(doctorName)} · Дата візиту: ${this.escapeHtml(this.formatDateTimeUa(appointmentDate))}</p>
+                    ${reviewLink ? `
+                        <div style="text-align:center;margin-top:12px;">
+                            <a href="${this.escapeHtml(reviewLink)}" style="display:inline-block;padding:12px 18px;border:1.5px solid #111111;background:#84d8ce;color:#111111;text-decoration:none;font-size:13px;font-weight:700;text-transform:uppercase;">Залишити відгук</a>
                         </div>
-
-                        <div style="padding:28px 24px 24px;">
-                            <h1 style="margin:0 0 18px;text-align:center;font-size:28px;line-height:1.15;font-weight:700;color:#111111;text-transform:uppercase;">КОНСУЛЬТАТИВНИЙ ВИСНОВОК</h1>
-
-                            <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#111111;">Добрий день, <strong>${this.escapeHtml(patientName)}</strong>.</p>
-                            <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#111111;">До листа прикріплено PDF-файл з висновком лікаря, планом лікування, рекомендаціями та призначеними ліками.</p>
-                            <p style="margin:0;font-size:13px;line-height:1.7;color:#6b7280;text-align:center;">Лікар: ${this.escapeHtml(doctorName)} · Дата візиту: ${this.escapeHtml(this.formatDateTimeUa(appointmentDate))}</p>
-                        </div>
-                    </div>
-                </div>
-            `,
+                    ` : ''}
+                `,
+            ),
             attachments: [
                 {
                     filename: 'consultation-conclusion.pdf',
@@ -798,5 +1035,6 @@ export class MailService {
             ],
         });
     }
+
 
 }

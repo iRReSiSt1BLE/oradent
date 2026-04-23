@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3000';
+export const API_BASE_URL = 'http://localhost:3000';
 
 type RequestOptions = RequestInit & {
     token?: string | null;
@@ -11,11 +11,12 @@ export async function http<T>(
     const { token, headers, ...rest } = options;
 
     const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
-            headers: {
-        ...(rest.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...headers,
+        ...rest,
+        cache: 'no-store',
+        headers: {
+            ...(rest.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...headers,
         },
     });
 

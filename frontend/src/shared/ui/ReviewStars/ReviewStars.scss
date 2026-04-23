@@ -1,0 +1,52 @@
+.review-stars {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+
+  &__visual {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1;
+  }
+
+  &__star {
+    display: block;
+    flex: 0 0 auto;
+  }
+
+  &__controls {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+  }
+
+  &__segment {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  &.is-disabled &__segment {
+    cursor: not-allowed;
+  }
+
+  &--sm &__star {
+    width: 16px;
+    height: 16px;
+  }
+
+  &--md &__star {
+    width: 22px;
+    height: 22px;
+  }
+
+  &--lg &__star {
+    width: 30px;
+    height: 30px;
+  }
+}

@@ -287,6 +287,21 @@ export class AppointmentController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @Post(':id/review')
+    submitReview(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+        @Body()
+        body: {
+            rating: number;
+            text?: string;
+            anonymous?: boolean;
+        },
+    ) {
+        return this.appointmentService.submitAppointmentReview(req.user, id, body);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Post(':id/pay-google-pay-test')
     payMyAppointmentGooglePayTest(
         @Param('id') id: string,

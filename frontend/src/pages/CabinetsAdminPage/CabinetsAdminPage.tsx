@@ -4,18 +4,24 @@ import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     createCabinet,
     deleteCabinet,
+    deleteCabinetSetupSession,
     getCabinetDoctorsOptions,
     getCabinetServicesOptions,
+    getCabinetSetupSession,
     getCabinets,
+    initCabinetSetupSession,
+    requestCabinetPreview,
     toggleCabinetActive,
     updateCabinet,
     type CabinetDeviceStartMode,
     type CabinetDoctorOption,
     type CabinetItem,
     type CabinetServiceOption,
+    type CabinetSetupSession,
 } from '../../shared/api/cabinetApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import { useI18n } from '../../shared/i18n/I18nProvider';
+import { API_BASE_URL } from '../../shared/api/http';
 import './CabinetsAdminPage.scss';
 
 type AlertState = {
@@ -33,6 +39,7 @@ type BrowserMediaDevice = {
 
 type CabinetDeviceForm = {
     key: string;
+    sourcePairKey: string;
     name: string;
     cameraDeviceId: string;
     cameraLabel: string;
@@ -53,6 +60,83 @@ type CabinetFormState = {
 type AppLanguage = 'ua' | 'en' | 'de' | 'fr';
 type Localized = Record<AppLanguage, string>;
 type LocalizedFieldType = 'cabinetNameI18n' | 'cabinetDescriptionI18n' | 'cabinetDeviceNameI18n';
+
+type AgentPairOption = {
+    value: string;
+    pairKey: string;
+    displayName: string;
+    videoDeviceId: string;
+    videoLabel: string;
+    audioDeviceId: string;
+    audioLabel: string;
+    isAvailable: boolean;
+};
+
+function buildSetupWebSocketUrl(token: string, setupSessionId: string) {
+    const base = new URL(API_BASE_URL);
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${base.host}/cabinets/setup/ws?token=${encodeURIComponent(token)}&setupSessionId=${encodeURIComponent(setupSessionId)}`;
+}
+
+const PREVIEW_BINARY_MAGIC = 'OPF1';
+const previewBinaryMagicBytes = new TextEncoder().encode(PREVIEW_BINARY_MAGIC);
+const previewBinaryTextDecoder = new TextDecoder();
+
+type BinaryPreviewFramePacket = {
+    pairKey?: string;
+    mimeType?: string;
+    capturedAt?: string;
+    imageBytes: Uint8Array;
+};
+
+type PreviewSignalPayload = {
+    setupSessionId?: string;
+    pairKey?: string;
+    description?: RTCSessionDescriptionInit;
+    candidate?: RTCIceCandidateInit;
+    error?: string;
+};
+
+const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
+    iceServers: [
+        {
+            urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'],
+        },
+    ],
+};
+
+async function parseBinaryPreviewFramePacket(data: Blob | ArrayBuffer) {
+    const buffer = data instanceof ArrayBuffer ? data : await data.arrayBuffer();
+    const view = new Uint8Array(buffer);
+    const headerLength = previewBinaryMagicBytes.length + 4;
+
+    if (view.length <= headerLength) return null;
+
+    for (let i = 0; i < previewBinaryMagicBytes.length; i += 1) {
+        if (view[i] !== previewBinaryMagicBytes[i]) return null;
+    }
+
+    const metaLengthView = new DataView(buffer, previewBinaryMagicBytes.length, 4);
+    const metadataLength = metaLengthView.getUint32(0);
+    const metadataStart = headerLength;
+    const metadataEnd = metadataStart + metadataLength;
+
+    if (!metadataLength || metadataEnd > view.length) return null;
+
+    const metadataRaw = previewBinaryTextDecoder.decode(view.slice(metadataStart, metadataEnd));
+    const metadata = JSON.parse(metadataRaw) as Omit<BinaryPreviewFramePacket, 'imageBytes'>;
+    const imageBytes = view.slice(metadataEnd);
+
+    if (!imageBytes.length) return null;
+
+    return {
+        pairKey: metadata.pairKey,
+        mimeType: metadata.mimeType,
+        capturedAt: metadata.capturedAt,
+        imageBytes,
+    } satisfies BinaryPreviewFramePacket;
+}
+
 
 function getI18nVariants(raw: unknown): string[] {
     const values = new Set<string>();
@@ -260,6 +344,51 @@ function pluralizeUa(count: number, one: string, few: string, many: string) {
     return many;
 }
 
+
+const DRAFT_CABINET_PREFIX = '__DRAFT__CABINET__';
+
+const CABINET_CREATE_SETUP_DRAFT_KEY = 'oradent:cabinets:create-setup-draft';
+
+type PersistedCreateCabinetDraft = {
+    setupSessionId: string;
+    form: CabinetFormState;
+};
+
+function saveCreateCabinetDraft(draft: PersistedCreateCabinetDraft) {
+    try {
+        sessionStorage.setItem(CABINET_CREATE_SETUP_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+        // ignore storage errors
+    }
+}
+
+function loadCreateCabinetDraft(): PersistedCreateCabinetDraft | null {
+    try {
+        const raw = sessionStorage.getItem(CABINET_CREATE_SETUP_DRAFT_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as PersistedCreateCabinetDraft;
+        if (!parsed?.setupSessionId) return null;
+        return {
+            setupSessionId: parsed.setupSessionId,
+            form: parsed.form || createEmptyForm(),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function clearCreateCabinetDraft() {
+    try {
+        sessionStorage.removeItem(CABINET_CREATE_SETUP_DRAFT_KEY);
+    } catch {
+        // ignore storage errors
+    }
+}
+
+function isDraftCabinet(cabinet: Pick<CabinetItem, 'name'> | null | undefined) {
+    return Boolean(cabinet?.name?.startsWith(DRAFT_CABINET_PREFIX));
+}
+
 function formatCamerasCount(count: number, t: (key: string) => string) {
     return `${count} ${pluralizeUa(
         count,
@@ -271,19 +400,8 @@ function formatCamerasCount(count: number, t: (key: string) => string) {
 
 
 function uid() {
-    return Math.random().toString(36).slice(2, 11);
-}
 
-function emptyDevice(): CabinetDeviceForm {
-    return {
-        key: uid(),
-        name: '',
-        cameraDeviceId: '',
-        cameraLabel: '',
-        microphoneDeviceId: '',
-        microphoneLabel: '',
-        startMode: 'MANUAL',
-    };
+    return Math.random().toString(36).slice(2, 11);
 }
 
 function createEmptyForm(): CabinetFormState {
@@ -300,6 +418,7 @@ function createEmptyForm(): CabinetFormState {
 function normalizeComparableText(value: string) {
     return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
+
 
 function tryExtractDbI18nData(raw: string): Record<string, string> | null {
     if (!raw || typeof raw !== 'string') return null;
@@ -364,6 +483,28 @@ function doctorFullName(doctor: CabinetDoctorOption | null | undefined) {
         .trim();
 }
 
+function getAgentStatusLabel(status: string | null | undefined, t: (key: string) => string) {
+    return status === 'online' ? t('cabinetsAdmin.agentStatusOnline') : t('cabinetsAdmin.agentStatusOffline');
+}
+
+function getAgentPairOptions(cabinet: CabinetItem | null): AgentPairOption[] {
+    return (cabinet?.linkedAgent?.pairs || []).map((pair) => ({
+        value: `${pair.videoDeviceId}::${pair.audioDeviceId}`,
+        pairKey: pair.pairKey,
+        displayName: pair.displayName || pair.pairKey,
+        videoDeviceId: pair.videoDeviceId,
+        videoLabel: pair.videoLabel || pair.videoDeviceId,
+        audioDeviceId: pair.audioDeviceId,
+        audioLabel: pair.audioLabel || pair.audioDeviceId,
+        isAvailable: pair.isAvailable,
+    }));
+}
+
+function getDevicePairValue(device: Pick<CabinetDeviceForm, 'cameraDeviceId' | 'microphoneDeviceId'>) {
+    if (!device.cameraDeviceId || !device.microphoneDeviceId) return '';
+    return `${device.cameraDeviceId}::${device.microphoneDeviceId}`;
+}
+
 
 function mapCabinetToForm(cabinet: CabinetItem): CabinetFormState {
     return {
@@ -376,6 +517,12 @@ function mapCabinetToForm(cabinet: CabinetItem): CabinetFormState {
             cabinet.devices.length > 0
                 ? cabinet.devices.map((item) => ({
                       key: item.id,
+                      sourcePairKey:
+                          cabinet.linkedAgent?.pairs.find(
+                              (pair) =>
+                                  pair.videoDeviceId === (item.cameraDeviceId || '') &&
+                                  pair.audioDeviceId === (item.microphoneDeviceId || ''),
+                          )?.pairKey || '',
                       name: item.name || '',
                       cameraDeviceId: item.cameraDeviceId || '',
                       cameraLabel: item.cameraLabel || '',
@@ -439,8 +586,11 @@ export default function CabinetsAdminPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<ModalMode>('create');
     const [editingCabinetId, setEditingCabinetId] = useState<string | null>(null);
+    const [setupSession, setSetupSession] = useState<CabinetSetupSession | null>(null);
     const [form, setForm] = useState<CabinetFormState>(createEmptyForm());
     const [saving, setSaving] = useState(false);
+    const [draftBootstrapping, setDraftBootstrapping] = useState(false);
+    const [refreshingSetupSession, setRefreshingSetupSession] = useState(false);
     const [refreshingDevices, setRefreshingDevices] = useState(false);
     const [translatingTarget, setTranslatingTarget] = useState<string | null>(null);
     const [nameEditorLanguage, setNameEditorLanguage] = useState<AppLanguage>('ua');
@@ -455,20 +605,57 @@ export default function CabinetsAdminPage() {
 
     const blocked = role !== 'ADMIN' && role !== 'SUPER_ADMIN';
 
-    const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-    const cameraStreamRef = useRef<MediaStream | null>(null);
+    const cameraPreviewTimerRef = useRef<number | null>(null);
+    const cameraPreviewRequestIdRef = useRef(0);
+    const cameraPreviewImgRef = useRef<HTMLImageElement | null>(null);
+    const cameraPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+    const cameraPreviewPlaceholderRef = useRef<HTMLDivElement | null>(null);
+    const cameraPreviewMetaRef = useRef<HTMLDivElement | null>(null);
+    const cameraPreviewObjectUrlRef = useRef<string | null>(null);
+    const cameraPreviewLiveStreamRef = useRef<MediaStream | null>(null);
+    const previewPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+    const previewWebRtcPairKeyRef = useRef<string | null>(null);
+    const previewWebRtcTimeoutRef = useRef<number | null>(null);
     const microphoneStreamRef = useRef<MediaStream | null>(null);
     const microphoneAudioContextRef = useRef<AudioContext | null>(null);
     const microphoneAnimationRef = useRef<number | null>(null);
+    const createSetupRestoreAttemptedRef = useRef(false);
+    const setupSocketRef = useRef<WebSocket | null>(null);
+    const previewPairKeyRef = useRef<string | null>(null);
 
     const selectedCabinet = useMemo(
         () => cabinets.find((item) => item.id === selectedCabinetId) || null,
         [cabinets, selectedCabinetId],
     );
 
+    const modalCabinet = useMemo(
+        () => (editingCabinetId ? cabinets.find((item) => item.id === editingCabinetId) || null : null),
+        [cabinets, editingCabinetId],
+    );
+
+    const modalConnectionCode = modalMode === 'create' ? setupSession?.connectionCode || '' : modalCabinet?.connectionCode || '';
+    const modalLinkedAgent = modalMode === 'create' ? setupSession?.linkedAgent || null : modalCabinet?.linkedAgent || null;
+    const modalAgentPairOptions = useMemo(() => {
+        if (modalMode === 'create') {
+            return (setupSession?.linkedAgent?.pairs || []).map((pair) => ({
+                value: `${pair.videoDeviceId}::${pair.audioDeviceId}`,
+                pairKey: pair.pairKey,
+                displayName: pair.displayName || pair.pairKey,
+                videoDeviceId: pair.videoDeviceId,
+                videoLabel: pair.videoLabel || pair.videoDeviceId,
+                audioDeviceId: pair.audioDeviceId,
+                audioLabel: pair.audioLabel || pair.audioDeviceId,
+                isAvailable: pair.isAvailable,
+            }));
+        }
+
+        return getAgentPairOptions(modalCabinet);
+    }, [modalCabinet, modalMode, setupSession]);
+
     const filteredCabinets = useMemo(() => {
         const query = normalizeComparableText(search);
         return cabinets.filter((cabinet) => {
+            if (isDraftCabinet(cabinet)) return false;
             if (onlyActive && !cabinet.isActive) return false;
             if (!query) return true;
             const text = normalizeComparableText([
@@ -476,6 +663,9 @@ export default function CabinetsAdminPage() {
                 parseDbI18nValue(cabinet.description, language) || '',
                 ...cabinet.services.map((item) => parseDbI18nValue(item.name, language)),
                 ...cabinet.doctorAssignments.map((item) => doctorFullName(item.doctor)),
+                cabinet.connectionCode,
+                cabinet.linkedAgent?.name || '',
+                cabinet.linkedAgent?.agentKey || '',
                 ...cabinet.devices.flatMap((item) => [parseDbI18nValue(item.name, language), item.cameraLabel || '', item.microphoneLabel || '']),
             ].join(' '));
             return text.includes(query);
@@ -507,6 +697,12 @@ const matchingDoctors = useMemo(() => {
         const active = Math.max(0, Math.min(count, Math.round(microphoneLevel * count)));
         return Array.from({ length: count }, (_, index) => index < active);
     }, [microphoneLevel]);
+
+    void refreshingDevices;
+    void deviceAccessGranted;
+    void videoInputs;
+    void audioInputs;
+    void microphoneBars;
 
     const nameEditorValue = useMemo(() => parseLocalizedEditorValue(form.name), [form.name]);
     const descriptionEditorValue = useMemo(() => parseLocalizedEditorValue(form.description), [form.description]);
@@ -605,6 +801,253 @@ const matchingDoctors = useMemo(() => {
         };
     }, [modalOpen]);
 
+
+    async function syncCurrentSetupSession(showError = false) {
+        if (!token || !setupSession?.id) return;
+
+        try {
+            setRefreshingSetupSession(true);
+            const response = await getCabinetSetupSession(token, setupSession.id);
+            setSetupSession(response.setupSession);
+        } catch (err: any) {
+            if (showError) {
+                setAlert({ variant: 'error', message: err?.message || 'Не вдалося оновити setup-сесію кабінету.' });
+            }
+        } finally {
+            setRefreshingSetupSession(false);
+        }
+    }
+
+    useEffect(() => {
+        if (!token || createSetupRestoreAttemptedRef.current) return;
+        createSetupRestoreAttemptedRef.current = true;
+
+        const storedDraft = loadCreateCabinetDraft();
+        if (!storedDraft?.setupSessionId) return;
+
+        setModalMode('create');
+        setEditingCabinetId(null);
+        setForm(storedDraft.form || createEmptyForm());
+        setNameEditorLanguage('ua');
+        setDescriptionEditorLanguage('ua');
+        setModalOpen(true);
+        setDraftBootstrapping(true);
+
+        void getCabinetSetupSession(token, storedDraft.setupSessionId)
+            .then((response) => {
+                setSetupSession(response.setupSession);
+            })
+            .catch(() => {
+                clearCreateCabinetDraft();
+                setModalOpen(false);
+                setSetupSession(null);
+                setForm(createEmptyForm());
+            })
+            .finally(() => {
+                setDraftBootstrapping(false);
+            });
+    }, [token]);
+
+    useEffect(() => {
+        if (!(modalOpen && modalMode === 'create' && setupSession?.id)) {
+            return;
+        }
+
+        saveCreateCabinetDraft({
+            setupSessionId: setupSession.id,
+            form,
+        });
+    }, [form, modalMode, modalOpen, setupSession?.id]);
+
+    useEffect(() => {
+        if (!(modalOpen && modalMode === 'create' && setupSession?.id)) {
+            return;
+        }
+
+        const handleVisibilityOrFocus = () => {
+            void syncCurrentSetupSession(false);
+        };
+
+        window.addEventListener('focus', handleVisibilityOrFocus);
+        document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+        return () => {
+            window.removeEventListener('focus', handleVisibilityOrFocus);
+            document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+        };
+    }, [modalMode, modalOpen, setupSession?.id, t, token]);
+
+    useEffect(() => {
+        if (!(modalOpen && modalMode === 'create' && token && setupSession?.id)) {
+            return;
+        }
+
+        let cancelled = false;
+        let socket: WebSocket | null = null;
+        let reconnectTimer: number | null = null;
+
+        const connect = () => {
+            try {
+                socket = new WebSocket(buildSetupWebSocketUrl(token, setupSession.id));
+                socket.binaryType = 'arraybuffer';
+                setupSocketRef.current = socket;
+            } catch {
+                reconnectTimer = window.setTimeout(connect, 2000);
+                return;
+            }
+
+            socket.onmessage = (event) => {
+                void (async () => {
+                    try {
+                        if (typeof event.data !== 'string') {
+                            const frame = await parseBinaryPreviewFramePacket(event.data as Blob | ArrayBuffer);
+                            if (frame?.pairKey && frame.pairKey === previewPairKeyRef.current) {
+                                showCameraPreviewFromBinary(frame);
+                            }
+                            return;
+                        }
+
+                        const message = JSON.parse(event.data) as { type?: string; payload?: Record<string, unknown> };
+                        if (message.type === 'setup.updated' || message.type === 'setup.connected') {
+                            void getCabinetSetupSession(token, setupSession.id)
+                                .then((response) => {
+                                    if (!cancelled) {
+                                        setSetupSession(response.setupSession);
+                                    }
+                                })
+                                .catch(() => undefined);
+                            return;
+                        }
+
+                        if (message.type === 'preview.frame') {
+                            const pairKey = typeof message.payload?.pairKey === 'string' ? message.payload.pairKey : '';
+                            const imageDataUrl = typeof message.payload?.imageDataUrl === 'string' ? message.payload.imageDataUrl : '';
+                            const capturedAt = typeof message.payload?.capturedAt === 'string' ? message.payload.capturedAt : new Date().toISOString();
+
+                            if (pairKey && imageDataUrl && pairKey === previewPairKeyRef.current) {
+                                showCameraPreviewFromUrl(imageDataUrl, capturedAt);
+                            }
+                            return;
+                        }
+
+                        if (message.type === 'preview.signal') {
+                            try {
+                                await handleSetupPreviewSignal(message.payload as PreviewSignalPayload);
+                            } catch (error: any) {
+                                if (!cancelled) {
+                                    setAlert({ variant: 'error', message: error?.message || t('cabinetsAdmin.cameraTestError') });
+                                    stopCameraTest();
+                                }
+                            }
+                            return;
+                        }
+
+                        if (message.type === 'preview.stopped') {
+                            closePreviewPeerConnection();
+                            return;
+                        }
+
+                        if (message.type === 'preview.error') {
+                            if (!cancelled) {
+                                setAlert({ variant: 'error', message: String(message.payload?.message || t('cabinetsAdmin.cameraTestError')) });
+                                stopCameraTest();
+                            }
+                        }
+                    } catch {
+                        // ignore malformed ws payloads
+                    }
+                })();
+            };
+
+            socket.onclose = () => {
+                if (setupSocketRef.current === socket) {
+                    setupSocketRef.current = null;
+                }
+                closePreviewPeerConnection();
+                if (cancelled) return;
+                reconnectTimer = window.setTimeout(connect, 2000);
+            };
+
+            socket.onerror = () => {
+                socket?.close();
+            };
+        };
+
+        connect();
+
+        return () => {
+            cancelled = true;
+            if (reconnectTimer) {
+                window.clearTimeout(reconnectTimer);
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            if (setupSocketRef.current === socket) {
+                setupSocketRef.current = null;
+            }
+            closePreviewPeerConnection();
+        };
+    }, [modalMode, modalOpen, setupSession?.id, token]);
+
+    useEffect(() => {
+        return () => {
+            previewPairKeyRef.current = null;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!modalOpen || !token) return;
+
+        let cancelled = false;
+
+        if (modalMode === 'create') {
+            if (!setupSession?.id) return;
+
+            const syncSetupSession = async () => {
+                try {
+                    const response = await getCabinetSetupSession(token, setupSession.id);
+                    if (cancelled) return;
+                    setSetupSession(response.setupSession);
+                } catch {
+                    // ignore setup polling errors
+                }
+            };
+
+            void syncCurrentSetupSession(false);
+            const intervalId = window.setInterval(() => {
+                void syncSetupSession();
+            }, 10000);
+
+            return () => {
+                cancelled = true;
+                window.clearInterval(intervalId);
+            };
+        }
+
+        if (!editingCabinetId) return;
+
+        const syncModalCabinet = async () => {
+            try {
+                const response = await getCabinets(token);
+                if (cancelled) return;
+                setCabinets(response.cabinets);
+            } catch {
+                // ignore modal polling errors
+            }
+        };
+
+        void syncModalCabinet();
+        const intervalId = window.setInterval(() => {
+            void syncModalCabinet();
+        }, 10000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+        };
+    }, [editingCabinetId, modalMode, modalOpen, setupSession?.id, token]);
+
     useEffect(() => {
         setForm((prev) => ({
             ...prev,
@@ -620,67 +1063,387 @@ const matchingDoctors = useMemo(() => {
         };
     }, []);
 
-    function openCreateModal() {
+    async function openCreateModal() {
+        if (!token) return;
+
         stopCameraTest();
         stopMicrophoneTest();
+        clearCreateCabinetDraft();
         setModalMode('create');
         setEditingCabinetId(null);
+        setSetupSession(null);
         setForm(createEmptyForm());
         setNameEditorLanguage('ua');
         setDescriptionEditorLanguage('ua');
-        setDeviceEditorLanguages({});
         setModalOpen(true);
-        void refreshBrowserDevices(!deviceAccessGranted);
+        setDraftBootstrapping(true);
+
+        try {
+            const response = await initCabinetSetupSession(token);
+            setSetupSession(response.setupSession);
+        } catch (err: any) {
+            setModalOpen(false);
+            setAlert({ variant: 'error', message: err?.message || t('cabinetsAdmin.saveError') });
+        } finally {
+            setDraftBootstrapping(false);
+        }
     }
 
     function openEditModal(cabinet: CabinetItem) {
         stopCameraTest();
         stopMicrophoneTest();
         setModalMode('edit');
+        setSetupSession(null);
         setEditingCabinetId(cabinet.id);
         const nextForm = mapCabinetToForm(cabinet);
         setForm(nextForm);
         setNameEditorLanguage('ua');
         setDescriptionEditorLanguage('ua');
-        setDeviceEditorLanguages(Object.fromEntries(nextForm.devices.map((item) => [item.key, 'ua'])));
         setModalOpen(true);
-        void refreshBrowserDevices(!deviceAccessGranted);
     }
 
-    function closeModal() {
+    async function closeModal(cleanupSetupSession = true) {
+        const setupSessionId = modalMode === 'create' ? setupSession?.id || null : null;
+
+        clearCreateCabinetDraft();
         stopCameraTest();
         stopMicrophoneTest();
         setModalOpen(false);
         setEditingCabinetId(null);
+        setSetupSession(null);
         setForm(createEmptyForm());
         setNameEditorLanguage('ua');
         setDescriptionEditorLanguage('ua');
         setDeviceEditorLanguages({});
+        setDraftBootstrapping(false);
+
+        if (cleanupSetupSession && token && setupSessionId) {
+            try {
+                await deleteCabinetSetupSession(token, setupSessionId);
+            } catch {
+                // ignore setup cleanup errors
+            }
+        }
+    }
+
+    function releaseCameraPreviewObjectUrl() {
+        if (cameraPreviewObjectUrlRef.current) {
+            URL.revokeObjectURL(cameraPreviewObjectUrlRef.current);
+            cameraPreviewObjectUrlRef.current = null;
+        }
+    }
+
+    function clearPreviewWebRtcTimeout() {
+        if (previewWebRtcTimeoutRef.current) {
+            window.clearTimeout(previewWebRtcTimeoutRef.current);
+            previewWebRtcTimeoutRef.current = null;
+        }
+    }
+
+    function closePreviewPeerConnection() {
+        clearPreviewWebRtcTimeout();
+
+        if (previewPeerConnectionRef.current) {
+            try {
+                previewPeerConnectionRef.current.ontrack = null;
+                previewPeerConnectionRef.current.onicecandidate = null;
+                previewPeerConnectionRef.current.onconnectionstatechange = null;
+                previewPeerConnectionRef.current.close();
+            } catch {
+                // ignore close errors
+            }
+            previewPeerConnectionRef.current = null;
+        }
+
+        if (cameraPreviewLiveStreamRef.current) {
+            cameraPreviewLiveStreamRef.current.getTracks().forEach((track) => track.stop());
+            cameraPreviewLiveStreamRef.current = null;
+        }
+
+        if (cameraPreviewVideoRef.current) {
+            cameraPreviewVideoRef.current.pause();
+            cameraPreviewVideoRef.current.srcObject = null;
+            cameraPreviewVideoRef.current.style.display = 'none';
+        }
+
+        previewWebRtcPairKeyRef.current = null;
+    }
+
+    function showLiveCameraPreview(stream: MediaStream, capturedAt?: string | null) {
+        releaseCameraPreviewObjectUrl();
+
+        if (cameraPreviewImgRef.current) {
+            cameraPreviewImgRef.current.removeAttribute('src');
+            cameraPreviewImgRef.current.style.display = 'none';
+        }
+
+        if (cameraPreviewVideoRef.current) {
+            cameraPreviewVideoRef.current.srcObject = stream;
+            cameraPreviewVideoRef.current.style.display = '';
+            void cameraPreviewVideoRef.current.play().catch(() => undefined);
+        }
+
+        if (cameraPreviewPlaceholderRef.current) {
+            cameraPreviewPlaceholderRef.current.style.display = 'none';
+        }
+
+        if (cameraPreviewMetaRef.current) {
+            const stamp = capturedAt || new Date().toISOString();
+            cameraPreviewMetaRef.current.textContent = `${t('cabinetsAdmin.previewUpdatedAt')}: ${new Date(stamp).toLocaleTimeString()}`;
+            cameraPreviewMetaRef.current.style.display = '';
+        }
+    }
+
+    async function handleSetupPreviewSignal(payload: PreviewSignalPayload) {
+        const pairKey = typeof payload.pairKey === 'string' ? payload.pairKey : '';
+        if (!pairKey || pairKey !== previewWebRtcPairKeyRef.current) {
+            return;
+        }
+
+        if (payload.error) {
+            throw new Error(payload.error);
+        }
+
+        const pc = previewPeerConnectionRef.current;
+        if (!pc) {
+            return;
+        }
+
+        if (payload.description) {
+            await pc.setRemoteDescription(payload.description);
+        }
+
+        if (payload.candidate) {
+            await pc.addIceCandidate(payload.candidate);
+        }
+    }
+
+    async function startSetupWebRtcPreview(pairKey: string) {
+        if (typeof RTCPeerConnection === 'undefined') {
+            throw new Error('WebRTC preview не підтримується у цьому браузері.');
+        }
+
+        const socket = setupSocketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            throw new Error(t('cabinetsAdmin.previewSocketUnavailable'));
+        }
+
+        closePreviewPeerConnection();
+        previewWebRtcPairKeyRef.current = pairKey;
+
+        const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+        previewPeerConnectionRef.current = pc;
+
+        pc.ontrack = (event) => {
+            clearPreviewWebRtcTimeout();
+            const stream = event.streams[0] || new MediaStream([event.track]);
+            cameraPreviewLiveStreamRef.current = stream;
+            showLiveCameraPreview(stream, new Date().toISOString());
+        };
+
+        pc.onicecandidate = (event) => {
+            if (!event.candidate || previewWebRtcPairKeyRef.current !== pairKey) {
+                return;
+            }
+
+            try {
+                sendSetupPreviewCommand('preview.signal', {
+                    pairKey,
+                    candidate: event.candidate.toJSON(),
+                });
+            } catch {
+                // ignore transient ICE send errors here
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+                closePreviewPeerConnection();
+            }
+        };
+
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: false });
+        await pc.setLocalDescription(offer);
+
+        sendSetupPreviewCommand('preview.signal', {
+            pairKey,
+            description: pc.localDescription
+                ? {
+                      type: pc.localDescription.type,
+                      sdp: pc.localDescription.sdp || undefined,
+                  }
+                : offer,
+        });
+
+        clearPreviewWebRtcTimeout();
+        previewWebRtcTimeoutRef.current = window.setTimeout(() => {
+            if (previewWebRtcPairKeyRef.current !== pairKey || cameraPreviewLiveStreamRef.current) {
+                return;
+            }
+
+            setAlert({ variant: 'error', message: 'WebRTC preview не підключився вчасно.' });
+            stopCameraTest();
+        }, 12000);
+    }
+
+    function clearCameraPreviewUi(placeholderText?: string) {
+        releaseCameraPreviewObjectUrl();
+        closePreviewPeerConnection();
+
+        if (cameraPreviewImgRef.current) {
+            cameraPreviewImgRef.current.removeAttribute('src');
+            cameraPreviewImgRef.current.style.display = 'none';
+        }
+
+        if (cameraPreviewPlaceholderRef.current) {
+            cameraPreviewPlaceholderRef.current.textContent = placeholderText || t('cabinetsAdmin.previewLoading');
+            cameraPreviewPlaceholderRef.current.style.display = '';
+        }
+
+        if (cameraPreviewMetaRef.current) {
+            cameraPreviewMetaRef.current.textContent = '';
+            cameraPreviewMetaRef.current.style.display = 'none';
+        }
+    }
+
+    function showCameraPreviewFromUrl(imageUrl: string, capturedAt?: string | null) {
+        if (!cameraPreviewImgRef.current) return;
+
+        if (cameraPreviewVideoRef.current) {
+            cameraPreviewVideoRef.current.pause();
+            cameraPreviewVideoRef.current.srcObject = null;
+            cameraPreviewVideoRef.current.style.display = 'none';
+        }
+
+        releaseCameraPreviewObjectUrl();
+        cameraPreviewImgRef.current.src = imageUrl;
+        cameraPreviewImgRef.current.style.display = '';
+
+        if (cameraPreviewPlaceholderRef.current) {
+            cameraPreviewPlaceholderRef.current.style.display = 'none';
+        }
+
+        if (cameraPreviewMetaRef.current) {
+            if (capturedAt) {
+                cameraPreviewMetaRef.current.textContent = `${t('cabinetsAdmin.previewUpdatedAt')}: ${new Date(capturedAt).toLocaleTimeString()}`;
+                cameraPreviewMetaRef.current.style.display = '';
+            } else {
+                cameraPreviewMetaRef.current.textContent = '';
+                cameraPreviewMetaRef.current.style.display = 'none';
+            }
+        }
+    }
+
+    function showCameraPreviewFromBinary(frame: BinaryPreviewFramePacket) {
+        const mimeType = frame.mimeType || 'image/webp';
+        if (cameraPreviewVideoRef.current) {
+            cameraPreviewVideoRef.current.pause();
+            cameraPreviewVideoRef.current.srcObject = null;
+            cameraPreviewVideoRef.current.style.display = 'none';
+        }
+        releaseCameraPreviewObjectUrl();
+        const normalizedImageBytes = new Uint8Array(frame.imageBytes.byteLength);
+        normalizedImageBytes.set(frame.imageBytes);
+        const objectUrl = URL.createObjectURL(new Blob([normalizedImageBytes.buffer], { type: mimeType }));
+        cameraPreviewObjectUrlRef.current = objectUrl;
+
+        if (cameraPreviewImgRef.current) {
+            cameraPreviewImgRef.current.src = objectUrl;
+            cameraPreviewImgRef.current.style.display = '';
+        }
+
+        if (cameraPreviewPlaceholderRef.current) {
+            cameraPreviewPlaceholderRef.current.style.display = 'none';
+        }
+
+        if (cameraPreviewMetaRef.current) {
+            if (frame.capturedAt) {
+                cameraPreviewMetaRef.current.textContent = `${t('cabinetsAdmin.previewUpdatedAt')}: ${new Date(frame.capturedAt).toLocaleTimeString()}`;
+                cameraPreviewMetaRef.current.style.display = '';
+            } else {
+                cameraPreviewMetaRef.current.textContent = '';
+                cameraPreviewMetaRef.current.style.display = 'none';
+            }
+        }
     }
 
     function toggleCabinetSelection(cabinetId: string) {
         setSelectedCabinetId((prev) => (prev === cabinetId ? null : cabinetId));
     }
 
-    function updateDevice(key: string, patch: Partial<CabinetDeviceForm>) {
+
+
+    async function copyConnectionCode(value: string) {
+        const prepared = value.trim();
+        if (!prepared) return;
+
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(prepared);
+        } else {
+            const input = document.createElement('textarea');
+            input.value = prepared;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            input.remove();
+        }
+
+        setAlert({ variant: 'success', message: t('cabinetsAdmin.codeCopied') });
+    }
+
+    function toggleAgentPair(pair: AgentPairOption) {
+        setForm((prev) => {
+            const existing = prev.devices.find(
+                (device) => device.sourcePairKey === pair.pairKey || getDevicePairValue(device) === pair.value,
+            );
+
+            if (existing) {
+                stopCameraTest(existing.key);
+                stopMicrophoneTest(existing.key);
+                setDeviceEditorLanguages((prevLanguages) => {
+                    const next = { ...prevLanguages };
+                    delete next[existing.key];
+                    return next;
+                });
+                return {
+                    ...prev,
+                    devices: prev.devices.filter((device) => device.key !== existing.key),
+                };
+            }
+
+            const nextKey = uid();
+            setDeviceEditorLanguages((prevLanguages) => ({ ...prevLanguages, [nextKey]: 'ua' }));
+
+            return {
+                ...prev,
+                devices: [
+                    ...prev.devices,
+                    {
+                        key: nextKey,
+                        sourcePairKey: pair.pairKey,
+                        name: '',
+                        cameraDeviceId: pair.videoDeviceId,
+                        cameraLabel: pair.videoLabel,
+                        microphoneDeviceId: pair.audioDeviceId,
+                        microphoneLabel: pair.audioLabel,
+                        startMode: 'MANUAL',
+                    },
+                ],
+            };
+        });
+    }
+
+    function updateDeviceStartMode(pairKey: string, startMode: CabinetDeviceStartMode) {
         setForm((prev) => ({
             ...prev,
-            devices: prev.devices.map((device) => (device.key === key ? { ...device, ...patch } : device)),
+            devices: prev.devices.map((device) =>
+                device.sourcePairKey === pairKey ? { ...device, startMode } : device,
+            ),
         }));
     }
 
-    function addDevice() {
-        setForm((prev) => ({ ...prev, devices: [...prev.devices, emptyDevice()] }));
-    }
-
-    function removeDevice(key: string) {
-        stopCameraTest(key);
-        stopMicrophoneTest(key);
-        setForm((prev) => ({
-            ...prev,
-            devices: prev.devices.filter((device) => device.key !== key),
-        }));
-    }
 
     function toggleInArray(list: string[], value: string) {
         return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -714,11 +1477,11 @@ const matchingDoctors = useMemo(() => {
         }));
     }
 
-    function updateDeviceNameTranslation(key: string, languageKey: AppLanguage, value: string) {
+    function updateDeviceNameTranslation(deviceKey: string, languageKey: AppLanguage, value: string) {
         setForm((prev) => ({
             ...prev,
             devices: prev.devices.map((device) =>
-                device.key === key
+                device.key === deviceKey
                     ? {
                           ...device,
                           name: updateLocalizedRawValue(device.name, languageKey, value, 'cabinetDeviceNameI18n'),
@@ -726,6 +1489,14 @@ const matchingDoctors = useMemo(() => {
                     : device,
             ),
         }));
+    }
+
+    function setDeviceEditorLanguage(deviceKey: string, languageKey: AppLanguage) {
+        setDeviceEditorLanguages((prev) => ({ ...prev, [deviceKey]: languageKey }));
+    }
+
+    function getDeviceEditorLanguage(deviceKey: string): AppLanguage {
+        return deviceEditorLanguages[deviceKey] || 'ua';
     }
 
     async function handleTranslateField(
@@ -771,38 +1542,86 @@ const matchingDoctors = useMemo(() => {
         }
     }
 
+    function sendSetupPreviewCommand(type: 'preview.start' | 'preview.stop' | 'preview.signal', payload: Record<string, unknown>) {
+        const socket = setupSocketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            throw new Error(t('cabinetsAdmin.previewSocketUnavailable'));
+        }
+
+        socket.send(JSON.stringify({ type, payload }));
+    }
+
+    async function loadAgentPreviewFrame(deviceKey: string) {
+        if (!token) {
+            return;
+        }
+
+        const device = form.devices.find((item) => item.key === deviceKey);
+        if (!device?.sourcePairKey) {
+            throw new Error(t('cabinetsAdmin.cameraTestError'));
+        }
+
+        const requestId = ++cameraPreviewRequestIdRef.current;
+        const response = await requestCabinetPreview(token, {
+            setupSessionId: modalMode === 'create' ? setupSession?.id : undefined,
+            cabinetId: modalMode === 'edit' ? editingCabinetId || undefined : undefined,
+            pairKey: device.sourcePairKey,
+        });
+
+        if (requestId !== cameraPreviewRequestIdRef.current) {
+            return;
+        }
+
+        showCameraPreviewFromUrl(response.preview.imageDataUrl, response.preview.capturedAt);
+    }
+
     async function startCameraTest(deviceKey: string) {
         const device = form.devices.find((item) => item.key === deviceKey);
-        if (!device?.cameraDeviceId || !navigator.mediaDevices?.getUserMedia) return;
+        if (!device?.sourcePairKey) {
+            setAlert({ variant: 'error', message: t('cabinetsAdmin.cameraTestError') });
+            return;
+        }
 
         try {
             stopCameraTest();
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: device.cameraDeviceId } },
-                audio: false,
-            });
-            cameraStreamRef.current = stream;
             setCameraTestingKey(deviceKey);
-            requestAnimationFrame(() => {
-                if (cameraVideoRef.current) {
-                    cameraVideoRef.current.srcObject = stream;
-                    void cameraVideoRef.current.play().catch(() => undefined);
-                }
-            });
+            clearCameraPreviewUi();
+            previewPairKeyRef.current = device.sourcePairKey;
+
+            if (modalMode === 'create' && setupSession?.id) {
+                await startSetupWebRtcPreview(device.sourcePairKey);
+                return;
+            }
+
+            await loadAgentPreviewFrame(deviceKey);
+            cameraPreviewTimerRef.current = window.setInterval(() => {
+                void loadAgentPreviewFrame(deviceKey).catch(() => undefined);
+            }, 1200);
         } catch (err: any) {
+            stopCameraTest();
             setAlert({ variant: 'error', message: err?.message || t('cabinetsAdmin.cameraTestError') });
         }
     }
 
     function stopCameraTest(targetKey?: string) {
         if (targetKey && cameraTestingKey !== targetKey) return;
-        cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-        cameraStreamRef.current = null;
-        if (cameraVideoRef.current) {
-            cameraVideoRef.current.pause();
-            cameraVideoRef.current.srcObject = null;
+        const pairKey = previewPairKeyRef.current;
+        if (modalMode === 'create' && setupSession?.id && pairKey) {
+            try {
+                sendSetupPreviewCommand('preview.stop', { pairKey });
+            } catch {
+                // ignore socket stop errors
+            }
         }
+        previewPairKeyRef.current = null;
+        closePreviewPeerConnection();
+        if (cameraPreviewTimerRef.current) {
+            window.clearInterval(cameraPreviewTimerRef.current);
+            cameraPreviewTimerRef.current = null;
+        }
+        cameraPreviewRequestIdRef.current += 1;
         setCameraTestingKey(null);
+        clearCameraPreviewUi();
     }
 
     async function startMicrophoneTest(deviceKey: string) {
@@ -837,6 +1656,9 @@ const matchingDoctors = useMemo(() => {
         }
     }
 
+    void refreshBrowserDevices;
+    void startMicrophoneTest;
+
     function stopMicrophoneTest(targetKey?: string) {
         if (targetKey && microphoneTestingKey !== targetKey) return;
         if (microphoneAnimationRef.current) {
@@ -867,24 +1689,26 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         return;
     }
 
+    if (form.devices.some((device) => !(getPrimaryLocalizedValue(device.name) || '').trim())) {
+        setAlert({ variant: 'info', message: t('cabinetsAdmin.deviceNameRequired') });
+        return;
+    }
+
     try {
         setSaving(true);
 
         const devices = form.devices
-            .map((device) => ({
-                name: device.name,
-                cameraDeviceId: device.cameraDeviceId || undefined,
-                cameraLabel:
-                    videoInputs.find((item) => item.deviceId === device.cameraDeviceId)?.label ||
-                    device.cameraLabel ||
-                    undefined,
-                microphoneDeviceId: device.microphoneDeviceId || undefined,
-                microphoneLabel:
-                    audioInputs.find((item) => item.deviceId === device.microphoneDeviceId)?.label ||
-                    device.microphoneLabel ||
-                    undefined,
-                startMode: device.startMode,
-            }))
+            .map((device) => {
+                const selectedPair = modalAgentPairOptions.find((item) => item.value === getDevicePairValue(device));
+                return {
+                    name: device.name,
+                    cameraDeviceId: device.cameraDeviceId || undefined,
+                    cameraLabel: selectedPair?.videoLabel || device.cameraLabel || undefined,
+                    microphoneDeviceId: device.microphoneDeviceId || undefined,
+                    microphoneLabel: selectedPair?.audioLabel || device.microphoneLabel || undefined,
+                    startMode: device.startMode,
+                };
+            })
             .filter((device) => getPrimaryLocalizedValue(device.name).trim() && (device.cameraDeviceId || device.microphoneDeviceId));
 
         const payload = {
@@ -897,18 +1721,26 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         };
 
         if (modalMode === 'create') {
-            const response = await createCabinet(token, payload);
-            const next = [response.cabinet, ...cabinets.filter((item) => item.id !== response.cabinet.id)];
-            setCabinets(next);
+            if (!setupSession?.id) {
+                throw new Error('Setup-сесію кабінету ще не підготовлено.');
+            }
+
+            const response = await createCabinet(token, {
+                ...payload,
+                setupSessionId: setupSession.id,
+            });
+            setCabinets((prev) => [response.cabinet, ...prev]);
             setSelectedCabinetId(response.cabinet.id);
-            setAlert({ variant: 'success', message: t('cabinetsAdmin.created') });
+            setAlert({ variant: 'success', message: `${t('cabinetsAdmin.created')} ${t('cabinetsAdmin.connectionCode')}: ${response.cabinet.connectionCode}` });
+            await closeModal(false);
+            return;
         } else if (editingCabinetId) {
             const response = await updateCabinet(token, editingCabinetId, payload);
             setCabinets((prev) => prev.map((item) => (item.id === editingCabinetId ? response.cabinet : item)));
             setSelectedCabinetId(response.cabinet.id);
             setAlert({ variant: 'success', message: t('cabinetsAdmin.updated') });
         }
-        closeModal();
+        await closeModal(false);
     } catch (err: any) {
         setAlert({ variant: 'error', message: err?.message || t('cabinetsAdmin.saveError') });
     } finally {
@@ -962,7 +1794,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
                                 <h1>{t('cabinetsAdmin.title')}</h1>
                                 <p>{t('cabinetsAdmin.subtitle')}</p>
                             </div>
-                            <button type="button" className="cabinets-admin-page__primary-btn" onClick={openCreateModal}>
+                            <button type="button" className="cabinets-admin-page__primary-btn" onClick={() => void openCreateModal()}>
                                 {t('cabinetsAdmin.newCabinet')}
                             </button>
                         </div>
@@ -1047,7 +1879,17 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
                                                     <strong>{parseDbI18nValue(cabinet.name, language) || getPrimaryLocalizedValue(cabinet.name) || cabinet.name}</strong>
                                                     <span className={`cabinets-admin-page__status-dot ${cabinet.isActive ? 'is-active' : 'is-inactive'}`} />
                                                 </div>
-                                                <div className="cabinets-admin-page__row-subtitle">{parseDbI18nValue(cabinet.description, language) || getPrimaryLocalizedValue(cabinet.description) || cabinet.description || t('cabinetsAdmin.noDescription')}</div>
+                                                <div className="cabinets-admin-page__row-subtitle">
+                                                    <div>{parseDbI18nValue(cabinet.description, language) || getPrimaryLocalizedValue(cabinet.description) || cabinet.description || t('cabinetsAdmin.noDescription')}</div>
+                                                    <div className="cabinets-admin-page__row-meta">
+                                                        <span>{t('cabinetsAdmin.connectionCode')}: {cabinet.connectionCode}</span>
+                                                        <span>
+                                                            {cabinet.linkedAgent
+                                                                ? `${t('cabinetsAdmin.linkedAgent')}: ${cabinet.linkedAgent.name} · ${getAgentStatusLabel(cabinet.linkedAgent.status, t)}`
+                                                                : t('cabinetsAdmin.agentNotConnected')}
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div className="cabinets-admin-page__row-side">
                                                 <span className="cabinets-admin-page__pill">{formatCamerasCount(camerasCount, t)}</span>
@@ -1064,14 +1906,14 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
             </div>
 
             {modalOpen ? (
-                <div className="cabinets-admin-page__modal-backdrop" onClick={closeModal}>
+                <div className="cabinets-admin-page__modal-backdrop">
                     <div className="cabinets-admin-page__modal" onClick={(event) => event.stopPropagation()}>
                         <div className="cabinets-admin-page__modal-header">
                             <div>
                                 <h2>{modalMode === 'create' ? t('cabinetsAdmin.createCabinet') : t('cabinetsAdmin.editCabinet')}</h2>
                                 <p>{t('cabinetsAdmin.modalHint')}</p>
                             </div>
-                            <button type="button" className="cabinets-admin-page__icon-btn cabinets-admin-page__icon-btn--close" onClick={closeModal} aria-label={t('cabinetsAdmin.close')}>
+                            <button type="button" className="cabinets-admin-page__icon-btn cabinets-admin-page__icon-btn--close" onClick={() => void closeModal()} aria-label={t('cabinetsAdmin.close')}>
                                 ×
                             </button>
                         </div>
@@ -1188,130 +2030,166 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
                                 </div>
                             </div>
 
+                            <div className="cabinets-admin-page__setup-info-grid">
+                                <div className="cabinets-admin-page__setup-info-card">
+                                    <div className="cabinets-admin-page__selector-head">
+                                        <div>
+                                            <h3>{t('cabinetsAdmin.connectionCode')}</h3>
+                                            <p>{t('cabinetsAdmin.connectionCodeHint')}</p>
+                                        </div>
+                                    </div>
+                                    <div className="cabinets-admin-page__connection-code-box">
+                                        <strong>{modalConnectionCode || '—'}</strong>
+                                        {modalConnectionCode ? (
+                                            <button type="button" className="cabinets-admin-page__ghost-btn" onClick={() => void copyConnectionCode(modalConnectionCode)}>
+                                                {t('cabinetsAdmin.copyCode')}
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                    <p className="cabinets-admin-page__setup-copy">
+                                        {draftBootstrapping
+                                            ? t('cabinetsAdmin.preparingConnectionCode')
+                                            : modalLinkedAgent
+                                              ? t('cabinetsAdmin.connectionCodeReady')
+                                              : modalConnectionCode
+                                                ? t('cabinetsAdmin.connectionCodeReady')
+                                                : t('cabinetsAdmin.connectionCodePending')}
+                                    </p>
+                                </div>
+
+                                <div className="cabinets-admin-page__setup-info-card">
+                                    <div className="cabinets-admin-page__selector-head">
+                                        <div>
+                                            <h3>{t('cabinetsAdmin.agentPairs')}</h3>
+                                            <p>{t('cabinetsAdmin.agentDevicesHint')}</p>
+                                        </div>
+                                        {modalMode === 'create' && setupSession?.id ? (
+                                            <button
+                                                type="button"
+                                                className="cabinets-admin-page__secondary-btn"
+                                                onClick={() => void syncCurrentSetupSession(true)}
+                                                disabled={refreshingSetupSession}
+                                            >
+                                                {refreshingSetupSession ? t('cabinetsAdmin.refreshingAgentStatus') : t('cabinetsAdmin.refreshAgentStatus')}
+                                            </button>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="cabinets-admin-page__agent-inline-status">
+                                        <div className="cabinets-admin-page__summary-value-row">
+                                            <strong>{modalAgentPairOptions.length}</strong>
+                                            <span className={`cabinets-admin-page__status-dot ${(modalLinkedAgent?.status || 'offline') === 'online' ? 'is-active' : 'is-inactive'}`} />
+                                        </div>
+                                        <span className="cabinets-admin-page__agent-inline-text">
+                                            {modalLinkedAgent
+                                                ? `${t('cabinetsAdmin.linkedAgent')}: ${modalLinkedAgent?.name || '—'} · ${getAgentStatusLabel(modalLinkedAgent?.status, t)}`
+                                                : t('cabinetsAdmin.agentNotConnected')}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
                             <div className="cabinets-admin-page__devices-section">
                                 <div className="cabinets-admin-page__devices-head">
                                     <div>
                                         <h3>{t('cabinetsAdmin.deviceConfig')}</h3>
-                                        <p>{t('cabinetsAdmin.devicesHint')}</p>
-                                    </div>
-                                    <div className="cabinets-admin-page__devices-head-actions">
-                                        <button type="button" className="cabinets-admin-page__secondary-btn cabinets-admin-page__secondary-btn--equal" onClick={() => void refreshBrowserDevices(true)} disabled={refreshingDevices}>
-                                            {refreshingDevices ? (
-                                                <span className="cabinets-admin-page__button-loading">
-                                                    <span className="cabinets-admin-page__button-spinner" />
-                                                    {t('cabinetsAdmin.refreshingDevices')}
-                                                </span>
-                                            ) : t('cabinetsAdmin.refreshOsDevices')}
-                                        </button>
-                                        <button type="button" className="cabinets-admin-page__secondary-btn cabinets-admin-page__secondary-btn--equal" onClick={addDevice}>
-                                            {t('cabinetsAdmin.addDevice')}
-                                        </button>
+                                        <p>{t('cabinetsAdmin.deviceConfigHint')}</p>
                                     </div>
                                 </div>
 
-                                <div className="cabinets-admin-page__devices-note">{deviceAccessGranted ? t('cabinetsAdmin.osDevicesReady') : t('cabinetsAdmin.osDevicesPermissionHint')}</div>
+                                {modalAgentPairOptions.length ? (
+                                    <div className="cabinets-admin-page__agent-pair-picker">
+                                        {modalAgentPairOptions.map((pair) => {
+                                            const selectedDevice = form.devices.find(
+                                                (device) => device.sourcePairKey === pair.pairKey || getDevicePairValue(device) === pair.value,
+                                            );
+                                            const checked = Boolean(selectedDevice);
+                                            const deviceEditorLanguage = selectedDevice ? getDeviceEditorLanguage(selectedDevice.key) : 'ua';
+                                            const deviceEditorValue = selectedDevice ? parseLocalizedEditorValue(selectedDevice.name) : normalizeLocalized({});
 
-                                {form.devices.length ? (
-                                    <div className="cabinets-admin-page__device-list">
-                                        {form.devices.map((device, index) => {
-                                            const isCameraTesting = cameraTestingKey === device.key;
-                                            const isMicrophoneTesting = microphoneTestingKey === device.key;
                                             return (
-                                                <div key={device.key} className="cabinets-admin-page__device-card">
-                                                    <div className="cabinets-admin-page__device-head">
-                                                        <div>
-                                                            <h4>{parseDbI18nValue(device.name, language) || getPrimaryLocalizedValue(device.name) || `${t('cabinetsAdmin.sourceTitle')} ${index + 1}`}</h4>
-                                                            <p>{device.startMode === 'AUTO_ON_VISIT_START' ? t('cabinetsAdmin.startMode.AUTO_ON_VISIT_START') : t('cabinetsAdmin.startMode.MANUAL')}</p>
+                                                <div key={pair.pairKey} className={`cabinets-admin-page__agent-pair-option ${checked ? 'is-selected' : ''}`}>
+                                                    <label className="cabinets-admin-page__agent-pair-check">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={() => toggleAgentPair(pair)}
+                                                        />
+                                                        <div className="cabinets-admin-page__agent-pair-text">
+                                                            <strong>{pair.videoLabel} + {pair.audioLabel}</strong>
+                                                            <span>
+                                                                {pair.isAvailable ? t('cabinetsAdmin.pairReady') : `${t('cabinetsAdmin.pairUnavailable')} · ${t('cabinetsAdmin.refreshAgentStatus')}`}
+                                                            </span>
                                                         </div>
-                                                        <button type="button" className="cabinets-admin-page__ghost-btn" onClick={() => removeDevice(device.key)}>
-                                                            {t('cabinetsAdmin.removeDevice')}
-                                                        </button>
-                                                    </div>
+                                                    </label>
 
-                                                    <div className="cabinets-admin-page__device-grid">
-                                                        <label className="cabinets-admin-page__field cabinets-admin-page__field--full">
-                                                            <span>{t('cabinetsAdmin.deviceName')}</span>
-                                                            <div className="cabinets-admin-page__translation-tools cabinets-admin-page__translation-tools--compact">
-                                                                <div className="cabinets-admin-page__translation-tabs">
-                                                                    {translationLanguages.map((item) => (
-                                                                        <button
-                                                                            key={`${device.key}-tab-${item.key}`}
-                                                                            type="button"
-                                                                            className={`cabinets-admin-page__translation-tab ${(deviceEditorLanguages[device.key] || 'ua') === item.key ? 'is-active' : ''}`}
-                                                                            onClick={() => setDeviceEditorLanguages((prev) => ({ ...prev, [device.key]: item.key }))}
-                                                                        >
-                                                                            {item.label}
-                                                                        </button>
-                                                                    ))}
+                                                    {checked && selectedDevice ? (
+                                                        <div className="cabinets-admin-page__agent-pair-config">
+                                                            <div className="cabinets-admin-page__pair-summary">
+                                                                <span>{selectedDevice.cameraLabel || pair.videoLabel || '—'}</span>
+                                                                <span>{selectedDevice.microphoneLabel || pair.audioLabel || '—'}</span>
+                                                            </div>
+
+                                                            <label className="cabinets-admin-page__field">
+                                                                <span>{t('cabinetsAdmin.deviceName')}</span>
+                                                                <div className="cabinets-admin-page__translation-tools">
+                                                                    <div className="cabinets-admin-page__translation-tabs">
+                                                                        {translationLanguages.map((item) => (
+                                                                            <button
+                                                                                key={`device-${selectedDevice.key}-${item.key}`}
+                                                                                type="button"
+                                                                                className={`cabinets-admin-page__translation-tab ${deviceEditorLanguage === item.key ? 'is-active' : ''}`}
+                                                                                onClick={() => setDeviceEditorLanguage(selectedDevice.key, item.key)}
+                                                                            >
+                                                                                {item.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="cabinets-admin-page__translation-btn"
+                                                                        onClick={() => void handleTranslateField(`device:${selectedDevice.key}`, selectedDevice.name, deviceEditorLanguage, 'cabinetDeviceNameI18n')}
+                                                                        disabled={translatingTarget === `device:${selectedDevice.key}`}
+                                                                    >
+                                                                        {translatingTarget === `device:${selectedDevice.key}` ? t('cabinetsAdmin.translating') : t('cabinetsAdmin.autoTranslate')}
+                                                                    </button>
                                                                 </div>
+                                                                <input
+                                                                    type="text"
+                                                                    value={deviceEditorValue[deviceEditorLanguage]}
+                                                                    onChange={(event) => updateDeviceNameTranslation(selectedDevice.key, deviceEditorLanguage, event.target.value)}
+                                                                    placeholder={t('cabinetsAdmin.deviceNamePlaceholder')}
+                                                                />
+                                                            </label>
+
+                                                            <label className="cabinets-admin-page__field cabinets-admin-page__field--compact">
+                                                                <span>{t('cabinetsAdmin.startModeLabel')}</span>
+                                                                <select
+                                                                    value={selectedDevice.startMode}
+                                                                    onChange={(event) => updateDeviceStartMode(pair.pairKey, event.target.value as CabinetDeviceStartMode)}
+                                                                >
+                                                                    <option value="AUTO_ON_VISIT_START">{t('cabinetsAdmin.startMode.AUTO_ON_VISIT_START')}</option>
+                                                                    <option value="MANUAL">{t('cabinetsAdmin.startMode.MANUAL')}</option>
+                                                                </select>
+                                                            </label>
+
+                                                            <div className="cabinets-admin-page__device-actions">
                                                                 <button
                                                                     type="button"
-                                                                    className="cabinets-admin-page__translation-btn"
-                                                                    onClick={() => void handleTranslateField(`device:${device.key}`, device.name, deviceEditorLanguages[device.key] || 'ua', 'cabinetDeviceNameI18n')}
-                                                                    disabled={translatingTarget === `device:${device.key}`}
+                                                                    className="cabinets-admin-page__secondary-btn"
+                                                                    onClick={() => void (cameraTestingKey === selectedDevice.key ? stopCameraTest(selectedDevice.key) : startCameraTest(selectedDevice.key))}
                                                                 >
-                                                                    {translatingTarget === `device:${device.key}` ? t('cabinetsAdmin.translating') : t('cabinetsAdmin.autoTranslate')}
+                                                                    {cameraTestingKey === selectedDevice.key ? t('cabinetsAdmin.stopCameraTest') : t('cabinetsAdmin.openPreview')}
                                                                 </button>
                                                             </div>
-                                                            <input
-                                                                type="text"
-                                                                value={parseLocalizedEditorValue(device.name)[deviceEditorLanguages[device.key] || 'ua']}
-                                                                onChange={(event) => updateDeviceNameTranslation(device.key, deviceEditorLanguages[device.key] || 'ua', event.target.value)}
-                                                                placeholder={t('cabinetsAdmin.deviceNamePlaceholder')}
-                                                            />
-                                                        </label>
-                                                        <label className="cabinets-admin-page__field">
-                                                            <span>{t('cabinetsAdmin.startModeLabel')}</span>
-                                                            <select value={device.startMode} onChange={(event) => updateDevice(device.key, { startMode: event.target.value as CabinetDeviceStartMode })}>
-                                                                <option value="AUTO_ON_VISIT_START">{t('cabinetsAdmin.startMode.AUTO_ON_VISIT_START')}</option>
-                                                                <option value="MANUAL">{t('cabinetsAdmin.startMode.MANUAL')}</option>
-                                                            </select>
-                                                        </label>
-                                                        <label className="cabinets-admin-page__field">
-                                                            <span>{t('cabinetsAdmin.cameraSourceLabel')}</span>
-                                                            <select value={device.cameraDeviceId} onChange={(event) => {
-                                                                const selected = videoInputs.find((item) => item.deviceId === event.target.value);
-                                                                updateDevice(device.key, { cameraDeviceId: event.target.value, cameraLabel: selected?.label || '' });
-                                                            }}>
-                                                                <option value="">{t('cabinetsAdmin.selectCameraSource')}</option>
-                                                                {videoInputs.map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label}</option>)}
-                                                            </select>
-                                                        </label>
-                                                        <label className="cabinets-admin-page__field">
-                                                            <span>{t('cabinetsAdmin.microphoneSourceLabel')}</span>
-                                                            <select value={device.microphoneDeviceId} onChange={(event) => {
-                                                                const selected = audioInputs.find((item) => item.deviceId === event.target.value);
-                                                                updateDevice(device.key, { microphoneDeviceId: event.target.value, microphoneLabel: selected?.label || '' });
-                                                            }}>
-                                                                <option value="">{t('cabinetsAdmin.withoutMicrophone')}</option>
-                                                                {audioInputs.map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label}</option>)}
-                                                            </select>
-                                                        </label>
-                                                    </div>
 
-                                                    <div className="cabinets-admin-page__device-actions">
-                                                        <button type="button" className="cabinets-admin-page__secondary-btn" onClick={() => (isCameraTesting ? stopCameraTest(device.key) : void startCameraTest(device.key))} disabled={!device.cameraDeviceId}>
-                                                            {isCameraTesting ? t('cabinetsAdmin.stopCameraTest') : t('cabinetsAdmin.testCamera')}
-                                                        </button>
-                                                        <button type="button" className="cabinets-admin-page__secondary-btn" onClick={() => (isMicrophoneTesting ? stopMicrophoneTest(device.key) : void startMicrophoneTest(device.key))} disabled={!device.microphoneDeviceId}>
-                                                            {isMicrophoneTesting ? t('cabinetsAdmin.stopMicrophoneTest') : t('cabinetsAdmin.testMicrophone')}
-                                                        </button>
-                                                    </div>
-
-                                                    {isCameraTesting ? (
-                                                        <div className="cabinets-admin-page__camera-preview">
-                                                            <video ref={cameraVideoRef} autoPlay playsInline muted />
-                                                        </div>
-                                                    ) : null}
-
-                                                    {isMicrophoneTesting ? (
-                                                        <div className="cabinets-admin-page__mic-monitor">
-                                                            <div className="cabinets-admin-page__mic-bars" aria-hidden="true">
-                                                                {microphoneBars.map((active, barIndex) => (
-                                                                    <span key={`${device.key}-bar-${barIndex}`} className={active ? 'is-active' : ''} />
-                                                                ))}
-                                                            </div>
-                                                            <div className="cabinets-admin-page__mic-text">{device.microphoneLabel || t('cabinetsAdmin.withoutMicrophone')}</div>
+                                                            {cameraTestingKey === selectedDevice.key ? (
+                                                                <div className="cabinets-admin-page__camera-preview">
+                                                                    <video ref={cameraPreviewVideoRef} autoPlay playsInline muted style={{ display: 'none' }} />
+                                                                    <img ref={cameraPreviewImgRef} alt={selectedDevice.cameraLabel || 'preview'} style={{ display: 'none' }} />
+                                                                    <div ref={cameraPreviewPlaceholderRef} className="cabinets-admin-page__camera-preview-empty">{t('cabinetsAdmin.previewLoading')}</div>
+                                                                    <div ref={cameraPreviewMetaRef} className="cabinets-admin-page__camera-preview-meta" style={{ display: 'none' }} />
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                     ) : null}
                                                 </div>
@@ -1319,12 +2197,17 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
                                         })}
                                     </div>
                                 ) : (
-                                    <div className="cabinets-admin-page__devices-empty">{t('cabinetsAdmin.devicesOptionalHint')}</div>
+                                    <div className="cabinets-admin-page__devices-empty">
+                                        {draftBootstrapping
+                                            ? t('cabinetsAdmin.preparingConnectionCode')
+                                            : modalLinkedAgent
+                                              ? t('cabinetsAdmin.waitingPairsFromAgent')
+                                              : t('cabinetsAdmin.noAgentPairs')}
+                                    </div>
                                 )}
                             </div>
-
                             <div className="cabinets-admin-page__form-actions">
-                                <button type="button" className="cabinets-admin-page__secondary-btn" onClick={closeModal}>{t('cabinetsAdmin.cancel')}</button>
+                                <button type="button" className="cabinets-admin-page__secondary-btn" onClick={() => void closeModal()}>{t('cabinetsAdmin.cancel')}</button>
                                 <button type="submit" className="cabinets-admin-page__primary-btn" disabled={saving}>{saving ? (<span className="cabinets-admin-page__button-loading"><span className="cabinets-admin-page__button-spinner" />{t('cabinetsAdmin.saving')}</span>) : t('cabinetsAdmin.save')}</button>
                             </div>
                         </form>

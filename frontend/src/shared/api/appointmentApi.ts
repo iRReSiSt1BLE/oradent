@@ -5,7 +5,7 @@ export type GuestAppointmentPayload = {
     firstName: string;
     middleName?: string;
     phone: string;
-    phoneVerificationSessionId: string;
+    phoneVerificationSessionId?: string;
     doctorId?: string;
     serviceId?: string;
     appointmentDate?: string;
@@ -59,6 +59,10 @@ export type AppointmentItem = {
     medicationItems?: string[];
     consultationEmail?: string | null;
     completedAt?: string | null;
+    reviewAnonymous?: boolean;
+    reviewRating?: number | null;
+    reviewText?: string | null;
+    reviewCreatedAt?: string | null;
     createdAt: string;
     updatedAt: string;
     paymentStatus?: 'PENDING' | 'PAID' | 'FAILED' | string | null;
@@ -199,7 +203,7 @@ export type CreateGuestSmartBookingPayload = {
     firstName: string;
     middleName?: string;
     phone: string;
-    phoneVerificationSessionId: string;
+    phoneVerificationSessionId?: string;
     steps: Array<{
         serviceId: string;
         doctorId: string;
@@ -220,7 +224,7 @@ export type CreateGuestPaidGooglePayTestBookingPayload = {
     firstName: string;
     middleName?: string;
     phone: string;
-    phoneVerificationSessionId: string;
+    phoneVerificationSessionId?: string;
     steps: Array<{
         serviceId: string;
         doctorId: string;
@@ -462,6 +466,23 @@ export async function createGuestPaidGooglePayTestBooking(
             body: JSON.stringify(payload),
         },
     );
+}
+
+
+export async function submitAppointmentReview(
+    token: string,
+    appointmentId: string,
+    payload: {
+        rating: number;
+        text?: string;
+        anonymous?: boolean;
+    },
+) {
+    return http<{ ok: boolean; message: string; appointment: AppointmentItem }>(`/appointment/${appointmentId}/review`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function getMyAppointments(token: string) {

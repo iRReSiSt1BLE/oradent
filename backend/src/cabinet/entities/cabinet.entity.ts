@@ -26,6 +26,12 @@ export class Cabinet {
     @Column({ type: 'boolean', default: true })
     isActive: boolean;
 
+    @Column({ type: 'varchar', length: 64, unique: true })
+    connectionCode: string;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    agentKey: string | null;
+
     @ManyToMany(() => ClinicServiceEntity, { eager: true })
     @JoinTable({
         name: 'cabinet_services',

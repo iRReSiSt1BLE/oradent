@@ -30,6 +30,24 @@
   width: 100%;
 }
 
+
+.home-page__doctor-photo-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.home-page__doctor-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.home-page__doctor-link:hover {
+  color: #0f766e;
+}
+
 .home-page__doctor-photo {
   width: 100%;
   aspect-ratio: 1 / 1;
