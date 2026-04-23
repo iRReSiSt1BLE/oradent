@@ -10,9 +10,10 @@ import { Appointment } from '../appointment/entities/appointment.entity';
 import { User } from '../user/entities/user.entity';
 import { Doctor } from '../doctor/entities/doctor.entity';
 import { VideoAccessGrant } from './entities/video-access-grant.entity';
+import { CaptureAgentModule } from '../capture-agent/capture-agent.module';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Video, Appointment, User, Doctor, VideoAccessGrant])],
+    imports: [TypeOrmModule.forFeature([Video, Appointment, User, Doctor, VideoAccessGrant]), CaptureAgentModule],
     controllers: [VideoController],
     providers: [
         VideoService,

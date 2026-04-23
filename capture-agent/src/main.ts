@@ -3,6 +3,7 @@ import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
 import { getConfig, saveConfig } from './services/config-store';
 import { enrollAgent, pingBackend } from './services/http-client';
 import socketClient, { DeviceSyncSnapshot, SocketStatusPayload } from './services/socket-client';
+import { enqueueRecordingUpload, flushRecordingQueue } from './services/recording-upload';
 import { AgentConfig } from './state/default-config';
 
 let mainWindow: BrowserWindow | null = null;
@@ -43,9 +44,16 @@ function createWindow(): void {
   void mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'));
 }
 
+let queueFlushTimer: NodeJS.Timeout | null = null;
+
 void app.whenReady().then(() => {
   setupMediaPermissions();
-  socketClient.onStatus = broadcastSocketStatus;
+  socketClient.onStatus = (payload) => {
+    broadcastSocketStatus(payload);
+    if (payload.type === 'connected') {
+      void flushRecordingQueue().catch(() => undefined);
+    }
+  };
   socketClient.onCommand = (payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send('agent:socket-command', payload);
@@ -65,6 +73,7 @@ void app.whenReady().then(() => {
       wsPath: enrolled.wsPath,
       heartbeatSeconds: enrolled.heartbeatSeconds,
       cabinetCode: enrolled.cabinetCode || config.cabinetCode,
+      transportKey: enrolled.transportKey || config.transportKey,
     });
 
     return { ok: true, config: nextConfig, enrolled };
@@ -93,17 +102,50 @@ void app.whenReady().then(() => {
   ipcMain.handle('agent:preview-frame', (_event, payload: Record<string, unknown>) => {
     return { ok: socketClient.sendPreviewFrame(payload || {}) };
   });
+  ipcMain.handle('agent:queue-recording-upload', async (_event, payload: Record<string, unknown>) => {
+    return enqueueRecordingUpload({
+      appointmentId: String(payload.appointmentId || ''),
+      cabinetDeviceId: typeof payload.cabinetDeviceId === 'string' ? payload.cabinetDeviceId : undefined,
+      pairKey: typeof payload.pairKey === 'string' ? payload.pairKey : undefined,
+      mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+      originalFileName: typeof payload.originalFileName === 'string' ? payload.originalFileName : undefined,
+      startedAt: typeof payload.startedAt === 'string' ? payload.startedAt : undefined,
+      endedAt: typeof payload.endedAt === 'string' ? payload.endedAt : undefined,
+      buffer: payload.buffer as ArrayBuffer,
+    });
+  });
+  ipcMain.handle('agent:flush-recording-queue', async () => {
+    return flushRecordingQueue();
+  });
+
+  if (queueFlushTimer) {
+    clearInterval(queueFlushTimer);
+  }
+  queueFlushTimer = setInterval(() => {
+    void flushRecordingQueue().catch(() => undefined);
+  }, 5000);
 
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      if (queueFlushTimer) {
+    clearInterval(queueFlushTimer);
+  }
+  queueFlushTimer = setInterval(() => {
+    void flushRecordingQueue().catch(() => undefined);
+  }, 5000);
+
+  createWindow();
     }
   });
 });
 
 app.on('window-all-closed', () => {
+  if (queueFlushTimer) {
+    clearInterval(queueFlushTimer);
+    queueFlushTimer = null;
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }

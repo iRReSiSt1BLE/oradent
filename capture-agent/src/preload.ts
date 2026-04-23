@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('agentApi', {
     ipcRenderer.invoke('agent:preview-signal', payload) as Promise<{ ok: boolean }>,
   sendPreviewFrame: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:preview-frame', payload) as Promise<{ ok: boolean }>,
+  queueRecordingUpload: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:queue-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>,
+  flushRecordingQueue: () =>
+    ipcRenderer.invoke('agent:flush-recording-queue') as Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>,
   onSocketStatus: (callback: (payload: SocketStatusPayload) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: SocketStatusPayload) => callback(payload);
     ipcRenderer.on('agent:socket-status', handler);

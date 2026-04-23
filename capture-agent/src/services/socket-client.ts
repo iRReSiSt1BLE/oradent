@@ -31,7 +31,9 @@ export type SocketCommandPayload =
   | { type: 'preview.request'; payload: Record<string, unknown> }
   | { type: 'preview.start'; payload: Record<string, unknown> }
   | { type: 'preview.stop'; payload: Record<string, unknown> }
-  | { type: 'preview.signal'; payload: Record<string, unknown> };
+  | { type: 'preview.signal'; payload: Record<string, unknown> }
+  | { type: 'recording.start'; payload: Record<string, unknown> }
+  | { type: 'recording.stop'; payload: Record<string, unknown> };
 
 const PREVIEW_BINARY_MAGIC = Buffer.from('OPF1');
 
@@ -215,6 +217,17 @@ class SocketClient {
 
         if (parsed.type === 'agent.preview.stop') {
           this.onCommand({ type: 'preview.stop', payload: parsed.payload || {} });
+          return;
+        }
+
+
+        if (parsed.type === 'agent.recording.start') {
+          this.onCommand({ type: 'recording.start', payload: parsed.payload || {} });
+          return;
+        }
+
+        if (parsed.type === 'agent.recording.stop') {
+          this.onCommand({ type: 'recording.stop', payload: parsed.payload || {} });
           return;
         }
 

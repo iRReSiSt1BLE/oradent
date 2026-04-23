@@ -16,6 +16,8 @@ declare global {
       sendPreviewResponse(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       sendPreviewSignal(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       sendPreviewFrame(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
+      queueRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      flushRecordingQueue(): Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>;
       onSocketStatus(callback: (payload: SocketStatusPayload) => void): () => void;
       onSocketCommand(callback: (payload: SocketCommandPayload) => void): () => void;
     };
@@ -60,6 +62,7 @@ type ContinuousPreviewState = {
   mimeType: string;
   timer: number | null;
   stream: MediaStream | null;
+  ownsStream: boolean;
   video: HTMLVideoElement | null;
   canvas: HTMLCanvasElement | null;
   context: CanvasRenderingContext2D | null;
@@ -80,6 +83,19 @@ type WebRtcPreviewState = {
   pairKey: string;
   pc: RTCPeerConnection;
   stream: MediaStream | null;
+};
+
+type AgentRecordingSession = {
+  recordingKey: string;
+  appointmentId: string;
+  cabinetDeviceId: string;
+  pair: PairView;
+  stream: MediaStream;
+  recorder: MediaRecorder;
+  chunks: BlobPart[];
+  startedAt: string;
+  mimeType: string;
+  originalFileName: string;
 };
 
 const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
@@ -154,6 +170,7 @@ let permissionState = {
 };
 let continuousPreviewState: ContinuousPreviewState | null = null;
 let webRtcPreviewState: WebRtcPreviewState | null = null;
+const activeRecordingSessions = new Map<string, AgentRecordingSession>();
 
 function toast(message: string, variant: ToastVariant = 'info'): void {
   const item = document.createElement('div');
@@ -461,6 +478,147 @@ function renderPairs(): void {
 }
 
 
+
+function buildRecordingKey(appointmentId: string, cabinetDeviceId: string): string {
+  return `${appointmentId}::${cabinetDeviceId}`;
+}
+
+function pickRecordingMimeType(): string {
+  const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  for (const mimeType of candidates) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mimeType)) {
+      return mimeType;
+    }
+  }
+  return 'video/webm';
+}
+
+function resolveRecordingPair(payload: Record<string, unknown>): PairView | null {
+  const cameraDeviceId = String(payload.cameraDeviceId || '').trim();
+  const microphoneDeviceId = String(payload.microphoneDeviceId || '').trim();
+  const requestedPairKey = String(payload.pairKey || '').trim();
+
+  const pairs = buildPairs();
+  if (requestedPairKey) {
+    const byKey = pairs.find((pair) => pair.pairKey === requestedPairKey);
+    if (byKey) return byKey;
+  }
+
+  if (cameraDeviceId || microphoneDeviceId) {
+    const byDevices = pairs.find((pair) => pair.videoDeviceId === cameraDeviceId && pair.audioDeviceId === microphoneDeviceId);
+    if (byDevices) return byDevices;
+  }
+
+  if (cameraDeviceId && microphoneDeviceId) {
+    return {
+      pairKey: requestedPairKey || `${cameraDeviceId}::${microphoneDeviceId}`,
+      displayName: String(payload.deviceName || makeDefaultPairName(cameraDeviceId, microphoneDeviceId)),
+      videoDeviceId: cameraDeviceId,
+      videoLabel: findDeviceLabel('videoinput', cameraDeviceId),
+      audioDeviceId: microphoneDeviceId,
+      audioLabel: findDeviceLabel('audioinput', microphoneDeviceId),
+    };
+  }
+
+  return null;
+}
+
+async function startAgentRecordingSession(payload: Record<string, unknown>): Promise<void> {
+  const appointmentId = String(payload.appointmentId || '').trim();
+  const cabinetDeviceId = String(payload.cabinetDeviceId || '').trim();
+  if (!appointmentId || !cabinetDeviceId) {
+    throw new Error('Невірна команда старту запису: відсутній appointmentId або cabinetDeviceId.');
+  }
+
+  const recordingKey = buildRecordingKey(appointmentId, cabinetDeviceId);
+  if (activeRecordingSessions.has(recordingKey)) {
+    return;
+  }
+
+  const pair = resolveRecordingPair(payload);
+  if (!pair) {
+    throw new Error('Не вдалося знайти або зібрати пару пристроїв для запису.');
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: buildVideoConstraints(pair.videoDeviceId, 'local'),
+    audio: pair.audioDeviceId ? { deviceId: { exact: pair.audioDeviceId } } : false,
+  });
+
+  const mimeType = pickRecordingMimeType();
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  const session: AgentRecordingSession = {
+    recordingKey,
+    appointmentId,
+    cabinetDeviceId,
+    pair,
+    stream,
+    recorder,
+    chunks: [],
+    startedAt: String(payload.startedAt || new Date().toISOString()),
+    mimeType: recorder.mimeType || mimeType || 'video/webm',
+    originalFileName: `appointment-${appointmentId}-${cabinetDeviceId}.webm`,
+  };
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      session.chunks.push(event.data);
+    }
+  };
+
+  recorder.onerror = () => {
+    toast(`Помилка локального запису для ${pair.displayName}.`, 'error');
+  };
+
+  recorder.onstop = async () => {
+    try {
+      const blob = new Blob(session.chunks, { type: session.mimeType || 'video/webm' });
+      const buffer = await blob.arrayBuffer();
+      await window.agentApi.queueRecordingUpload({
+        appointmentId: session.appointmentId,
+        cabinetDeviceId: session.cabinetDeviceId,
+        pairKey: session.pair.pairKey,
+        mimeType: session.mimeType || 'video/webm',
+        originalFileName: session.originalFileName,
+        startedAt: session.startedAt,
+        endedAt: new Date().toISOString(),
+        buffer,
+      });
+      setStatusLine(`Запис ${session.pair.displayName} збережено локально та поставлено в чергу на відправку.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не вдалося поставити запис у чергу.';
+      setStatusLine(message);
+      toast(message, 'error');
+    } finally {
+      stopMediaStream(session.stream);
+      activeRecordingSessions.delete(recordingKey);
+    }
+  };
+
+  activeRecordingSessions.set(recordingKey, session);
+  recorder.start(1000);
+  setStatusLine(`Іде запис: ${pair.displayName}`);
+  toast(`Почато локальний запис: ${pair.displayName}`, 'info');
+}
+
+async function stopAgentRecordingSession(payload: Record<string, unknown>): Promise<void> {
+  const appointmentId = String(payload.appointmentId || '').trim();
+  const cabinetDeviceId = String(payload.cabinetDeviceId || '').trim();
+  if (!appointmentId || !cabinetDeviceId) {
+    return;
+  }
+
+  const recordingKey = buildRecordingKey(appointmentId, cabinetDeviceId);
+  const session = activeRecordingSessions.get(recordingKey);
+  if (!session) {
+    return;
+  }
+
+  if (session.recorder.state !== 'inactive') {
+    session.recorder.stop();
+  }
+}
+
 function buildVideoConstraints(deviceId: string, profile: 'local' | 'remote' = 'local'): MediaTrackConstraints {
   return {
     deviceId: { exact: deviceId },
@@ -501,7 +659,9 @@ function disposeContinuousPreviewResources(state: ContinuousPreviewState | null)
     state.timer = null;
   }
 
-  stopMediaStream(state.stream);
+  if (state.ownsStream) {
+    stopMediaStream(state.stream);
+  }
   state.stream = null;
 
   if (state.video) {
@@ -612,12 +772,7 @@ async function encodePreviewFrameBinary(
   };
 }
 
-async function createBackgroundPreviewVideo(pair: PairView): Promise<{ stream: MediaStream; video: HTMLVideoElement }> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: buildVideoConstraints(pair.videoDeviceId, 'remote'),
-    audio: false,
-  });
-
+async function createVideoElementForStream(stream: MediaStream): Promise<HTMLVideoElement> {
   const video = document.createElement('video');
   video.autoplay = true;
   video.muted = true;
@@ -625,18 +780,44 @@ async function createBackgroundPreviewVideo(pair: PairView): Promise<{ stream: M
   video.srcObject = stream;
   await video.play().catch(() => undefined);
   await waitForVideoReady(video);
-
-  return { stream, video };
+  return video;
 }
 
-async function ensureContinuousPreviewVideo(pair: PairView): Promise<{ stream: MediaStream | null; video: HTMLVideoElement }> {
-  const currentActivePair = activePair();
-  if (previewStream && currentActivePair?.pairKey === pair.pairKey && previewVideo.readyState >= 2) {
-    return { stream: null, video: previewVideo };
+function findActiveRecordingSessionByPair(pair: PairView): AgentRecordingSession | null {
+  for (const session of activeRecordingSessions.values()) {
+    if (session.pair.pairKey === pair.pairKey) {
+      return session;
+    }
+    if (session.pair.videoDeviceId === pair.videoDeviceId && session.pair.audioDeviceId === pair.audioDeviceId) {
+      return session;
+    }
+  }
+  return null;
+}
+
+async function createBackgroundPreviewVideo(pair: PairView): Promise<{ stream: MediaStream; video: HTMLVideoElement; ownsStream: boolean }> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: buildVideoConstraints(pair.videoDeviceId, 'remote'),
+    audio: false,
+  });
+
+  const video = await createVideoElementForStream(stream);
+  return { stream, video, ownsStream: true };
+}
+
+async function ensureContinuousPreviewVideo(pair: PairView): Promise<{ stream: MediaStream | null; video: HTMLVideoElement; ownsStream: boolean }> {
+  const recordingSession = findActiveRecordingSessionByPair(pair);
+  if (recordingSession?.stream) {
+    const video = await createVideoElementForStream(recordingSession.stream);
+    return { stream: null, video, ownsStream: false };
   }
 
-  const prepared = await createBackgroundPreviewVideo(pair);
-  return prepared;
+  const currentActivePair = activePair();
+  if (previewStream && currentActivePair?.pairKey === pair.pairKey && previewVideo.readyState >= 2) {
+    return { stream: null, video: previewVideo, ownsStream: false };
+  }
+
+  return createBackgroundPreviewVideo(pair);
 }
 
 async function pumpContinuousPreviewFrame(state: ContinuousPreviewState): Promise<void> {
@@ -703,6 +884,7 @@ async function startContinuousPreview(pairKey: string, options?: { width?: numbe
     mimeType: normalizePreviewMimeType(options?.mimeType, 'image/webp'),
     timer: null,
     stream: prepared.stream,
+    ownsStream: prepared.ownsStream,
     video: prepared.video,
     canvas,
     context,
@@ -1334,11 +1516,17 @@ async function connectAgent(): Promise<void> {
   await ensureBackendReachable();
   await window.agentApi.disconnectSocket().catch(() => ({ ok: false }));
 
-  const enrollResult = await window.agentApi.enroll(buildSnapshot());
-  config = enrollResult.config;
-  syncUiWithConfig();
-  setStatusLine(`Агент прив’язано до ${config.cabinetCode || '—'}.`);
-  toast('Агент зареєстровано.', 'success');
+  const hasStoredEnrollment = Boolean(config.agentId && config.agentKey && config.agentToken);
+
+  if (!hasStoredEnrollment) {
+    const enrollResult = await window.agentApi.enroll(buildSnapshot());
+    config = enrollResult.config;
+    syncUiWithConfig();
+    setStatusLine(`Агент прив’язано до ${config.cabinetCode || '—'}.`);
+    toast('Агент зареєстровано.', 'success');
+  } else {
+    setStatusLine(`Повторне підключення агента до ${config.cabinetCode || '—'}.`);
+  }
 
   updateSocketBadge('Підключення…', 'connecting');
   await window.agentApi.connectSocket(buildSnapshot());
@@ -1551,6 +1739,24 @@ window.agentApi.onSocketCommand((message) => {
     void stopWebRtcPreview(
       buildPreviewSessionKey(String(payload.setupSessionId || ''), String(payload.pairKey || '')),
     );
+    return;
+  }
+
+  if (message?.type === 'recording.start') {
+    void startAgentRecordingSession(payload).catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : 'Не вдалося почати локальний запис.';
+      setStatusLine(errorMessage);
+      toast(errorMessage, 'error');
+    });
+    return;
+  }
+
+  if (message?.type === 'recording.stop') {
+    void stopAgentRecordingSession(payload).catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : 'Не вдалося зупинити локальний запис.';
+      setStatusLine(errorMessage);
+      toast(errorMessage, 'error');
+    });
   }
 });
 

@@ -507,6 +507,30 @@ export async function payMyAppointmentGooglePayTest(
     });
 }
 
+export async function startAppointmentAgentRecording(
+    token: string,
+    appointmentId: string,
+    payload?: { cabinetDeviceId?: string },
+) {
+    return http<{ ok: boolean; message: string; sentCount: number }>(`/appointment/${appointmentId}/agent-recording/start`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload || {}),
+    });
+}
+
+export async function stopAppointmentAgentRecording(
+    token: string,
+    appointmentId: string,
+    payload?: { cabinetDeviceId?: string },
+) {
+    return http<{ ok: boolean; message: string; sentCount: number }>(`/appointment/${appointmentId}/agent-recording/stop`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload || {}),
+    });
+}
+
 export async function completeDoctorAppointment(
     token: string,
     id: string,
@@ -701,4 +725,38 @@ export async function getConsultationPdfWithPassword(
     }
 
     return response.blob();
+}
+
+export type AppointmentAgentPreviewFrame = {
+    ok: boolean;
+    preview: {
+        pairKey: string;
+        imageDataUrl: string;
+        mimeType: string;
+        capturedAt: string;
+    } | null;
+};
+
+export async function startAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string }) {
+    return http<{ ok: boolean; pairKey: string; message?: string }>(`/capture-agent/appointment-preview/start`, {
+        method: 'POST',
+        token,
+        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId },
+    });
+}
+
+export async function stopAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string }) {
+    return http<{ ok: boolean; message?: string }>(`/capture-agent/appointment-preview/stop`, {
+        method: 'POST',
+        token,
+        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId },
+    });
+}
+
+export async function getAppointmentAgentPreviewFrame(token: string, appointmentId: string, cabinetDeviceId: string) {
+    const query = new URLSearchParams({ appointmentId, cabinetDeviceId }).toString();
+    return http<AppointmentAgentPreviewFrame>(`/capture-agent/appointment-preview/frame?${query}`, {
+        method: 'GET',
+        token,
+    });
 }

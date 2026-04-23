@@ -17,6 +17,7 @@ export type EnrollResponse = {
   accessToken: string;
   wsPath: string;
   heartbeatSeconds: number;
+  transportKey?: string;
 };
 
 function normalizeBackendUrl(value: string): string {
@@ -94,5 +95,19 @@ export async function enrollAgent(
       devices,
       devicePairs,
     }),
+  });
+}
+
+export async function getAgentTransportSecret(config: AgentConfig): Promise<{ transportKey: string }> {
+  const baseUrl = getValidatedBackendUrl(config);
+  if (!config.agentToken) {
+    throw new Error('Немає agent token для отримання transport key.');
+  }
+
+  return requestJson<{ transportKey: string }>(`${baseUrl}/capture-agent/transport-secret`, {
+    method: 'GET',
+    headers: {
+      'x-agent-token': config.agentToken,
+    },
   });
 }

@@ -3,6 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     completeDoctorAppointment,
+    startAppointmentAgentPreview,
+    getAppointmentAgentPreviewFrame,
+    startAppointmentAgentRecording,
+    stopAppointmentAgentPreview,
+    stopAppointmentAgentRecording,
     createDoctorFollowUpAppointment,
     getDoctorAppointmentById,
     getManualAvailabilityDay,
@@ -13,7 +18,6 @@ import {
     type ManualAvailabilityDayResponse,
     type ManualAvailabilityMonthDay,
 } from '../../shared/api/appointmentApi';
-import { uploadVideo } from '../../shared/api/videoApi';
 import { getPublicDoctors, type PublicDoctorItem } from '../../shared/api/doctorApi';
 import { getActivePublicServices, type ClinicService } from '../../shared/api/servicesApi';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
@@ -34,6 +38,11 @@ type RecorderSlotState = {
     uploading: boolean;
     showPreview: boolean;
     hasMedia: boolean;
+    previewActive: boolean;
+    previewLoading: boolean;
+    previewImageDataUrl: string | null;
+    previewCapturedAt: string | null;
+    previewError: string | null;
 };
 
 type AlertState = {
@@ -167,41 +176,6 @@ function doctorLabel(doctor: PublicDoctorItem) {
     return `${doctor.lastName || ''} ${doctor.firstName || ''}${doctor.middleName ? ` ${doctor.middleName}` : ''}`.replace(/\s+/g, ' ').trim();
 }
 
-function pickSupportedMimeType() {
-    const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-    for (const type of candidates) {
-        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) return type;
-    }
-    return '';
-}
-
-function resolveConfiguredDeviceId(configuredId: string | null | undefined, label: string | null | undefined, list: MediaDeviceOption[]) {
-    if (configuredId && list.some((item) => item.id === configuredId)) return configuredId;
-    if (label) {
-        const matched = list.find((item) => item.label === label);
-        if (matched) return matched.id;
-    }
-    return list[0]?.id || '';
-}
-
-function buildMediaConstraints(slot: RecorderSlotState): MediaStreamConstraints | null {
-    const hasVideo = Boolean(slot.videoDeviceId);
-    const hasAudio = Boolean(slot.audioDeviceId);
-    if (!hasVideo && !hasAudio) return null;
-
-    return {
-        video: hasVideo
-            ? {
-                  deviceId: { exact: slot.videoDeviceId },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                  frameRate: { ideal: 30, max: 30 },
-              }
-            : false,
-        audio: hasAudio ? { deviceId: { exact: slot.audioDeviceId } } : false,
-    };
-}
-
 function normalizeListText(value: string) {
     return value
         .split('\n')
@@ -250,12 +224,11 @@ export default function DoctorAppointmentDetailPage() {
     const [selectedTime, setSelectedTime] = useState('');
     const [selectedCabinetId, setSelectedCabinetId] = useState<string | null>(null);
 
-    const previewRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+    const previewRefs = useRef<Record<string, HTMLVideoElement | HTMLImageElement | null>>({});
     const streamsRef = useRef<Record<string, MediaStream | null>>({});
     const recordersRef = useRef<Record<string, MediaRecorder | null>>({});
-    const chunksRef = useRef<Record<string, BlobPart[]>>({});
-    const startedAtRef = useRef<Record<string, Date | null>>({});
-    const endedAtRef = useRef<Record<string, Date | null>>({});
+    const previewPollersRef = useRef<Record<string, number | null>>({});
+    const previewInFlightRef = useRef<Record<string, boolean>>({});
     const autoStartedRef = useRef<Set<string>>(new Set());
     const finishAfterUploadsRef = useRef(false);
 
@@ -299,30 +272,8 @@ export default function DoctorAppointmentDetailPage() {
     }, [id, isDoctor, token]);
 
     useEffect(() => {
-        async function bootstrapDevices() {
-            try {
-                const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                temp.getTracks().forEach((track) => track.stop());
-            } catch {}
-
-            try {
-                const list = await navigator.mediaDevices.enumerateDevices();
-                setVideoDevices(
-                    list
-                        .filter((item) => item.kind === 'videoinput')
-                        .map((item, index) => ({ id: item.deviceId, label: item.label || `Камера ${index + 1}` })),
-                );
-                setAudioDevices(
-                    list
-                        .filter((item) => item.kind === 'audioinput')
-                        .map((item, index) => ({ id: item.deviceId, label: item.label || `Мікрофон ${index + 1}` })),
-                );
-            } catch {
-                setAlert({ variant: 'error', message: 'Не вдалося отримати список камер і мікрофонів' });
-            }
-        }
-
-        void bootstrapDevices();
+        setVideoDevices([]);
+        setAudioDevices([]);
     }, []);
 
     useEffect(() => {
@@ -349,16 +300,18 @@ export default function DoctorAppointmentDetailPage() {
         const preparedSlots = cabinetDevices.map((device: AppointmentCabinetDevice) => ({
             id: device.id,
             name: device.name,
-            videoDeviceId: resolveConfiguredDeviceId(device.cameraDeviceId, device.cameraLabel, videoDevices),
-            audioDeviceId: resolveConfiguredDeviceId(device.microphoneDeviceId, device.microphoneLabel, audioDevices),
+            videoDeviceId: device.cameraDeviceId || '',
+            audioDeviceId: device.microphoneDeviceId || '',
             startMode: device.startMode || 'MANUAL',
             recording: false,
             uploading: false,
             showPreview: false,
-            hasMedia: Boolean(
-                resolveConfiguredDeviceId(device.cameraDeviceId, device.cameraLabel, videoDevices) ||
-                    resolveConfiguredDeviceId(device.microphoneDeviceId, device.microphoneLabel, audioDevices),
-            ),
+            hasMedia: Boolean(device.cameraDeviceId || device.microphoneDeviceId),
+            previewActive: false,
+            previewLoading: false,
+            previewImageDataUrl: null,
+            previewCapturedAt: null,
+            previewError: null,
         }));
 
         setSlots(preparedSlots);
@@ -388,6 +341,20 @@ export default function DoctorAppointmentDetailPage() {
 
     useEffect(() => {
         return () => {
+            Object.values(previewPollersRef.current).forEach((timerId) => {
+                if (typeof timerId === 'number') {
+                    window.clearInterval(timerId);
+                }
+            });
+            previewPollersRef.current = {};
+            previewInFlightRef.current = {};
+
+            if (appointment?.id && token) {
+                slots.forEach((slot) => {
+                    void stopAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slot.id }).catch(() => null);
+                });
+            }
+
             Object.values(recordersRef.current).forEach((recorder) => {
                 if (recorder && recorder.state !== 'inactive') recorder.stop();
             });
@@ -398,13 +365,6 @@ export default function DoctorAppointmentDetailPage() {
     }, []);
 
 
-    useEffect(() => {
-        slots.forEach((slot) => {
-            if (!slot.showPreview) return;
-            const stream = streamsRef.current[slot.id];
-            if (stream) attachStreamToPreview(slot.id, stream);
-        });
-    }, [slots, expandedSlots]);
 
     useEffect(() => {
         if (!finishAfterUploadsRef.current) return;
@@ -481,23 +441,106 @@ export default function DoctorAppointmentDetailPage() {
         setSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
 
-    function attachStreamToPreview(slotId: string, stream: MediaStream, attempt = 0) {
-        const videoEl = previewRefs.current[slotId];
-        if (!videoEl) {
-            if (attempt < 8) {
-                window.setTimeout(() => attachStreamToPreview(slotId, stream, attempt + 1), 60);
-            }
+    function clearPreviewPoller(slotId: string) {
+        const timerId = previewPollersRef.current[slotId];
+        if (typeof timerId === 'number') {
+            window.clearInterval(timerId);
+        }
+        delete previewPollersRef.current[slotId];
+        delete previewInFlightRef.current[slotId];
+    }
+
+    async function startSlotPreview(slotId: string) {
+        if (!appointment?.id || !token) return;
+
+        const slot = slots.find((item) => item.id === slotId);
+        if (!slot?.videoDeviceId) {
+            updateSlot(slotId, { previewActive: false, previewLoading: false, previewError: 'Для цього джерела не налаштовано камеру.' });
             return;
         }
-        videoEl.srcObject = stream;
-        videoEl.muted = true;
-        videoEl.autoplay = true;
-        videoEl.playsInline = true;
-        void videoEl.play().catch(() => null);
+
+        clearPreviewPoller(slotId);
+        updateSlot(slotId, {
+            showPreview: true,
+            previewActive: true,
+            previewLoading: true,
+            previewError: null,
+        });
+
+        try {
+            await startAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slotId });
+        } catch (error) {
+            updateSlot(slotId, {
+                previewActive: false,
+                previewLoading: false,
+                previewError: error instanceof Error ? error.message : 'Не вдалося запустити live-preview.',
+            });
+            return;
+        }
+
+        const poll = async () => {
+            if (previewInFlightRef.current[slotId]) {
+                return;
+            }
+
+            previewInFlightRef.current[slotId] = true;
+            try {
+                const frame = await getAppointmentAgentPreviewFrame(token, appointment.id, slotId);
+                if (frame.preview?.imageDataUrl) {
+                    updateSlot(slotId, {
+                        previewLoading: false,
+                        previewError: null,
+                        previewImageDataUrl: frame.preview.imageDataUrl,
+                        previewCapturedAt: frame.preview.capturedAt,
+                    });
+                }
+            } catch (error) {
+                updateSlot(slotId, {
+                    previewLoading: false,
+                    previewError: error instanceof Error ? error.message : 'Не вдалося отримати кадр preview.',
+                });
+            } finally {
+                previewInFlightRef.current[slotId] = false;
+            }
+        };
+
+        await poll();
+        previewPollersRef.current[slotId] = window.setInterval(() => {
+            void poll();
+        }, 250);
+    }
+
+    async function stopSlotPreview(slotId: string, options?: { clearFrame?: boolean }) {
+        clearPreviewPoller(slotId);
+
+        if (appointment?.id && token) {
+            await stopAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slotId }).catch(() => null);
+        }
+
+        updateSlot(slotId, {
+            previewActive: false,
+            previewLoading: false,
+            previewError: null,
+            showPreview: false,
+            ...(options?.clearFrame === false ? {} : { previewImageDataUrl: null, previewCapturedAt: null }),
+        });
     }
 
     function toggleSlotExpanded(slotId: string) {
-        setExpandedSlots((prev) => ({ ...prev, [slotId]: !prev[slotId] }));
+        const nextOpen = !Boolean(expandedSlots[slotId]);
+        setExpandedSlots((prev) => ({ ...prev, [slotId]: nextOpen }));
+
+        const slot = slots.find((item) => item.id === slotId);
+        if (!slot) return;
+
+        if (!nextOpen) {
+            void stopSlotPreview(slotId);
+            return;
+        }
+
+        if (slot.recording && slot.videoDeviceId) {
+            void startSlotPreview(slotId);
+        }
     }
 
     async function startRecording(slotId: string, options?: { auto?: boolean }) {
@@ -508,114 +551,61 @@ export default function DoctorAppointmentDetailPage() {
 
         const slot = slots.find((item) => item.id === slotId);
         if (!slot || slot.recording || slot.uploading) return;
-
-        try {
-            if (streamsRef.current[slotId]) {
-                streamsRef.current[slotId]?.getTracks().forEach((track) => track.stop());
-                streamsRef.current[slotId] = null;
-            }
-
-            const constraints = buildMediaConstraints(slot);
-            if (!constraints) {
-                if (!options?.auto) {
-                    setAlert({ variant: 'error', message: 'Для цього джерела не знайдено доступних пристроїв запису' });
-                }
-                return;
-            }
-
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            streamsRef.current[slotId] = stream;
-            chunksRef.current[slotId] = [];
-            startedAtRef.current[slotId] = new Date();
-            endedAtRef.current[slotId] = null;
-
-            setExpandedSlots((prev) => ({ ...prev, [slotId]: true }));
-            updateSlot(slotId, { recording: true, showPreview: true });
-            requestAnimationFrame(() => attachStreamToPreview(slotId, stream));
-
-            const mimeType = pickSupportedMimeType();
-            const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-
-            recorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
-                    if (!chunksRef.current[slotId]) chunksRef.current[slotId] = [];
-                    chunksRef.current[slotId].push(event.data);
-                }
-            };
-
-            recorder.onerror = () => {
-                updateSlot(slotId, { recording: false, showPreview: false });
-                setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
-                setAlert({ variant: 'error', message: 'Помилка запису відео. Спробуй іншу камеру або мікрофон.' });
-            };
-
-            recorder.onstop = async () => {
-                const blob = new Blob(chunksRef.current[slotId] || [], { type: mimeType || 'video/webm' });
-                endedAtRef.current[slotId] = new Date();
-
-                const streamToStop = streamsRef.current[slotId];
-                if (streamToStop) {
-                    streamToStop.getTracks().forEach((track) => track.stop());
-                    streamsRef.current[slotId] = null;
-                }
-
-                const videoEl = previewRefs.current[slotId];
-                if (videoEl) {
-                    videoEl.srcObject = null;
-                    videoEl.src = '';
-                }
-
-                updateSlot(slotId, { recording: false, showPreview: false });
-                setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
-
-                if (blob.size === 0) {
-                    setAlert({ variant: 'error', message: 'Отримано порожній файл запису. Спробуй ще раз.' });
-                    return;
-                }
-
-                await uploadSlotRecording(slotId, blob);
-            };
-
-            recordersRef.current[slotId] = recorder;
-            recorder.start(1000);
-            if (options?.auto) autoStartedRef.current.add(slotId);
-        } catch (err) {
-            updateSlot(slotId, { recording: false, showPreview: false });
-            setExpandedSlots((prev) => ({ ...prev, [slotId]: false }));
+        if (!slot.hasMedia) {
             if (!options?.auto) {
-                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис' });
+                setAlert({ variant: 'error', message: 'Для цього джерела не налаштовано пару камера + мікрофон на capture agent.' });
+            }
+            return;
+        }
+
+        updateSlot(slotId, { uploading: true });
+        try {
+            await startAppointmentAgentRecording(token, appointment.id, { cabinetDeviceId: slotId });
+            setExpandedSlots((prev) => ({ ...prev, [slotId]: true }));
+            updateSlot(slotId, {
+                recording: true,
+                uploading: false,
+                showPreview: true,
+                previewLoading: Boolean(slot.videoDeviceId),
+                previewError: null,
+                previewImageDataUrl: null,
+                previewCapturedAt: null,
+            });
+            if (slot.videoDeviceId) {
+                void startSlotPreview(slotId);
+            }
+            if (!options?.auto) {
+                setAlert({ variant: 'success', message: 'Команду старту запису надіслано до capture agent' });
+            }
+        } catch (err) {
+            updateSlot(slotId, { recording: false, uploading: false, showPreview: false, previewActive: false, previewLoading: false });
+            if (!options?.auto) {
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис через capture agent' });
             }
         }
     }
 
-    function stopRecording(slotId: string) {
-        const recorder = recordersRef.current[slotId];
-        if (!recorder || recorder.state === 'inactive') return;
-        recorder.stop();
-    }
-
-    async function uploadSlotRecording(slotId: string, blob: Blob) {
+    async function stopRecording(slotId: string) {
         if (!appointment?.id || !token) return;
+        const slot = slots.find((item) => item.id === slotId);
+        if (!slot || slot.uploading || !slot.recording) return;
+
         updateSlot(slotId, { uploading: true });
-
         try {
-            const file = new File([blob], `appointment-${appointment.id}-slot-${slotId}.webm`, {
-                type: blob.type || 'video/webm',
-                lastModified: Date.now(),
+            await stopAppointmentAgentRecording(token, appointment.id, { cabinetDeviceId: slotId });
+            await stopSlotPreview(slotId);
+            updateSlot(slotId, {
+                recording: false,
+                uploading: false,
+                showPreview: false,
+                previewActive: false,
+                previewLoading: false,
+                previewImageDataUrl: null,
+                previewCapturedAt: null,
             });
-
-            const formData = new FormData();
-            formData.append('video', file);
-            formData.append('appointmentId', appointment.id);
-            if (startedAtRef.current[slotId]) formData.append('startedAt', startedAtRef.current[slotId]!.toISOString());
-            if (endedAtRef.current[slotId]) formData.append('endedAt', endedAtRef.current[slotId]!.toISOString());
-
-            await uploadVideo(token, formData);
-            setAlert({ variant: 'success', message: 'Відео успішно завантажено' });
         } catch (err) {
-            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося завантажити відео' });
-        } finally {
             updateSlot(slotId, { uploading: false });
+            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося зупинити запис через capture agent' });
         }
     }
 
@@ -751,7 +741,7 @@ export default function DoctorAppointmentDetailPage() {
                                 <div className="doctor-appointment-detail__section-head">
                                     <div>
                                         <h2>Відеозапис</h2>
-                                        <p>{appointment.cabinet?.devices?.length ? 'Камери доступні для запису цього прийому.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
+                                        <p>{appointment.cabinet?.devices?.length ? 'Запис цього прийому виконує локальний capture agent у кабінеті.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
                                     </div>
                                 </div>
 
@@ -799,7 +789,7 @@ export default function DoctorAppointmentDetailPage() {
                                                                 />
                                                             ) : (
                                                                 <div className="doctor-appointment-detail__preview-placeholder">
-                                                                    Камера вимкнена. Вона вмикається тільки під час запису.
+                                                                    Запис веде локальний capture agent. Live-preview на цій сторінці не показується.
                                                                 </div>
                                                             )}
                                                         </div>

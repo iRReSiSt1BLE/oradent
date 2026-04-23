@@ -15,6 +15,7 @@ import { MailModule } from '../mail/mail.module';
 import {Patient} from "../patient/entities/patient.entity";
 import { Cabinet } from '../cabinet/entities/cabinet.entity';
 import { VideoAccessGrant } from '../video/entities/video-access-grant.entity';
+import { CaptureAgentModule } from '../capture-agent/capture-agent.module';
 
 @Module({
     imports: [
@@ -33,6 +34,7 @@ import { VideoAccessGrant } from '../video/entities/video-access-grant.entity';
         ServicesModule,
         DoctorScheduleModule,
         MailModule,
+        CaptureAgentModule,
     ],
     controllers: [AppointmentController],
     providers: [AppointmentService],

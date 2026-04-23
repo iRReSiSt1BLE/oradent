@@ -2,6 +2,8 @@ import {
     BadRequestException,
     ForbiddenException,
     Injectable,
+    Logger,
+    NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, Repository } from 'typeorm';
@@ -24,11 +26,12 @@ import {CreatePaidGooglePayTestBookingDto} from "./dto/create-paid-google-pay-te
 import {PaymentMethod} from "../common/enums/payment-method.enum";
 import {Patient} from "../patient/entities/patient.entity";
 import { Cabinet } from '../cabinet/entities/cabinet.entity';
-import { NotFoundException } from '@nestjs/common';
 import { AdminCancelAppointmentDto } from './dto/admin-cancel-appointment.dto';
 import { AdminRescheduleAppointmentDto } from './dto/admin-reschedule-appointment.dto';
 import { AdminRefundAppointmentDto } from './dto/admin-refund-appointment.dto';
 import { VideoAccessGrant } from '../video/entities/video-access-grant.entity';
+import { CaptureAgentService } from '../capture-agent/capture-agent.service';
+import { CaptureAgentRealtimeService } from '../capture-agent/capture-agent-realtime.service';
 import * as argon2 from 'argon2';
 
 
@@ -43,6 +46,8 @@ type JwtUser = {
 
 @Injectable()
 export class AppointmentService {
+    private readonly logger = new Logger(AppointmentService.name);
+
     constructor(
         @InjectRepository(Appointment)
         private readonly appointmentRepository: Repository<Appointment>,
@@ -64,6 +69,8 @@ export class AppointmentService {
         private readonly cabinetRepository: Repository<Cabinet>,
         @InjectRepository(VideoAccessGrant)
         private readonly videoAccessGrantRepository: Repository<VideoAccessGrant>,
+        private readonly captureAgentService: CaptureAgentService,
+        private readonly captureAgentRealtimeService: CaptureAgentRealtimeService,
     ) {}
 
     private parseAppointmentDateOrThrow(raw: string): Date {
@@ -946,6 +953,8 @@ export class AppointmentService {
         const recordingsCount = await this.videoRepository.count({ where: { appointmentId } });
         const completedAt = new Date();
         const nextVisitDate = payload.nextVisitDate ? this.parseAppointmentDateOrThrow(payload.nextVisitDate) : null;
+
+        void this.sendAgentRecordingCommand(appointment, 'stop', { bestEffort: true });
 
         appointment.consultationConclusion = consultationConclusion;
         appointment.treatmentPlanItems = treatmentPlanItems;
@@ -2726,6 +2735,112 @@ export class AppointmentService {
 
 
 
+    private async getCabinetRecordingDevices(appointment: Appointment, cabinetDeviceId?: string) {
+        if (!appointment.cabinetId) {
+            return [] as Array<{
+                id: string;
+                name: string;
+                cameraDeviceId: string | null;
+                microphoneDeviceId: string | null;
+                startMode: string;
+                isActive: boolean;
+            }>;
+        }
+
+        const cabinet = await this.cabinetRepository.findOne({
+            where: { id: appointment.cabinetId },
+            relations: ['devices'],
+        });
+
+        const devices = (cabinet?.devices || [])
+            .filter((item) => item.isActive)
+            .filter((item) => item.cameraDeviceId || item.microphoneDeviceId);
+
+        if (cabinetDeviceId) {
+            return devices.filter((item) => item.id === cabinetDeviceId);
+        }
+
+        return devices;
+    }
+
+    private async sendAgentRecordingCommand(
+        appointment: Appointment,
+        command: 'start' | 'stop',
+        options?: { cabinetDeviceId?: string; autoOnly?: boolean; bestEffort?: boolean },
+    ) {
+        const devices = await this.getCabinetRecordingDevices(appointment, options?.cabinetDeviceId);
+        const filteredDevices = options?.autoOnly
+            ? devices.filter((item) => String(item.startMode || '').toUpperCase() === 'AUTO_ON_VISIT_START')
+            : devices;
+
+        if (!appointment.cabinetId || filteredDevices.length === 0) {
+            return {
+                ok: true,
+                message: 'Для цього прийому немає налаштованих джерел запису.',
+                command,
+                sentCount: 0,
+                targets: [],
+            };
+        }
+
+        const agent = await this.captureAgentService.getOnlineAgentByCabinetId(appointment.cabinetId);
+        if (!agent?.agentKey) {
+            if (options?.bestEffort) {
+                this.logger.warn(`Capture agent is offline for cabinet ${appointment.cabinetId}`);
+                return { ok: false, message: 'Capture agent офлайн', command, sentCount: 0, targets: [] };
+            }
+            throw new BadRequestException('Capture agent для цього кабінету зараз офлайн або не привʼязаний.');
+        }
+
+        const startedAt = new Date().toISOString();
+        let sentCount = 0;
+        for (const device of filteredDevices) {
+            const sent = this.captureAgentRealtimeService.sendToAgentKey(agent.agentKey, {
+                type: command === 'start' ? 'agent.recording.start' : 'agent.recording.stop',
+                payload: {
+                    appointmentId: appointment.id,
+                    cabinetId: appointment.cabinetId,
+                    cabinetDeviceId: device.id,
+                    deviceName: device.name,
+                    cameraDeviceId: device.cameraDeviceId,
+                    microphoneDeviceId: device.microphoneDeviceId,
+                    startedAt,
+                },
+            });
+            if (sent) {
+                sentCount += 1;
+            }
+        }
+
+        if (sentCount === 0 && !options?.bestEffort) {
+            throw new BadRequestException('Не вдалося передати команду запису до capture agent.');
+        }
+
+        return {
+            ok: sentCount > 0,
+            message: command === 'start' ? 'Команду старту запису надіслано до capture agent.' : 'Команду зупинки запису надіслано до capture agent.',
+            command,
+            sentCount,
+            targets: filteredDevices.map((item) => ({
+                id: item.id,
+                name: item.name,
+                startMode: item.startMode,
+            })),
+        };
+    }
+
+    async startAgentRecording(userId: string, appointmentId: string, cabinetDeviceId?: string) {
+        const appointment = await this.getAppointmentOrThrow(appointmentId);
+        await this.ensureWeeklyBoardAccess(userId, appointment);
+        return this.sendAgentRecordingCommand(appointment, 'start', { cabinetDeviceId });
+    }
+
+    async stopAgentRecording(userId: string, appointmentId: string, cabinetDeviceId?: string) {
+        const appointment = await this.getAppointmentOrThrow(appointmentId);
+        await this.ensureWeeklyBoardAccess(userId, appointment);
+        return this.sendAgentRecordingCommand(appointment, 'stop', { cabinetDeviceId });
+    }
+
     private parseWeekAnchor(raw?: string) {
         const date = raw ? new Date(raw) : new Date();
         if (Number.isNaN(date.getTime())) {
@@ -3242,6 +3357,14 @@ export class AppointmentService {
 
         appointment.visitFlowStatus = normalized;
         const saved = await this.appointmentRepository.save(appointment);
+
+        if (normalized === 'IN_PROGRESS') {
+            void this.sendAgentRecordingCommand(saved, 'start', { autoOnly: true, bestEffort: true });
+        }
+
+        if (normalized === 'COMPLETED') {
+            void this.sendAgentRecordingCommand(saved, 'stop', { bestEffort: true });
+        }
 
         if (normalized === 'NO_SHOW' && appointment.patient?.email) {
             const appointmentLine = await this.buildAppointmentLineFromEntity(saved);

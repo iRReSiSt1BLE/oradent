@@ -112,6 +112,15 @@ export class CaptureAgentRealtimeService {
     return this.agentKeysById.get(normalizedAgentId) || null;
   }
 
+  sendToAgentKey(agentKey: string, payload: Record<string, unknown>) {
+    const agentId = this.getAgentIdByKey(agentKey);
+    if (!agentId) {
+      return false;
+    }
+
+    return this.send(agentId, payload);
+  }
+
   startContinuousPreview(
     agentKey: string,
     pairKey: string,

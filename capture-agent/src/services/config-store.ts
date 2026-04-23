@@ -77,6 +77,7 @@ function buildConfig(payload?: Partial<AgentConfig>): AgentConfig {
     agentToken: trimString(source.agentToken),
     agentId: trimString(source.agentId),
     agentName: trimString(source.agentName, defaultConfig.agentName),
+    transportKey: trimString((source as AgentConfig).transportKey, defaultConfig.transportKey) || defaultConfig.transportKey,
     activePairKey: trimString(source.activePairKey),
     configuredPairs: normalizeConfiguredPairs(source.configuredPairs),
   };

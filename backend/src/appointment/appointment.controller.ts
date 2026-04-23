@@ -252,6 +252,26 @@ export class AppointmentController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @Post(':id/agent-recording/start')
+    startAgentRecording(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+        @Body() body: { cabinetDeviceId?: string },
+    ) {
+        return this.appointmentService.startAgentRecording(req.user.id, id, body?.cabinetDeviceId);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post(':id/agent-recording/stop')
+    stopAgentRecording(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+        @Body() body: { cabinetDeviceId?: string },
+    ) {
+        return this.appointmentService.stopAgentRecording(req.user.id, id, body?.cabinetDeviceId);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Post(':id/doctor-complete')
     completeDoctorAppointment(
         @Req() req: { user: JwtUser },

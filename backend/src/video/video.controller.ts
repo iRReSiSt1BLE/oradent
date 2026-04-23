@@ -2,6 +2,7 @@ import {
     Body,
     Controller,
     Get,
+    Headers,
     Param,
     Post,
     Req,
@@ -16,6 +17,7 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { VideoService } from './video.service';
 import { UploadVideoDto } from './dto/upload-video.dto';
+import { UploadAgentVideoDto } from './dto/upload-agent-video.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StreamVideoDto } from './dto/stream-video.dto';
@@ -55,6 +57,29 @@ export class VideoController {
         return {
             ok: true,
             message: 'Відео успішно завантажено',
+            data: savedVideo,
+        };
+    }
+
+    @Post('agent-upload')
+    @UseInterceptors(
+        FileInterceptor('video', {
+            storage: memoryStorage(),
+            limits: {
+                fileSize: 1024 * 1024 * 1024,
+            },
+        }),
+    )
+    async uploadVideoFromAgent(
+        @UploadedFile() file: Express.Multer.File,
+        @Body() dto: UploadAgentVideoDto,
+        @Headers('x-agent-token') agentToken?: string,
+    ) {
+        const savedVideo = await this.videoService.saveAgentUploadedVideo(file, dto, agentToken);
+
+        return {
+            ok: true,
+            message: 'Відео від capture agent успішно завантажено',
             data: savedVideo,
         };
     }

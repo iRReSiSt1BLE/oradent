@@ -82,7 +82,14 @@ export class CaptureAgentService {
       throw new UnauthorizedException('Cabinet code не знайдено або він протермінований.');
     }
 
-    if (!setupSession && dto.enrollmentToken !== expectedToken) {
+    const canReEnrollExistingCabinet =
+      !!cabinet && !!cabinet.agentKey && cabinet.agentKey === normalizedAgentKey;
+
+    if (
+      !setupSession &&
+      !canReEnrollExistingCabinet &&
+      dto.enrollmentToken !== expectedToken
+    ) {
       throw new UnauthorizedException('Невірний enrollment token');
     }
 
@@ -283,6 +290,27 @@ export class CaptureAgentService {
     agent.lastSeenAt = new Date();
     await this.captureAgentRepository.save(agent);
     await this.cabinetSetupRealtimeService.notifyByAgentKey(agent.agentKey);
+  }
+
+  async getAgentByCabinetId(cabinetId: string) {
+    const normalizedCabinetId = String(cabinetId || '').trim();
+    if (!normalizedCabinetId) {
+      return null;
+    }
+
+    return this.captureAgentRepository.findOne({
+      where: { cabinetId: normalizedCabinetId },
+      relations: { devices: true, pairs: true, cabinet: true },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  async getOnlineAgentByCabinetId(cabinetId: string) {
+    const agent = await this.getAgentByCabinetId(cabinetId);
+    if (!agent || agent.status !== CaptureAgentStatus.ONLINE) {
+      return null;
+    }
+    return agent;
   }
 
   private mapAgent(agent: CaptureAgent) {
