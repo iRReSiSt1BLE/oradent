@@ -60,10 +60,12 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [langOpen, setLangOpen] = useState(false);
+    const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const langRef = useRef<HTMLDivElement | null>(null);
 
     const activeLang = LANG_OPTIONS.find((l) => l.code === language) || LANG_OPTIONS[0];
+    const canEditHomeContent = isAdminOrSuperAdmin && location.pathname === '/';
 
     function handleLogout() {
         removeToken();
@@ -100,6 +102,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
             if (e.key === 'Escape') {
                 setMenuOpen(false);
                 setLangOpen(false);
+                setMobileNavOpen(false);
             }
         }
 
@@ -115,6 +118,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
     useEffect(() => {
         setMenuOpen(false);
         setLangOpen(false);
+        setMobileNavOpen(false);
     }, [location.pathname]);
 
     function renderLanguageDropdown() {
@@ -180,8 +184,36 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
         );
     }
 
+
+
+    function openHomeContentEditor() {
+        window.dispatchEvent(new Event('oradent-open-home-content-manager'));
+        setMobileNavOpen(false);
+    }
+
+    function renderHomeContentEditButton() {
+        if (!canEditHomeContent) return null;
+
+        return (
+            <button
+                className="header__action header__edit-home-action"
+                type="button"
+                onClick={openHomeContentEditor}
+                aria-label={t('header.editHomeContent')}
+                title={t('header.editHomeContent')}
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+                    <g fill="none" stroke="#000" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5">
+                        <path d="M19.09 14.441v4.44a2.37 2.37 0 0 1-2.369 2.369H5.12a2.37 2.37 0 0 1-2.369-2.383V7.279a2.356 2.356 0 0 1 2.37-2.37H9.56" />
+                        <path d="M6.835 15.803v-2.165c.002-.357.144-.7.395-.953l9.532-9.532a1.36 1.36 0 0 1 1.934 0l2.151 2.151a1.36 1.36 0 0 1 0 1.934l-9.532 9.532a1.36 1.36 0 0 1-.953.395H8.197a1.36 1.36 0 0 1-1.362-1.362M19.09 8.995l-4.085-4.086" />
+                    </g>
+                </svg>
+            </button>
+        );
+    }
+
     return (
-        <header className="header">
+        <header className={`header ${isStaff ? 'header--staff' : 'header--public'} ${mobileNavOpen ? 'header--menu-open' : ''}`}>
             {!isStaff && (
                 <div className="header__topbar">
                     <a className="header__topbar-link header__topbar-link--left" href="tel:+380000000000">
@@ -203,7 +235,19 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                         </span>
                     </Link>
 
-                    <nav className="header__nav">
+                    <button
+                        type="button"
+                        className={`header__burger ${mobileNavOpen ? 'is-open' : ''}`}
+                        onClick={() => setMobileNavOpen((prev) => !prev)}
+                        aria-label={mobileNavOpen ? t('common.close') : t('header.openMenu')}
+                        aria-expanded={mobileNavOpen}
+                    >
+                        <span />
+                        <span />
+                        <span />
+                    </button>
+
+                    <nav className={`header__nav ${mobileNavOpen ? 'header__nav--open' : ''}`}>
                         {!token ? (
                             <>
                                 <NavItem to="/" label={t('header.home')} active={isActive('/')} />
@@ -211,6 +255,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                                 <NavItem to="/register" label={t('header.register')} active={isActive('/register')} />
                                 <NavItem to="/login" label={t('header.login')} active={isActive('/login')} />
                                 {renderLanguageDropdown()}
+                                {renderHomeContentEditButton()}
                                 {renderCartButton()}
                             </>
                         ) : isStaff ? (
@@ -241,6 +286,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                                 </div>
 
                                 {renderLanguageDropdown()}
+                                {renderHomeContentEditButton()}
                                 {renderCartButton()}
 
                                 <button className="header__action" type="button" onClick={handleLogout}>
@@ -253,6 +299,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                                 <NavItem to="/my-appointments" label={t('header.myAppointments')} active={isActive('/my-appointments')} />
                                 <NavItem to="/profile" label={t('header.profile')} active={isActive('/profile')} />
                                 {renderLanguageDropdown()}
+                                {renderHomeContentEditButton()}
                                 {renderCartButton()}
                                 <button className="header__action" type="button" onClick={handleLogout}>
                                     {t('header.logout')}

@@ -40,6 +40,7 @@ type PairView = {
   videoLabel: string;
   audioDeviceId: string;
   audioLabel: string;
+  snapshotHotkey: string;
 };
 
 type EncodedPreviewFrame = {
@@ -72,6 +73,7 @@ type ContinuousPreviewState = {
 
 type PreviewSignalPayload = {
   setupSessionId?: string;
+  previewSessionId?: string;
   pairKey?: string;
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
@@ -79,10 +81,12 @@ type PreviewSignalPayload = {
 
 type WebRtcPreviewState = {
   sessionKey: string;
-  setupSessionId: string;
+  setupSessionId?: string;
+  previewSessionId?: string;
   pairKey: string;
   pc: RTCPeerConnection;
   stream: MediaStream | null;
+  ownsStream: boolean;
 };
 
 type AgentRecordingSession = {
@@ -123,12 +127,16 @@ const startMicTestBtn = byId<HTMLButtonElement>('startMicTestBtn');
 const playMicTestBtn = byId<HTMLButtonElement>('playMicTestBtn');
 const addPairBtn = byId<HTMLButtonElement>('addPairBtn');
 const autofillPairsBtn = byId<HTMLButtonElement>('autofillPairsBtn');
+const captureHotkeyBtn = byId<HTMLButtonElement>('captureHotkeyBtn');
+const manualSnapshotBtn = byId<HTMLButtonElement>('manualSnapshotBtn');
+const resetHotkeyBtn = byId<HTMLButtonElement>('resetHotkeyBtn');
 
 const backendUrlInput = byId<HTMLInputElement>('backendUrlInput');
 const cabinetCodeInput = byId<HTMLInputElement>('cabinetCodeInput');
 const pairNameInput = byId<HTMLInputElement>('pairNameInput');
 const videoSelect = byId<HTMLSelectElement>('videoSelect');
 const audioSelect = byId<HTMLSelectElement>('audioSelect');
+const snapshotHotkeyInput = byId<HTMLInputElement>('snapshotHotkeyInput');
 
 const previewVideo = byId<HTMLVideoElement>('previewVideo');
 const previewPlaceholder = byId<HTMLDivElement>('previewPlaceholder');
@@ -140,6 +148,7 @@ const micTestMeta = byId<HTMLSpanElement>('micTestMeta');
 const pairsContainer = byId<HTMLDivElement>('pairsContainer');
 const persistentNote = byId<HTMLDivElement>('persistentNote');
 const pairsCountText = byId<HTMLSpanElement>('pairsCountText');
+const snapshotStatusText = byId<HTMLDivElement>('snapshotStatusText');
 const toastStack = byId<HTMLDivElement>('toastStack');
 
 const globalStatusBadge = byId<HTMLSpanElement>('globalStatusBadge');
@@ -171,6 +180,9 @@ let permissionState = {
 let continuousPreviewState: ContinuousPreviewState | null = null;
 let webRtcPreviewState: WebRtcPreviewState | null = null;
 const activeRecordingSessions = new Map<string, AgentRecordingSession>();
+let awaitingSnapshotHotkey = false;
+let awaitingSnapshotHotkeyPairKey: string | null = null;
+let snapshotInFlight = false;
 
 function toast(message: string, variant: ToastVariant = 'info'): void {
   const item = document.createElement('div');
@@ -225,22 +237,25 @@ function makeDefaultPairName(videoDeviceId: string, audioDeviceId: string): stri
 }
 
 function resolveConfiguredPair(pair: AgentConfiguredPair): PairView | null {
+  if (!pair.videoDeviceId || !pair.audioDeviceId) {
+    return null;
+  }
+
   const videoIndex = getVideoInputs().findIndex((item) => item.deviceId === pair.videoDeviceId);
   const audioIndex = getAudioInputs().findIndex((item) => item.deviceId === pair.audioDeviceId);
   const video = videoIndex >= 0 ? getVideoInputs()[videoIndex] : null;
   const audio = audioIndex >= 0 ? getAudioInputs()[audioIndex] : null;
-
-  if (!video || !audio) {
-    return null;
-  }
+  const videoLabel = video ? optionLabel(video, videoIndex) : findDeviceLabel('videoinput', pair.videoDeviceId);
+  const audioLabel = audio ? optionLabel(audio, audioIndex) : findDeviceLabel('audioinput', pair.audioDeviceId);
 
   return {
     pairKey: pair.pairKey,
-    displayName: pair.displayName || makeDefaultPairName(pair.videoDeviceId, pair.audioDeviceId),
+    displayName: pair.displayName || `${videoLabel} + ${audioLabel}`,
     videoDeviceId: pair.videoDeviceId,
-    videoLabel: optionLabel(video, videoIndex),
+    videoLabel,
     audioDeviceId: pair.audioDeviceId,
-    audioLabel: optionLabel(audio, audioIndex),
+    audioLabel,
+    snapshotHotkey: pair.snapshotHotkey || config?.snapshotHotkey || 'F8',
   };
 }
 
@@ -266,7 +281,13 @@ async function persistConfig(payload: Partial<AgentConfig>): Promise<void> {
 }
 
 async function updateConfiguredPairs(nextPairs: AgentConfiguredPair[]): Promise<void> {
-  const resolvedPairs = nextPairs.filter((pair) => pair.pairKey && pair.videoDeviceId && pair.audioDeviceId);
+  const defaultHotkey = config?.snapshotHotkey || 'F8';
+  const resolvedPairs = nextPairs
+    .filter((pair) => pair.pairKey && pair.videoDeviceId && pair.audioDeviceId)
+    .map((pair) => ({
+      ...pair,
+      snapshotHotkey: pair.snapshotHotkey || defaultHotkey,
+    }));
   const activeExists = resolvedPairs.some((pair) => pair.pairKey === config?.activePairKey);
   await persistConfig({
     configuredPairs: resolvedPairs,
@@ -277,6 +298,110 @@ async function updateConfiguredPairs(nextPairs: AgentConfiguredPair[]): Promise<
 
 function normalizedBackendUrl(value: string): string {
   return value.trim().replace(/\/$/, '');
+}
+
+function serializeHotkey(event: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push('Ctrl');
+  if (event.altKey) parts.push('Alt');
+  if (event.shiftKey) parts.push('Shift');
+  if (event.metaKey) parts.push('Meta');
+
+  let key = event.key;
+  if (key === ' ') key = 'Space';
+  if (key.length === 1) key = key.toUpperCase();
+  parts.push(key);
+  return parts.join('+');
+}
+
+function hotkeyMatches(event: KeyboardEvent, hotkey: string): boolean {
+  return serializeHotkey(event) === hotkey;
+}
+
+function setSnapshotStatus(text: string): void {
+  snapshotStatusText.textContent = text;
+}
+
+function pickActiveRecordingSession(pairKey?: string | null): AgentRecordingSession | null {
+  const sessions = Array.from(activeRecordingSessions.values());
+  if (!sessions.length) return null;
+  if (pairKey) {
+    return sessions.find((session) => session.pair.pairKey === pairKey) || null;
+  }
+  return sessions[sessions.length - 1] || null;
+}
+
+function findRecordingSessionByHotkey(event: KeyboardEvent): AgentRecordingSession | null {
+  const sessions = Array.from(activeRecordingSessions.values());
+  return sessions.find((session) => session.pair.snapshotHotkey && hotkeyMatches(event, session.pair.snapshotHotkey)) || null;
+}
+
+async function uploadDentalSnapshotFromSession(session: AgentRecordingSession, frame: { blob: Blob; mimeType: string; capturedAt: string }): Promise<void> {
+  if (!config?.agentToken) {
+    throw new Error('Agent token is missing.');
+  }
+
+  const encrypted = await encryptBlobForTransport(frame.blob, config.transportKey || 'oradent-capture-transport');
+  const formData = new FormData();
+  const originalFileName = `dental-snapshot-${session.appointmentId}-${Date.now()}.jpg`;
+  formData.append('image', encrypted.encryptedBlob, `${originalFileName}.enc`);
+  formData.append('appointmentId', session.appointmentId);
+  formData.append('cabinetDeviceId', session.cabinetDeviceId);
+  formData.append('pairKey', session.pair.pairKey);
+  formData.append('capturedAt', frame.capturedAt);
+  formData.append('mimeType', frame.mimeType);
+  formData.append('originalFileName', originalFileName);
+  formData.append('sha256Hash', encrypted.sha256Hash);
+  formData.append('transportIv', encrypted.transportIv);
+  formData.append('transportAuthTag', encrypted.transportAuthTag);
+
+  const response = await fetch(`${normalizedBackendUrl(config.backendUrl)}/dental-chart/agent-snapshot`, {
+    method: 'POST',
+    headers: {
+      'x-agent-token': config.agentToken,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => 'Snapshot upload failed.');
+    throw new Error(message || 'Snapshot upload failed.');
+  }
+}
+
+async function captureDentalSnapshot(pairKey?: string | null): Promise<void> {
+  const session = pickActiveRecordingSession(pairKey);
+  if (!session) {
+    setSnapshotStatus('Знімок можна зробити тільки під час активного запису прийому.');
+    toast('Активного запису прийому немає', 'error');
+    return;
+  }
+
+  if (snapshotInFlight) return;
+
+  snapshotInFlight = true;
+  updateControls();
+  setSnapshotStatus('Створення знімка…');
+
+  let video: HTMLVideoElement | null = null;
+  try {
+    video = await createVideoElementForStream(session.stream);
+    const frame = await encodePreviewFrameBlob(video, { width: 1280, quality: 0.92, mimeType: 'image/jpeg' });
+    await uploadDentalSnapshotFromSession(session, frame);
+    setSnapshotStatus(`Знімок збережено: ${session.pair.videoLabel} · ${new Date(frame.capturedAt).toLocaleTimeString('uk-UA')}`);
+    toast('Знімок відправлено у зубну карту', 'success');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Не вдалося зробити знімок.';
+    setSnapshotStatus(message);
+    toast(message, 'error');
+  } finally {
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+    }
+    snapshotInFlight = false;
+    updateControls();
+  }
 }
 
 async function resetEnrollmentState(reason?: string): Promise<void> {
@@ -405,6 +530,7 @@ function updateControls(): void {
   disconnectSocketBtn.disabled = socketState !== 'connected' && socketState !== 'connecting';
   addPairBtn.disabled = !canBuildPairs;
   autofillPairsBtn.disabled = !getVideoInputs().length || !getAudioInputs().length;
+  manualSnapshotBtn.disabled = activeRecordingSessions.size === 0 || snapshotInFlight;
   recordDot.style.opacity = isRecording ? '1' : '0.7';
 
   if (!hasVideo && !previewStream) {
@@ -418,6 +544,7 @@ function syncUiWithConfig(): void {
   }
 
   backendUrlInput.value = config.backendUrl || '';
+  snapshotHotkeyInput.value = config.snapshotHotkey || '';
   cabinetCodeInput.value = config.cabinetCode || '';
   updateRegistrationBadge();
   renderPairBuilderOptions();
@@ -471,8 +598,27 @@ function renderPairs(): void {
       void removeConfiguredPair(pair.pairKey);
     });
 
+    const hotkeyRow = document.createElement('div');
+    hotkeyRow.className = 'pair-card__hotkey';
+
+    const hotkeyText = document.createElement('span');
+    hotkeyText.textContent = `Знімок: ${pair.snapshotHotkey || 'не задано'}`;
+
+    const setHotkeyBtn = document.createElement('button');
+    setHotkeyBtn.type = 'button';
+    setHotkeyBtn.className = 'button button--ghost button--small';
+    setHotkeyBtn.textContent = 'Кнопка знімка';
+    setHotkeyBtn.addEventListener('click', () => {
+      awaitingSnapshotHotkey = false;
+      awaitingSnapshotHotkeyPairKey = pair.pairKey;
+      setSnapshotStatus(`Натисніть кнопку для знімка камери: ${pair.videoLabel}`);
+      toast('Очікую кнопку для цієї камери…', 'info');
+    });
+
+    hotkeyRow.append(hotkeyText, setHotkeyBtn);
+
     actions.append(selectBtn, removeBtn);
-    card.append(title, meta, actions);
+    card.append(title, meta, hotkeyRow, actions);
     pairsContainer.appendChild(card);
   });
 }
@@ -517,6 +663,7 @@ function resolveRecordingPair(payload: Record<string, unknown>): PairView | null
       videoLabel: findDeviceLabel('videoinput', cameraDeviceId),
       audioDeviceId: microphoneDeviceId,
       audioLabel: findDeviceLabel('audioinput', microphoneDeviceId),
+      snapshotHotkey: config?.snapshotHotkey || 'F8',
     };
   }
 
@@ -592,12 +739,14 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     } finally {
       stopMediaStream(session.stream);
       activeRecordingSessions.delete(recordingKey);
+      updateControls();
     }
   };
 
   activeRecordingSessions.set(recordingKey, session);
+  updateControls();
   recorder.start(1000);
-  setStatusLine(`Іде запис: ${pair.displayName}`);
+  setStatusLine(`Іде запис: ${pair.displayName}. Кнопка знімка цієї камери: ${pair.snapshotHotkey || config?.snapshotHotkey || 'не задано'}`);
   toast(`Почато локальний запис: ${pair.displayName}`, 'info');
 }
 
@@ -702,6 +851,52 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
     reader.onerror = () => reject(new Error('Помилка читання preview-кадру.'));
     reader.readAsDataURL(blob);
   });
+}
+
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function bufferToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+  return bufferToHex(await crypto.subtle.digest('SHA-256', buffer));
+}
+
+async function encryptBlobForTransport(blob: Blob, secret: string): Promise<{
+  encryptedBlob: Blob;
+  sha256Hash: string;
+  transportIv: string;
+  transportAuthTag: string;
+}> {
+  const plainBuffer = await blob.arrayBuffer();
+  const keyMaterial = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret || 'oradent-capture-transport'));
+  const key = await crypto.subtle.importKey('raw', keyMaterial, 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encryptedWithTag = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, plainBuffer));
+  const tagLength = 16;
+  const encryptedBytes = encryptedWithTag.slice(0, Math.max(0, encryptedWithTag.length - tagLength));
+  const tagBytes = encryptedWithTag.slice(Math.max(0, encryptedWithTag.length - tagLength));
+  const encryptedArrayBuffer = encryptedBytes.buffer.slice(
+    encryptedBytes.byteOffset,
+    encryptedBytes.byteOffset + encryptedBytes.byteLength,
+  ) as ArrayBuffer;
+
+  return {
+    encryptedBlob: new Blob([encryptedArrayBuffer], { type: 'application/octet-stream' }),
+    sha256Hash: await sha256Hex(plainBuffer),
+    transportIv: bytesToBase64(iv),
+    transportAuthTag: bytesToBase64(tagBytes),
+  };
 }
 
 async function encodePreviewFrameBlob(
@@ -901,8 +1096,9 @@ async function startContinuousPreview(pairKey: string, options?: { width?: numbe
   scheduleContinuousPreviewTick(state);
 }
 
-function buildPreviewSessionKey(setupSessionId: string, pairKey: string): string {
-  return `${setupSessionId}:${pairKey}`;
+function buildPreviewSessionKey(setupSessionId: string | undefined, pairKey: string, previewSessionId?: string): string {
+  if (previewSessionId) return `preview:${previewSessionId}`;
+  return `setup:${setupSessionId || ''}:${pairKey}`;
 }
 
 async function stopWebRtcPreview(sessionKey?: string): Promise<void> {
@@ -926,20 +1122,32 @@ async function stopWebRtcPreview(sessionKey?: string): Promise<void> {
     // noop
   }
 
-  stopMediaStream(current.stream);
+  if (current.ownsStream) {
+    stopMediaStream(current.stream);
+  }
 }
 
 async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void> {
-  const setupSessionId = String(payload.setupSessionId || '').trim();
+  const setupSessionId = String(payload.setupSessionId || '').trim() || undefined;
+  const previewSessionId = String(payload.previewSessionId || '').trim() || undefined;
   const pairKey = String(payload.pairKey || '').trim();
 
-  if (!setupSessionId || !pairKey) {
+  if (!pairKey || (!setupSessionId && !previewSessionId)) {
     return;
   }
 
   const description = payload.description;
   const candidate = payload.candidate;
-  const sessionKey = buildPreviewSessionKey(setupSessionId, pairKey);
+  const sessionKey = buildPreviewSessionKey(setupSessionId, pairKey, previewSessionId);
+
+  const sendSignal = async (message: Record<string, unknown>) => {
+    await window.agentApi.sendPreviewSignal({
+      ...(setupSessionId ? { setupSessionId } : {}),
+      ...(previewSessionId ? { previewSessionId } : {}),
+      pairKey,
+      ...message,
+    });
+  };
 
   if (description?.type === 'offer') {
     await stopWebRtcPreview(sessionKey);
@@ -949,18 +1157,22 @@ async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void>
       throw new Error('Пара для WebRTC preview не знайдена або не містить камеру.');
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const recordingSession = findActiveRecordingSessionByPair(pair);
+    const stream = recordingSession?.stream || await navigator.mediaDevices.getUserMedia({
       video: buildVideoConstraints(pair.videoDeviceId, 'remote'),
       audio: false,
     });
+    const ownsStream = !recordingSession?.stream;
 
     const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
     const state: WebRtcPreviewState = {
       sessionKey,
       setupSessionId,
+      previewSessionId,
       pairKey,
       pc,
       stream,
+      ownsStream,
     };
 
     webRtcPreviewState = state;
@@ -970,11 +1182,7 @@ async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void>
         return;
       }
 
-      void window.agentApi.sendPreviewSignal({
-        setupSessionId,
-        pairKey,
-        candidate: event.candidate.toJSON(),
-      });
+      void sendSignal({ candidate: event.candidate.toJSON() });
     };
 
     pc.onconnectionstatechange = () => {
@@ -996,7 +1204,7 @@ async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void>
       }
     };
 
-    stream.getTracks().forEach((track) => {
+    stream.getVideoTracks().forEach((track) => {
       pc.addTrack(track, stream);
     });
 
@@ -1004,9 +1212,7 @@ async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void>
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
-    await window.agentApi.sendPreviewSignal({
-      setupSessionId,
-      pairKey,
+    await sendSignal({
       description: pc.localDescription
         ? {
             type: pc.localDescription.type,
@@ -1299,8 +1505,11 @@ async function reconcileConfiguredPairs(): Promise<void> {
     return;
   }
 
-  const validPairs = (config.configuredPairs || []).filter((pair) => resolveConfiguredPair(pair));
-  const changed = validPairs.length !== (config.configuredPairs || []).length;
+  const hasInventory = getVideoInputs().length > 0 || getAudioInputs().length > 0;
+  const validPairs = hasInventory
+    ? (config.configuredPairs || []).filter((pair) => resolveConfiguredPair(pair))
+    : (config.configuredPairs || []);
+  const changed = hasInventory && validPairs.length !== (config.configuredPairs || []).length;
   if (changed) {
     await updateConfiguredPairs(validPairs);
     return;
@@ -1311,11 +1520,29 @@ async function reconcileConfiguredPairs(): Promise<void> {
   updateControls();
 }
 
+async function warmDeviceLabels(): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return;
+  }
+
+  const streams: MediaStream[] = [];
+  try {
+    const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }).catch(() => null);
+    if (cameraStream) streams.push(cameraStream);
+
+    const audioStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true }).catch(() => null);
+    if (audioStream) streams.push(audioStream);
+  } finally {
+    streams.forEach((stream) => stopMediaStream(stream));
+  }
+}
+
 async function refreshDeviceInventory(): Promise<void> {
   if (!navigator.mediaDevices?.enumerateDevices) {
     throw new Error('enumerateDevices недоступний у цій системі.');
   }
 
+  await warmDeviceLabels().catch(() => undefined);
   deviceInventory = await navigator.mediaDevices.enumerateDevices();
   await reconcileConfiguredPairs();
 }
@@ -1326,13 +1553,23 @@ async function requestMediaAccess(): Promise<AccessResult> {
   }
 
   const result: AccessResult = { camera: false, microphone: false };
+  const streams: MediaStream[] = [];
 
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  result.camera = stream.getVideoTracks().length > 0;
-  result.microphone = stream.getAudioTracks().length > 0;
-  stopMediaStream(stream);
+  const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }).catch(() => null);
+  if (cameraStream) {
+    streams.push(cameraStream);
+    result.camera = cameraStream.getVideoTracks().length > 0;
+  }
 
+  const audioStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true }).catch(() => null);
+  if (audioStream) {
+    streams.push(audioStream);
+    result.microphone = audioStream.getAudioTracks().length > 0;
+  }
+
+  streams.forEach((stream) => stopMediaStream(stream));
   await refreshPermissionState();
+  await refreshDeviceInventory().catch(() => undefined);
   return result;
 }
 
@@ -1448,6 +1685,7 @@ async function addPair(): Promise<void> {
       displayName,
       videoDeviceId,
       audioDeviceId,
+      snapshotHotkey: config.snapshotHotkey || 'F8',
     },
   ]);
 
@@ -1464,6 +1702,7 @@ async function addAllCombinations(): Promise<void> {
     (config.configuredPairs || []).map((pair) => `${pair.videoDeviceId}::${pair.audioDeviceId}`),
   );
 
+  const snapshotHotkey = config.snapshotHotkey || 'F8';
   const additions: AgentConfiguredPair[] = [];
   getVideoInputs().forEach((video) => {
     getAudioInputs().forEach((audio) => {
@@ -1477,6 +1716,7 @@ async function addAllCombinations(): Promise<void> {
         displayName: '',
         videoDeviceId: video.deviceId,
         audioDeviceId: audio.deviceId,
+        snapshotHotkey: snapshotHotkey,
       });
     });
   });
@@ -1682,6 +1922,67 @@ playMicTestBtn.addEventListener('click', () => {
   void micPlaybackAudio.play().catch(() => undefined);
 });
 
+captureHotkeyBtn.addEventListener('click', () => {
+  awaitingSnapshotHotkey = true;
+  snapshotHotkeyInput.value = 'Натисніть кнопку…';
+  setSnapshotStatus('Натисніть клавішу або комбінацію клавіш для знімка.');
+});
+
+manualSnapshotBtn.addEventListener('click', () => {
+  void captureDentalSnapshot();
+});
+
+resetHotkeyBtn.addEventListener('click', () => {
+  const nextPairs = (config?.configuredPairs || []).map((pair) => ({ ...pair, snapshotHotkey: 'F8' }));
+  void persistConfig({ snapshotHotkey: 'F8', configuredPairs: nextPairs }).then(() => {
+    setSnapshotStatus('Кнопки знімка скинуто на F8.');
+    toast('Кнопки знімка скинуто на F8', 'info');
+  });
+});
+
+window.addEventListener('keydown', (event) => {
+  if (awaitingSnapshotHotkeyPairKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    const pairKey = awaitingSnapshotHotkeyPairKey;
+    const nextHotkey = serializeHotkey(event);
+    awaitingSnapshotHotkeyPairKey = null;
+    const nextPairs = (config?.configuredPairs || []).map((pair) => (
+      pair.pairKey === pairKey ? { ...pair, snapshotHotkey: nextHotkey } : pair
+    ));
+    void updateConfiguredPairs(nextPairs).then(() => {
+      setSnapshotStatus(`Кнопку для камери збережено: ${nextHotkey}`);
+      toast(`Кнопку знімка збережено: ${nextHotkey}`, 'success');
+    });
+    return;
+  }
+
+  if (awaitingSnapshotHotkey) {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextHotkey = serializeHotkey(event);
+    awaitingSnapshotHotkey = false;
+    void persistConfig({ snapshotHotkey: nextHotkey }).then(() => {
+      setSnapshotStatus(`Кнопка за замовчуванням: ${nextHotkey} .`.replace(' .', '.'));
+      toast(`Кнопку за замовчуванням збережено: ${nextHotkey}`, 'success');
+    });
+    return;
+  }
+
+  const matchedSession = findRecordingSessionByHotkey(event);
+  if (matchedSession) {
+    event.preventDefault();
+    void captureDentalSnapshot(matchedSession.pair.pairKey);
+    return;
+  }
+
+  const hotkey = config?.snapshotHotkey;
+  if (hotkey && hotkeyMatches(event, hotkey)) {
+    event.preventDefault();
+    void captureDentalSnapshot();
+  }
+});
+
 window.agentApi.onSocketCommand((message) => {
   const payload = message.payload || {};
 
@@ -1727,6 +2028,7 @@ window.agentApi.onSocketCommand((message) => {
       toast(errorMessage, 'error');
       void window.agentApi.sendPreviewSignal({
         setupSessionId: payload.setupSessionId,
+        previewSessionId: payload.previewSessionId,
         pairKey: payload.pairKey,
         error: errorMessage,
       });
@@ -1737,7 +2039,7 @@ window.agentApi.onSocketCommand((message) => {
   if (message?.type === 'preview.stop') {
     stopContinuousPreview(String(payload.pairKey || '') || undefined);
     void stopWebRtcPreview(
-      buildPreviewSessionKey(String(payload.setupSessionId || ''), String(payload.pairKey || '')),
+      buildPreviewSessionKey(String(payload.setupSessionId || '') || undefined, String(payload.pairKey || ''), String(payload.previewSessionId || '') || undefined),
     );
     return;
   }

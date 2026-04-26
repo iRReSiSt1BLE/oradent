@@ -8,6 +8,7 @@ import {
     getCartCount,
     getCartTotalUah,
     removeServiceFromCart,
+    setCartItemQuantity,
     getDependentServiceNames,
     type CartItem,
 } from './shared/cart/cartStore';
@@ -60,6 +61,11 @@ ${dependentNames.join(', ')}`;
         syncCart();
     }
 
+    function handleQuantityChange(cartItemId: string, quantity: number) {
+        setCartItemQuantity(cartItemId, quantity);
+        syncCart();
+    }
+
     function handleBook() {
         setIsCartOpen(false);
 
@@ -81,6 +87,7 @@ ${dependentNames.join(', ')}`;
                 totalUah={cartTotalUah}
                 onClose={() => setIsCartOpen(false)}
                 onRemove={handleRemove}
+                onQuantityChange={handleQuantityChange}
                 onClear={handleClear}
                 onBook={handleBook}
             />

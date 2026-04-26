@@ -252,6 +252,35 @@ export function removeServiceFromCart(cartItemId: string): CartItem[] {
     return next;
 }
 
+
+export function setCartItemQuantity(cartItemId: string, quantity: number): CartItem[] {
+    const current = getCart();
+    const target = current.find((item) => item.cartItemId === cartItemId) || current.find((item) => item.serviceId === cartItemId);
+    if (!target) return current;
+
+    const normalizedQuantity = Math.floor(Number(quantity));
+
+    const next = current
+        .map((item) => {
+            if (item.cartItemId !== target.cartItemId) return item;
+            if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) return null;
+
+            const minQuantity = 1;
+            const maxQuantity = item.allowMultipleInCart
+                ? item.maxCartQuantity ?? 99
+                : 1;
+
+            return {
+                ...item,
+                quantity: Math.min(maxQuantity, Math.max(minQuantity, normalizedQuantity)),
+            };
+        })
+        .filter(Boolean) as CartItem[];
+
+    saveCart(next);
+    return next;
+}
+
 export function getDependentServiceNames(cartItemId: string): string[] {
     const current = getCart();
     const target = current.find((item) => item.cartItemId === cartItemId) || current.find((item) => item.serviceId === cartItemId);

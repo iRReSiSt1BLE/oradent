@@ -3,6 +3,7 @@ export type AgentConfiguredPair = {
   displayName: string;
   videoDeviceId: string;
   audioDeviceId: string;
+  snapshotHotkey?: string;
 };
 
 export type AgentConfig = {
@@ -17,6 +18,7 @@ export type AgentConfig = {
   transportKey: string;
   activePairKey: string;
   configuredPairs: AgentConfiguredPair[];
+  snapshotHotkey: string;
 };
 
 export const defaultConfig: AgentConfig = {
@@ -31,4 +33,5 @@ export const defaultConfig: AgentConfig = {
   transportKey: process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || 'oradent-capture-transport',
   activePairKey: '',
   configuredPairs: [],
+  snapshotHotkey: 'F8',
 };

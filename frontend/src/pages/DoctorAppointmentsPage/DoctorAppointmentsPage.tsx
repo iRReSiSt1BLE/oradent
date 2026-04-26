@@ -48,6 +48,15 @@ const accessDurationOptions: Array<{ value: AccessDurationKey; label: string }> 
     { value: '30d', label: '30 днів' },
 ];
 
+function dedupeVideoRecords(records: VideoRecord[]) {
+    const seen = new Map<string, VideoRecord>();
+    records.forEach((record) => {
+        const key = record.id || `${record.originalFileName}-${record.createdAt}`;
+        if (!seen.has(key)) seen.set(key, record);
+    });
+    return Array.from(seen.values());
+}
+
 function formatDateTime(value: string | null) {
     if (!value) return '—';
     const date = new Date(value);
@@ -180,7 +189,7 @@ export default function DoctorAppointmentsPage() {
 
             if (passwordAction.type === 'videos') {
                 const response = await getVideosByAppointment(token, passwordAction.appointment.id);
-                const records = Array.isArray(response.data) ? response.data : [];
+                const records = dedupeVideoRecords(Array.isArray(response.data) ? response.data : []);
 
                 if (!records.length) {
                     throw new Error('Для цього прийому відео ще немає');
@@ -338,6 +347,14 @@ export default function DoctorAppointmentsPage() {
                                             disabled={!item.consultationPdfReady}
                                         >
                                             Переглянути файл
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            className="doctor-appointments-page__secondary-btn"
+                                            onClick={() => navigate(`/my-dental-chart?appointmentId=${item.id}`)}
+                                        >
+                                            Переглянути зубну карту
                                         </button>
 
                                         <button

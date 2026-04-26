@@ -356,12 +356,17 @@ export class VideoService {
             throw new ForbiddenException('Capture agent не має права завантажувати відео для цього прийому');
         }
 
-        const plainBuffer = decryptAgentTransportPayload({
-            encryptedBuffer: file.buffer,
-            secret: this.getTransportSecret(),
-            ivBase64: dto.transportIv,
-            authTagBase64: dto.transportAuthTag,
-        });
+        let plainBuffer: Buffer;
+        try {
+            plainBuffer = decryptAgentTransportPayload({
+                encryptedBuffer: file.buffer,
+                secret: this.getTransportSecret(),
+                ivBase64: dto.transportIv,
+                authTagBase64: dto.transportAuthTag,
+            });
+        } catch {
+            throw new ForbiddenException('Не вдалося розшифрувати відео від capture agent. Перепідключіть агент, щоб оновити transportKey.');
+        }
 
         const computedHash = createHash('sha256').update(plainBuffer).digest('hex');
         if (computedHash.toLowerCase() !== String(dto.sha256Hash || '').trim().toLowerCase()) {

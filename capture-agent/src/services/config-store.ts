@@ -48,6 +48,7 @@ function normalizeConfiguredPairs(value: unknown): AgentConfiguredPair[] {
         displayName: trimString(entry.displayName),
         videoDeviceId: trimString(entry.videoDeviceId),
         audioDeviceId: trimString(entry.audioDeviceId),
+        snapshotHotkey: trimString(entry.snapshotHotkey),
       };
     })
     .filter((item) => item.pairKey && item.videoDeviceId && item.audioDeviceId)
@@ -80,6 +81,7 @@ function buildConfig(payload?: Partial<AgentConfig>): AgentConfig {
     transportKey: trimString((source as AgentConfig).transportKey, defaultConfig.transportKey) || defaultConfig.transportKey,
     activePairKey: trimString(source.activePairKey),
     configuredPairs: normalizeConfiguredPairs(source.configuredPairs),
+    snapshotHotkey: trimString(source.snapshotHotkey, defaultConfig.snapshotHotkey),
   };
 }
 

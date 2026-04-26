@@ -20,6 +20,17 @@ import {
 } from '../../shared/api/appointmentApi';
 import { getPublicDoctors, type PublicDoctorItem } from '../../shared/api/doctorApi';
 import { getActivePublicServices, type ClinicService } from '../../shared/api/servicesApi';
+import {
+    createDentalSnapshot,
+    deleteDentalSnapshot,
+    fetchDentalSnapshotFile,
+    getAppointmentDentalChart,
+    updateDentalSnapshot,
+    type DentalChartResponse,
+    type DentalSnapshotItem,
+    type DentalTargetType,
+} from '../../shared/api/dentalChartApi';
+import { API_BASE_URL } from '../../shared/api/http';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import './DoctorAppointmentDetailPage.scss';
 
@@ -43,12 +54,123 @@ type RecorderSlotState = {
     previewImageDataUrl: string | null;
     previewCapturedAt: string | null;
     previewError: string | null;
+    previewWebRtcActive: boolean;
 };
 
 type AlertState = {
     variant: 'success' | 'error' | 'info';
     message: string;
 } | null;
+
+type DentalSnapshotDraft = {
+    title: string;
+    description: string;
+    targetValue: string;
+};
+
+type DentalTargetSelection = {
+    targetType: DentalTargetType;
+    label: string;
+    toothNumber?: number | null;
+    jaw?: 'UPPER' | 'LOWER' | 'WHOLE' | null;
+};
+
+const DENTAL_TEETH_ROWS = [
+    [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28],
+    [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38],
+];
+
+const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
+    iceServers: [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    ],
+};
+
+function buildPreviewWsUrl(token: string) {
+    const url = new URL(API_BASE_URL);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/capture-agent/preview/ws';
+    url.search = new URLSearchParams({ token }).toString();
+    return url.toString();
+}
+
+function targetValueFromSnapshot(snapshot: DentalSnapshotItem) {
+    if (snapshot.targetType === 'TOOTH' && snapshot.toothNumber) {
+        return `TOOTH:${snapshot.toothNumber}`;
+    }
+
+    if (snapshot.targetType === 'JAW' && snapshot.jaw) {
+        return `JAW:${snapshot.jaw}`;
+    }
+
+    return 'MOUTH:mouth';
+}
+
+function targetValueFromSelection(target: DentalTargetSelection) {
+    if (target.targetType === 'TOOTH' && target.toothNumber) {
+        return `TOOTH:${target.toothNumber}`;
+    }
+
+    if (target.targetType === 'JAW' && target.jaw) {
+        return `JAW:${target.jaw === 'LOWER' ? 'LOWER' : 'UPPER'}`;
+    }
+
+    return 'MOUTH:mouth';
+}
+
+function parseDentalTargetValue(value: string) {
+    const [targetType, rawValue] = value.split(':');
+    if (targetType === 'TOOTH') {
+        const toothNumber = Number(rawValue);
+        return {
+            targetType: 'TOOTH' as DentalTargetType,
+            targetId: `tooth-${toothNumber}`,
+            toothNumber,
+            jaw: null,
+        };
+    }
+
+    if (targetType === 'JAW') {
+        const jaw = rawValue === 'LOWER' ? 'LOWER' : 'UPPER';
+        return {
+            targetType: 'JAW' as DentalTargetType,
+            targetId: jaw === 'UPPER' ? 'upper-jaw' : 'lower-jaw',
+            toothNumber: null,
+            jaw,
+        };
+    }
+
+    return {
+        targetType: 'MOUTH' as DentalTargetType,
+        targetId: 'mouth',
+        toothNumber: null,
+        jaw: 'WHOLE' as const,
+    };
+}
+
+function dentalTargetLabel(target: DentalTargetSelection | DentalSnapshotItem) {
+    if (target.targetType === 'TOOTH' && target.toothNumber) {
+        return `Зуб ${target.toothNumber}`;
+    }
+
+    if (target.targetType === 'JAW') {
+        return target.jaw === 'LOWER' ? 'Нижня щелепа' : 'Верхня щелепа';
+    }
+
+    return 'Уся ротова порожнина';
+}
+
+function snapshotMatchesTarget(snapshot: DentalSnapshotItem, target: DentalTargetSelection) {
+    if (target.targetType === 'TOOTH') {
+        return snapshot.targetType === 'TOOTH' && snapshot.toothNumber === target.toothNumber;
+    }
+
+    if (target.targetType === 'JAW') {
+        return snapshot.targetType === 'JAW' && snapshot.jaw === target.jaw;
+    }
+
+    return snapshot.targetType === 'MOUTH';
+}
 
 type CalendarCell =
     | { kind: 'empty'; key: string }
@@ -224,11 +346,35 @@ export default function DoctorAppointmentDetailPage() {
     const [selectedTime, setSelectedTime] = useState('');
     const [selectedCabinetId, setSelectedCabinetId] = useState<string | null>(null);
 
+    const [dentalChart, setDentalChart] = useState<DentalChartResponse | null>(null);
+    const [dentalLoading, setDentalLoading] = useState(false);
+    const [dentalSavingId, setDentalSavingId] = useState<string | null>(null);
+    const [dentalDeletingId, setDentalDeletingId] = useState<string | null>(null);
+    const [dentalDrafts, setDentalDrafts] = useState<Record<string, DentalSnapshotDraft>>({});
+    const [newDentalDraft, setNewDentalDraft] = useState<DentalSnapshotDraft>({
+        title: '',
+        description: '',
+        targetValue: 'MOUTH:mouth',
+    });
+    const [dentalImageUrls, setDentalImageUrls] = useState<Record<string, string>>({});
+    const [selectedDentalTarget, setSelectedDentalTarget] = useState<DentalTargetSelection>({
+        targetType: 'MOUTH',
+        label: 'Уся ротова порожнина',
+        jaw: 'WHOLE',
+    });
+
     const previewRefs = useRef<Record<string, HTMLVideoElement | HTMLImageElement | null>>({});
+    const previewVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+    const previewPeerConnectionsRef = useRef<Record<string, RTCPeerConnection | null>>({});
+    const previewSocketsRef = useRef<Record<string, WebSocket | null>>({});
+    const previewSessionIdsRef = useRef<Record<string, string | null>>({});
+    const previewFallbackTimersRef = useRef<Record<string, number | null>>({});
+    const previewStreamsRef = useRef<Record<string, MediaStream | null>>({});
     const streamsRef = useRef<Record<string, MediaStream | null>>({});
     const recordersRef = useRef<Record<string, MediaRecorder | null>>({});
     const previewPollersRef = useRef<Record<string, number | null>>({});
     const previewInFlightRef = useRef<Record<string, boolean>>({});
+    const dentalImageUrlsRef = useRef<Record<string, string>>({});
     const autoStartedRef = useRef<Set<string>>(new Set());
     const finishAfterUploadsRef = useRef(false);
 
@@ -245,6 +391,23 @@ export default function DoctorAppointmentDetailPage() {
         const statusCompleted = String(appointment?.status || '').toUpperCase() === 'COMPLETED';
         return visitCompleted || statusCompleted;
     }, [appointment?.status, appointment?.visitFlowStatus]);
+    const dentalTargetOptions = useMemo(() => [
+        { value: 'MOUTH:mouth', label: 'Уся ротова порожнина' },
+        { value: 'JAW:UPPER', label: 'Верхня щелепа' },
+        { value: 'JAW:LOWER', label: 'Нижня щелепа' },
+        ...DENTAL_TEETH_ROWS.flat().map((toothNumber) => ({
+            value: `TOOTH:${toothNumber}`,
+            label: `Зуб ${toothNumber}`,
+        })),
+    ], []);
+    const selectedDentalHistory = useMemo(
+        () => (dentalChart?.snapshots || []).filter((snapshot) => snapshotMatchesTarget(snapshot, selectedDentalTarget)),
+        [dentalChart?.snapshots, selectedDentalTarget],
+    );
+
+    useEffect(() => {
+        setNewDentalDraft((prev) => ({ ...prev, targetValue: targetValueFromSelection(selectedDentalTarget) }));
+    }, [selectedDentalTarget]);
 
     useEffect(() => {
         async function loadAppointment() {
@@ -270,6 +433,69 @@ export default function DoctorAppointmentDetailPage() {
 
         void loadAppointment();
     }, [id, isDoctor, token]);
+
+    async function loadDentalChart(silent = false) {
+        if (!appointment?.id || !token) return;
+
+        try {
+            if (!silent) setDentalLoading(true);
+            const response = await getAppointmentDentalChart(token, appointment.id);
+            setDentalChart(response);
+            setDentalDrafts((prev) => {
+                const next = { ...prev };
+                response.snapshots.forEach((snapshot) => {
+                    if (!next[snapshot.id]) {
+                        next[snapshot.id] = {
+                            title: snapshot.title || '',
+                            description: snapshot.description || '',
+                            targetValue: targetValueFromSnapshot(snapshot),
+                        };
+                    }
+                });
+                return next;
+            });
+        } catch (error) {
+            if (!silent) {
+                setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'Не вдалося завантажити зубну карту' });
+            }
+        } finally {
+            if (!silent) setDentalLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        if (!appointment?.id || !token) return;
+
+        void loadDentalChart();
+        const timerId = window.setInterval(() => {
+            void loadDentalChart(true);
+        }, 4500);
+
+        return () => window.clearInterval(timerId);
+    }, [appointment?.id, token]);
+
+    useEffect(() => {
+        if (!token || !dentalChart?.snapshots?.length) return;
+
+        dentalChart.snapshots.forEach((snapshot) => {
+            if (dentalImageUrlsRef.current[snapshot.id]) return;
+
+            void fetchDentalSnapshotFile(token, snapshot.id)
+                .then((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    dentalImageUrlsRef.current[snapshot.id] = url;
+                    setDentalImageUrls((prev) => ({ ...prev, [snapshot.id]: url }));
+                })
+                .catch(() => null);
+        });
+    }, [dentalChart?.snapshots, token]);
+
+    useEffect(() => {
+        return () => {
+            Object.values(dentalImageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+            dentalImageUrlsRef.current = {};
+        };
+    }, []);
 
     useEffect(() => {
         setVideoDevices([]);
@@ -312,6 +538,7 @@ export default function DoctorAppointmentDetailPage() {
             previewImageDataUrl: null,
             previewCapturedAt: null,
             previewError: null,
+            previewWebRtcActive: false,
         }));
 
         setSlots(preparedSlots);
@@ -348,6 +575,7 @@ export default function DoctorAppointmentDetailPage() {
             });
             previewPollersRef.current = {};
             previewInFlightRef.current = {};
+            Object.keys(previewSocketsRef.current).forEach((slotId) => cleanupWebRtcPreview(slotId));
 
             if (appointment?.id && token) {
                 slots.forEach((slot) => {
@@ -441,6 +669,88 @@ export default function DoctorAppointmentDetailPage() {
         setSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
 
+    function updateDentalDraft(snapshotId: string, patch: Partial<DentalSnapshotDraft>) {
+        setDentalDrafts((prev) => ({
+            ...prev,
+            [snapshotId]: {
+                title: prev[snapshotId]?.title || '',
+                description: prev[snapshotId]?.description || '',
+                targetValue: prev[snapshotId]?.targetValue || 'MOUTH:mouth',
+                ...patch,
+            },
+        }));
+    }
+
+    async function saveDentalSnapshot(snapshot: DentalSnapshotItem) {
+        if (!token) return;
+
+        const draft = dentalDrafts[snapshot.id] || {
+            title: snapshot.title || '',
+            description: snapshot.description || '',
+            targetValue: targetValueFromSnapshot(snapshot),
+        };
+        const target = parseDentalTargetValue(draft.targetValue);
+
+        try {
+            setDentalSavingId(snapshot.id);
+            await updateDentalSnapshot(token, snapshot.id, {
+                ...target,
+                title: draft.title,
+                description: draft.description,
+            });
+            await loadDentalChart(true);
+            setAlert({ variant: 'success', message: 'Знімок оновлено' });
+        } catch (error) {
+            setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'Не вдалося оновити знімок' });
+        } finally {
+            setDentalSavingId(null);
+        }
+    }
+
+    async function createDentalNote() {
+        if (!token || !appointment?.id || isCompleted) return;
+
+        const target = parseDentalTargetValue(newDentalDraft.targetValue);
+        const title = newDentalDraft.title.trim();
+        const description = newDentalDraft.description.trim();
+
+        if (!title && !description) {
+            setAlert({ variant: 'error', message: 'Додайте підпис або примітку.' });
+            return;
+        }
+
+        try {
+            setDentalSavingId('new');
+            await createDentalSnapshot(token, appointment.id, {
+                ...target,
+                title,
+                description,
+            });
+            setNewDentalDraft({ title: '', description: '', targetValue: targetValueFromSelection(selectedDentalTarget) });
+            await loadDentalChart(true);
+            setAlert({ variant: 'success', message: 'Примітку додано' });
+        } catch (error) {
+            setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'Не вдалося додати примітку' });
+        } finally {
+            setDentalSavingId(null);
+        }
+    }
+
+    async function removeDentalSnapshot(snapshotId: string) {
+        if (!token || isCompleted) return;
+
+        try {
+            setDentalDeletingId(snapshotId);
+            await deleteDentalSnapshot(token, snapshotId);
+            await loadDentalChart(true);
+            setAlert({ variant: 'success', message: 'Запис видалено' });
+        } catch (error) {
+            setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'Не вдалося видалити запис' });
+        } finally {
+            setDentalDeletingId(null);
+        }
+    }
+
     function clearPreviewPoller(slotId: string) {
         const timerId = previewPollersRef.current[slotId];
         if (typeof timerId === 'number') {
@@ -450,25 +760,212 @@ export default function DoctorAppointmentDetailPage() {
         delete previewInFlightRef.current[slotId];
     }
 
-    async function startSlotPreview(slotId: string) {
+    function cleanupWebRtcPreview(slotId: string) {
+        const fallbackTimer = previewFallbackTimersRef.current[slotId];
+        if (typeof fallbackTimer === 'number') {
+            window.clearTimeout(fallbackTimer);
+        }
+        delete previewFallbackTimersRef.current[slotId];
+
+        const sessionId = previewSessionIdsRef.current[slotId];
+        const socket = previewSocketsRef.current[slotId];
+        if (socket && socket.readyState === WebSocket.OPEN && sessionId) {
+            try {
+                socket.send(JSON.stringify({ type: 'preview.stop', payload: { previewSessionId: sessionId } }));
+            } catch {
+                // noop
+            }
+        }
+        if (socket) {
+            try {
+                socket.onopen = null;
+                socket.onmessage = null;
+                socket.onerror = null;
+                socket.onclose = null;
+                socket.close();
+            } catch {
+                // noop
+            }
+        }
+        delete previewSocketsRef.current[slotId];
+        delete previewSessionIdsRef.current[slotId];
+
+        const pc = previewPeerConnectionsRef.current[slotId];
+        if (pc) {
+            try {
+                pc.ontrack = null;
+                pc.onicecandidate = null;
+                pc.onconnectionstatechange = null;
+                pc.close();
+            } catch {
+                // noop
+            }
+        }
+        delete previewPeerConnectionsRef.current[slotId];
+
+        const stream = previewStreamsRef.current[slotId];
+        if (stream) {
+            stream.getTracks().forEach((track) => track.stop());
+        }
+        delete previewStreamsRef.current[slotId];
+
+        const video = previewVideoRefs.current[slotId];
+        if (video) {
+            video.pause();
+            video.srcObject = null;
+        }
+    }
+
+    async function startSlotWebRtcPreview(slotId: string): Promise<boolean> {
+        if (!appointment?.id || !token || typeof RTCPeerConnection === 'undefined') return false;
+
+        return new Promise<boolean>((resolve) => {
+            let settled = false;
+            const candidateQueue: RTCIceCandidateInit[] = [];
+
+            const finish = (value: boolean) => {
+                if (settled) return;
+                settled = true;
+                const timerId = previewFallbackTimersRef.current[slotId];
+                if (typeof timerId === 'number') window.clearTimeout(timerId);
+                delete previewFallbackTimersRef.current[slotId];
+                resolve(value);
+            };
+
+            try {
+                cleanupWebRtcPreview(slotId);
+                const socket = new WebSocket(buildPreviewWsUrl(token));
+                const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+
+                previewSocketsRef.current[slotId] = socket;
+                previewPeerConnectionsRef.current[slotId] = pc;
+
+                pc.addTransceiver('video', { direction: 'recvonly' });
+
+                pc.ontrack = (event) => {
+                    const stream = event.streams[0] || new MediaStream([event.track]);
+                    previewStreamsRef.current[slotId] = stream;
+                    const video = previewVideoRefs.current[slotId];
+                    if (video) {
+                        video.srcObject = stream;
+                        void video.play().catch(() => undefined);
+                    }
+                    updateSlot(slotId, {
+                        previewLoading: false,
+                        previewError: null,
+                        previewImageDataUrl: null,
+                        previewCapturedAt: new Date().toISOString(),
+                        previewWebRtcActive: true,
+                    });
+                    finish(true);
+                };
+
+                pc.onicecandidate = (event) => {
+                    if (!event.candidate) return;
+                    const candidate = event.candidate.toJSON();
+                    const previewSessionId = previewSessionIdsRef.current[slotId];
+                    if (!previewSessionId || socket.readyState !== WebSocket.OPEN) {
+                        candidateQueue.push(candidate);
+                        return;
+                    }
+                    socket.send(JSON.stringify({ type: 'preview.ice', payload: { previewSessionId, candidate } }));
+                };
+
+                pc.onconnectionstatechange = () => {
+                    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                        finish(false);
+                    }
+                };
+
+                socket.onopen = () => {
+                    void (async () => {
+                        try {
+                            const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: false });
+                            await pc.setLocalDescription(offer);
+                            socket.send(JSON.stringify({
+                                type: 'preview.offer',
+                                payload: {
+                                    appointmentId: appointment.id,
+                                    cabinetDeviceId: slotId,
+                                    description: pc.localDescription
+                                        ? { type: pc.localDescription.type, sdp: pc.localDescription.sdp || undefined }
+                                        : offer,
+                                },
+                            }));
+                        } catch {
+                            finish(false);
+                        }
+                    })();
+                };
+
+                socket.onmessage = (event) => {
+                    void (async () => {
+                        try {
+                            const message = JSON.parse(String(event.data || '{}')) as { type?: string; payload?: any };
+                            const payload = message.payload || {};
+
+                            if (message.type === 'preview.session' && payload.previewSessionId) {
+                                previewSessionIdsRef.current[slotId] = String(payload.previewSessionId);
+                                while (candidateQueue.length) {
+                                    const candidate = candidateQueue.shift();
+                                    socket.send(JSON.stringify({
+                                        type: 'preview.ice',
+                                        payload: { previewSessionId: payload.previewSessionId, candidate },
+                                    }));
+                                }
+                                return;
+                            }
+
+                            if (message.type === 'preview.signal') {
+                                if (payload.previewSessionId) {
+                                    previewSessionIdsRef.current[slotId] = String(payload.previewSessionId);
+                                }
+                                if (payload.error) {
+                                    updateSlot(slotId, { previewError: String(payload.error) });
+                                    finish(false);
+                                    return;
+                                }
+                                if (payload.description) {
+                                    await pc.setRemoteDescription(payload.description);
+                                }
+                                if (payload.candidate) {
+                                    await pc.addIceCandidate(payload.candidate);
+                                }
+                                return;
+                            }
+
+                            if (message.type === 'preview.error') {
+                                updateSlot(slotId, { previewError: String(payload.message || 'WebRTC preview error') });
+                                finish(false);
+                            }
+                        } catch {
+                            finish(false);
+                        }
+                    })();
+                };
+
+                socket.onerror = () => finish(false);
+                socket.onclose = () => {
+                    if (!settled) finish(false);
+                };
+
+                previewFallbackTimersRef.current[slotId] = window.setTimeout(() => finish(false), 7000);
+            } catch {
+                finish(false);
+            }
+        });
+    }
+
+    async function startSlotFramePreview(slotId: string) {
         if (!appointment?.id || !token) return;
 
-        const slot = slots.find((item) => item.id === slotId);
-        if (!slot?.videoDeviceId) {
-            updateSlot(slotId, { previewActive: false, previewLoading: false, previewError: 'Для цього джерела не налаштовано камеру.' });
-            return;
-        }
-
-        clearPreviewPoller(slotId);
-        updateSlot(slotId, {
-            showPreview: true,
-            previewActive: true,
-            previewLoading: true,
-            previewError: null,
-        });
-
         try {
-            await startAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slotId });
+            await startAppointmentAgentPreview(token, appointment.id, {
+                cabinetDeviceId: slotId,
+                fps: 12,
+                width: 960,
+                quality: 0.82,
+            });
         } catch (error) {
             updateSlot(slotId, {
                 previewActive: false,
@@ -490,6 +987,7 @@ export default function DoctorAppointmentDetailPage() {
                     updateSlot(slotId, {
                         previewLoading: false,
                         previewError: null,
+                        previewWebRtcActive: false,
                         previewImageDataUrl: frame.preview.imageDataUrl,
                         previewCapturedAt: frame.preview.capturedAt,
                     });
@@ -510,8 +1008,37 @@ export default function DoctorAppointmentDetailPage() {
         }, 250);
     }
 
+    async function startSlotPreview(slotId: string) {
+        if (!appointment?.id || !token) return;
+
+        const slot = slots.find((item) => item.id === slotId);
+        if (!slot?.videoDeviceId) {
+            updateSlot(slotId, { previewActive: false, previewLoading: false, previewError: 'Для цього джерела не налаштовано камеру.' });
+            return;
+        }
+
+        clearPreviewPoller(slotId);
+        cleanupWebRtcPreview(slotId);
+        updateSlot(slotId, {
+            showPreview: true,
+            previewActive: true,
+            previewLoading: true,
+            previewError: null,
+            previewImageDataUrl: null,
+            previewCapturedAt: null,
+            previewWebRtcActive: false,
+        });
+
+        const webRtcStarted = await startSlotWebRtcPreview(slotId);
+        if (webRtcStarted) return;
+
+        cleanupWebRtcPreview(slotId);
+        await startSlotFramePreview(slotId);
+    }
+
     async function stopSlotPreview(slotId: string, options?: { clearFrame?: boolean }) {
         clearPreviewPoller(slotId);
+        cleanupWebRtcPreview(slotId);
 
         if (appointment?.id && token) {
             await stopAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slotId }).catch(() => null);
@@ -522,6 +1049,7 @@ export default function DoctorAppointmentDetailPage() {
             previewLoading: false,
             previewError: null,
             showPreview: false,
+            previewWebRtcActive: false,
             ...(options?.clearFrame === false ? {} : { previewImageDataUrl: null, previewCapturedAt: null }),
         });
     }
@@ -538,7 +1066,7 @@ export default function DoctorAppointmentDetailPage() {
             return;
         }
 
-        if (slot.recording && slot.videoDeviceId) {
+        if (slot.videoDeviceId) {
             void startSlotPreview(slotId);
         }
     }
@@ -553,7 +1081,7 @@ export default function DoctorAppointmentDetailPage() {
         if (!slot || slot.recording || slot.uploading) return;
         if (!slot.hasMedia) {
             if (!options?.auto) {
-                setAlert({ variant: 'error', message: 'Для цього джерела не налаштовано пару камера + мікрофон на capture agent.' });
+                setAlert({ variant: 'error', message: 'Для цього джерела не налаштовано пару камера + мікрофон.' });
             }
             return;
         }
@@ -575,12 +1103,12 @@ export default function DoctorAppointmentDetailPage() {
                 void startSlotPreview(slotId);
             }
             if (!options?.auto) {
-                setAlert({ variant: 'success', message: 'Команду старту запису надіслано до capture agent' });
+                setAlert({ variant: 'success', message: 'Команду старту запису надіслано' });
             }
         } catch (err) {
             updateSlot(slotId, { recording: false, uploading: false, showPreview: false, previewActive: false, previewLoading: false });
             if (!options?.auto) {
-                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис через capture agent' });
+                setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося почати запис' });
             }
         }
     }
@@ -605,7 +1133,7 @@ export default function DoctorAppointmentDetailPage() {
             });
         } catch (err) {
             updateSlot(slotId, { uploading: false });
-            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося зупинити запис через capture agent' });
+            setAlert({ variant: 'error', message: err instanceof Error ? err.message : 'Не вдалося зупинити запис' });
         }
     }
 
@@ -741,7 +1269,7 @@ export default function DoctorAppointmentDetailPage() {
                                 <div className="doctor-appointment-detail__section-head">
                                     <div>
                                         <h2>Відеозапис</h2>
-                                        <p>{appointment.cabinet?.devices?.length ? 'Запис цього прийому виконує локальний capture agent у кабінеті.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
+                                        <p>{appointment.cabinet?.devices?.length ? 'Для цього прийому доступний локальний запис у кабінеті.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
                                     </div>
                                 </div>
 
@@ -777,21 +1305,36 @@ export default function DoctorAppointmentDetailPage() {
 
                                                     <div className={`doctor-appointment-detail__preview-panel ${expanded ? 'is-open' : ''}`}>
                                                         <div className="doctor-appointment-detail__preview-inner">
-                                                            {slot.showPreview ? (
-                                                                <video
+                                                            <video
+                                                                ref={(element) => {
+                                                                    previewVideoRefs.current[slot.id] = element;
+                                                                }}
+                                                                className="doctor-appointment-detail__preview"
+                                                                autoPlay
+                                                                muted
+                                                                playsInline
+                                                                style={{ display: slot.previewWebRtcActive ? undefined : 'none' }}
+                                                            />
+                                                            {!slot.previewWebRtcActive && slot.previewImageDataUrl ? (
+                                                                <img
                                                                     ref={(element) => {
                                                                         previewRefs.current[slot.id] = element;
                                                                     }}
                                                                     className="doctor-appointment-detail__preview"
-                                                                    playsInline
-                                                                    autoPlay
-                                                                    muted
+                                                                    src={slot.previewImageDataUrl}
+                                                                    alt={`Live preview ${slot.name}`}
                                                                 />
-                                                            ) : (
+                                                            ) : null}
+                                                            {!slot.previewWebRtcActive && !slot.previewImageDataUrl ? (
                                                                 <div className="doctor-appointment-detail__preview-placeholder">
-                                                                    Запис веде локальний capture agent. Live-preview на цій сторінці не показується.
+                                                                    {slot.previewLoading ? 'Завантаження прев’ю…' : slot.previewError || 'Натисніть стрілку, щоб показати прев’ю.'}
                                                                 </div>
-                                                            )}
+                                                            ) : null}
+                                                            {slot.previewCapturedAt ? (
+                                                                <span className="doctor-appointment-detail__preview-time">
+                                                                    {slot.previewWebRtcActive ? 'WebRTC preview' : `Кадр: ${formatDateTime(slot.previewCapturedAt)}`}
+                                                                </span>
+                                                            ) : null}
                                                         </div>
                                                     </div>
 
@@ -826,6 +1369,260 @@ export default function DoctorAppointmentDetailPage() {
                                                 </div>
                                             );
                                         })
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="doctor-appointment-detail__panel doctor-appointment-detail__dental-panel">
+                                <div className="doctor-appointment-detail__section-head">
+                                    <div>
+                                        <h2>Зубна карта пацієнта</h2>
+                                        <p>Поки без зубної формули: 32 постійні зуби, верхня/нижня щелепа і загальна історія ротової порожнини.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="doctor-appointment-detail__ghost-btn"
+                                        onClick={() => void loadDentalChart(false)}
+                                        disabled={dentalLoading}
+                                    >
+                                        {dentalLoading ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                        Оновити
+                                    </button>
+                                </div>
+
+                                <div className="doctor-appointment-detail__dental-layout">
+                                    <div className="doctor-appointment-detail__dental-map">
+                                        <div className="doctor-appointment-detail__jaw-actions">
+                                            <button
+                                                type="button"
+                                                className={selectedDentalTarget.targetType === 'MOUTH' ? 'is-selected' : ''}
+                                                onClick={() => setSelectedDentalTarget({ targetType: 'MOUTH', label: 'Уся ротова порожнина', jaw: 'WHOLE' })}
+                                            >
+                                                Уся ротова порожнина
+                                                <span>{dentalChart?.mouthHistory.length || 0}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'UPPER' ? 'is-selected' : ''}
+                                                onClick={() => setSelectedDentalTarget({ targetType: 'JAW', label: 'Верхня щелепа', jaw: 'UPPER' })}
+                                            >
+                                                Верхня щелепа
+                                                <span>{dentalChart?.upperJawHistory.length || 0}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'LOWER' ? 'is-selected' : ''}
+                                                onClick={() => setSelectedDentalTarget({ targetType: 'JAW', label: 'Нижня щелепа', jaw: 'LOWER' })}
+                                            >
+                                                Нижня щелепа
+                                                <span>{dentalChart?.lowerJawHistory.length || 0}</span>
+                                            </button>
+                                        </div>
+
+                                        <div className="doctor-appointment-detail__tooth-grid" aria-label="Зубна карта 32 зуби">
+                                            {DENTAL_TEETH_ROWS.map((row, rowIndex) => (
+                                                <div className="doctor-appointment-detail__tooth-row" key={`row-${rowIndex}`}>
+                                                    {row.map((toothNumber) => {
+                                                        const tooth = dentalChart?.teeth.find((item) => item.number === toothNumber);
+                                                        const isSelected = selectedDentalTarget.targetType === 'TOOTH' && selectedDentalTarget.toothNumber === toothNumber;
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                key={toothNumber}
+                                                                className={`doctor-appointment-detail__tooth ${isSelected ? 'is-selected' : ''} ${tooth?.snapshotCount ? 'has-history' : ''}`}
+                                                                onClick={() => setSelectedDentalTarget({ targetType: 'TOOTH', label: `Зуб ${toothNumber}`, toothNumber })}
+                                                            >
+                                                                <span>{toothNumber}</span>
+                                                                {tooth?.snapshotCount ? <em>{tooth.snapshotCount}</em> : null}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="doctor-appointment-detail__dental-history">
+                                        <div className="doctor-appointment-detail__dental-history-head">
+                                            <h3>{selectedDentalTarget.label}</h3>
+                                            <span>{selectedDentalHistory.length} записів</span>
+                                        </div>
+                                        {selectedDentalHistory.length ? (
+                                            <div className="doctor-appointment-detail__snapshot-mini-list">
+                                                {selectedDentalHistory.map((snapshot) => (
+                                                    <article key={snapshot.id} className="doctor-appointment-detail__snapshot-mini-card">
+                                                        {snapshot.hasFile ? (
+                                                            dentalImageUrls[snapshot.id] ? (
+                                                                <a href={dentalImageUrls[snapshot.id]} target="_blank" rel="noreferrer" className="doctor-appointment-detail__snapshot-link">
+                                                                    <img src={dentalImageUrls[snapshot.id]} alt={snapshot.title || dentalTargetLabel(snapshot)} />
+                                                                </a>
+                                                            ) : <div className="doctor-appointment-detail__snapshot-image-placeholder">Завантаження…</div>
+                                                        ) : <div className="doctor-appointment-detail__snapshot-image-placeholder is-note">Без фото</div>}
+                                                        <strong>{snapshot.title || dentalTargetLabel(snapshot)}</strong>
+                                                        <span>{snapshot.doctorName || 'Лікар не вказаний'} · {formatDateTime(snapshot.capturedAt || snapshot.createdAt)}</span>
+                                                        {snapshot.description ? <p>{snapshot.description}</p> : null}
+                                                        {!isCompleted ? (
+                                                            <button
+                                                                type="button"
+                                                                className="doctor-appointment-detail__mini-delete-btn"
+                                                                onClick={() => void removeDentalSnapshot(snapshot.id)}
+                                                                disabled={dentalDeletingId === snapshot.id}
+                                                            >
+                                                                {dentalDeletingId === snapshot.id ? 'Видалення…' : 'Видалити'}
+                                                            </button>
+                                                        ) : null}
+                                                    </article>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="doctor-appointment-detail__empty-note">Для вибраної області ще немає записів.</div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="doctor-appointment-detail__snapshot-editor">
+                                    <div className="doctor-appointment-detail__dental-history-head">
+                                        <h3>Усі записи по зубній карті</h3>
+                                        <span>{dentalChart?.snapshots.length || 0}</span>
+                                    </div>
+
+                                    {!isCompleted ? (
+                                        <div className="doctor-appointment-detail__snapshot-create">
+                                            <label className="doctor-appointment-detail__field">
+                                                <span>Область</span>
+                                                <select
+                                                    value={newDentalDraft.targetValue}
+                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, targetValue: event.target.value }))}
+                                                >
+                                                    {dentalTargetOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label className="doctor-appointment-detail__field">
+                                                <span>Підпис</span>
+                                                <input
+                                                    value={newDentalDraft.title}
+                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, title: event.target.value }))}
+                                                    placeholder="Наприклад: глибокий карієс"
+                                                />
+                                            </label>
+                                            <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                                <span>Опис / примітка</span>
+                                                <textarea
+                                                    value={newDentalDraft.description}
+                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, description: event.target.value }))}
+                                                    placeholder="Можна додати запис навіть без фото"
+                                                />
+                                            </label>
+                                            <button
+                                                type="button"
+                                                className="doctor-appointment-detail__ghost-btn"
+                                                onClick={() => void createDentalNote()}
+                                                disabled={dentalSavingId === 'new'}
+                                            >
+                                                {dentalSavingId === 'new' ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                                Додати запис
+                                            </button>
+                                        </div>
+                                    ) : null}
+
+                                    {dentalChart?.snapshots.length ? (
+                                        <div className="doctor-appointment-detail__snapshot-list">
+                                            {dentalChart.snapshots.map((snapshot) => {
+                                                const draft = dentalDrafts[snapshot.id] || {
+                                                    title: snapshot.title || '',
+                                                    description: snapshot.description || '',
+                                                    targetValue: targetValueFromSnapshot(snapshot),
+                                                };
+                                                const snapshotLocked = Boolean(snapshot.title || snapshot.description);
+
+                                                return (
+                                                    <article className="doctor-appointment-detail__snapshot-card doctor-appointment-detail__snapshot-card--compact" key={snapshot.id}>
+                                                        <div className="doctor-appointment-detail__snapshot-image doctor-appointment-detail__snapshot-image--wide">
+                                                            {snapshot.hasFile ? (
+                                                                dentalImageUrls[snapshot.id] ? (
+                                                                    <a href={dentalImageUrls[snapshot.id]} target="_blank" rel="noreferrer" className="doctor-appointment-detail__snapshot-link">
+                                                                        <img src={dentalImageUrls[snapshot.id]} alt={snapshot.title || 'Dental snapshot'} />
+                                                                    </a>
+                                                                ) : <span>Завантаження…</span>
+                                                            ) : <span>Без фото</span>}
+                                                        </div>
+                                                        <div className="doctor-appointment-detail__snapshot-fields doctor-appointment-detail__snapshot-fields--readonly">
+                                                            <div className="doctor-appointment-detail__snapshot-meta">
+                                                                <span>{snapshot.doctorName || 'Лікар не вказаний'}</span>
+                                                                <span>{formatDateTime(snapshot.capturedAt || snapshot.createdAt)}</span>
+                                                            </div>
+                                                            {!isCompleted ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="doctor-appointment-detail__mini-delete-btn doctor-appointment-detail__mini-delete-btn--inline"
+                                                                    onClick={() => void removeDentalSnapshot(snapshot.id)}
+                                                                    disabled={dentalDeletingId === snapshot.id}
+                                                                >
+                                                                    {dentalDeletingId === snapshot.id ? 'Видалення…' : 'Видалити запис'}
+                                                                </button>
+                                                            ) : null}
+                                                            <div className="doctor-appointment-detail__snapshot-readonly-row">
+                                                                <span>Область</span>
+                                                                <strong>{dentalTargetLabel(snapshot)}</strong>
+                                                            </div>
+                                                            <div className="doctor-appointment-detail__snapshot-readonly-row">
+                                                                <span>Підпис</span>
+                                                                <strong>{snapshot.title || 'Ще не підписано'}</strong>
+                                                            </div>
+                                                            {snapshot.description ? (
+                                                                <p className="doctor-appointment-detail__snapshot-description">{snapshot.description}</p>
+                                                            ) : null}
+
+                                                            {!snapshotLocked && !isCompleted ? (
+                                                                <details className="doctor-appointment-detail__snapshot-once-editor">
+                                                                    <summary>Додати підпис і привʼязати знімок</summary>
+                                                                    <label className="doctor-appointment-detail__field">
+                                                                        <span>Область</span>
+                                                                        <select
+                                                                            value={draft.targetValue}
+                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { targetValue: event.target.value })}
+                                                                        >
+                                                                            {dentalTargetOptions.map((option) => (
+                                                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </label>
+                                                                    <label className="doctor-appointment-detail__field">
+                                                                        <span>Підпис</span>
+                                                                        <input
+                                                                            value={draft.title}
+                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { title: event.target.value })}
+                                                                            placeholder="Наприклад: глибокий карієс"
+                                                                        />
+                                                                    </label>
+                                                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                                                        <span>Опис / примітка</span>
+                                                                        <textarea
+                                                                            value={draft.description}
+                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { description: event.target.value })}
+                                                                            placeholder="Що видно на знімку, контекст, рішення лікаря"
+                                                                        />
+                                                                    </label>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="doctor-appointment-detail__ghost-btn"
+                                                                        onClick={() => void saveDentalSnapshot(snapshot)}
+                                                                        disabled={dentalSavingId === snapshot.id}
+                                                                    >
+                                                                        {dentalSavingId === snapshot.id ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                                                        Зберегти один раз
+                                                                    </button>
+                                                                </details>
+                                                            ) : null}
+                                                        </div>
+                                                    </article>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="doctor-appointment-detail__empty-note">Записів ще немає.</div>
                                     )}
                                 </div>
                             </div>

@@ -108,6 +108,15 @@ async function uploadEntry(meta: QueueEntryMeta): Promise<boolean> {
   });
 
   if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    const unrecoverableTransportError = [400, 401, 403].includes(response.status)
+      && /розшифрувати|decrypt|transport|SHA-256|auth/i.test(message);
+
+    if (unrecoverableTransportError) {
+      deleteEntry(meta.entryId);
+      return true;
+    }
+
     return false;
   }
 

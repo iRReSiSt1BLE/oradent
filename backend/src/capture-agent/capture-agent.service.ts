@@ -82,14 +82,9 @@ export class CaptureAgentService {
       throw new UnauthorizedException('Cabinet code не знайдено або він протермінований.');
     }
 
-    const canReEnrollExistingCabinet =
-      !!cabinet && !!cabinet.agentKey && cabinet.agentKey === normalizedAgentKey;
+    const hasValidCabinetCode = !!cabinet || !!setupSession;
 
-    if (
-      !setupSession &&
-      !canReEnrollExistingCabinet &&
-      dto.enrollmentToken !== expectedToken
-    ) {
+    if (!hasValidCabinetCode && dto.enrollmentToken !== expectedToken) {
       throw new UnauthorizedException('Невірний enrollment token');
     }
 
@@ -495,8 +490,36 @@ export class CaptureAgentService {
       }
     }
 
+    const agent = await this.captureAgentRepository.findOne({ where: { agentKey } });
+
     if (!cabinet) {
+      if (agent?.cabinetId) {
+        agent.cabinetId = null;
+        agent.cabinet = null;
+        await this.captureAgentRepository.save(agent);
+      }
       return;
+    }
+
+    const previouslyBoundAgents = await this.captureAgentRepository.find({
+      where: { cabinetId: cabinet.id },
+    });
+
+    for (const item of previouslyBoundAgents) {
+      if (item.agentKey === agentKey) {
+        continue;
+      }
+
+      item.cabinetId = null;
+      item.cabinet = null;
+      item.status = CaptureAgentStatus.OFFLINE;
+      await this.captureAgentRepository.save(item);
+    }
+
+    if (agent && agent.cabinetId !== cabinet.id) {
+      agent.cabinetId = cabinet.id;
+      agent.cabinet = cabinet;
+      await this.captureAgentRepository.save(agent);
     }
 
     if (cabinet.agentKey !== agentKey) {
@@ -529,11 +552,10 @@ export class CaptureAgentService {
     cabinet: Cabinet | null,
     agentKey: string,
   ): void {
-    if (cabinet?.agentKey && cabinet.agentKey !== agentKey) {
-      throw new UnauthorizedException(
-        'Цей cabinet code вже привʼязаний до іншого Agent key.',
-      );
-    }
+    // Existing saved cabinets may be rebound to another local agent by entering their cabinet code.
+    // The code itself is treated as the authority for rebinding. Setup sessions remain protected below.
+    void cabinet;
+    void agentKey;
   }
 
   private ensureSetupSessionAgentKeyMatches(

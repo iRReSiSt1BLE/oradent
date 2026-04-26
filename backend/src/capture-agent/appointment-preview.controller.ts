@@ -10,12 +10,13 @@ export class AppointmentPreviewController {
   @Post('start')
   startPreview(
     @Req() req: any,
-    @Body() body: { appointmentId?: string; cabinetDeviceId?: string },
+    @Body() body: { appointmentId?: string; cabinetDeviceId?: string; fps?: number; width?: number; quality?: number },
   ) {
     return this.appointmentPreviewService.startPreview(
       req.user,
       String(body?.appointmentId || ''),
       String(body?.cabinetDeviceId || ''),
+      { fps: body?.fps, width: body?.width, quality: body?.quality },
     );
   }
 

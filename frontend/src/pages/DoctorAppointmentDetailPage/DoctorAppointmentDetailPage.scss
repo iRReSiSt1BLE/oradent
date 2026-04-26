@@ -630,3 +630,374 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.doctor-appointment-detail__preview-time {
+  display: block;
+  margin-top: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.doctor-appointment-detail__dental-panel {
+  display: grid;
+  gap: 22px;
+}
+
+.doctor-appointment-detail__dental-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.doctor-appointment-detail__dental-map,
+.doctor-appointment-detail__dental-history,
+.doctor-appointment-detail__snapshot-editor {
+  border: 1px solid #dbe4ef;
+  background: #fbfdff;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.doctor-appointment-detail__jaw-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.doctor-appointment-detail__jaw-actions button,
+.doctor-appointment-detail__tooth {
+  border: 1px solid #dbe4ef;
+  background: #fff;
+  color: #111827;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.doctor-appointment-detail__jaw-actions button {
+  min-height: 58px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.doctor-appointment-detail__jaw-actions button span,
+.doctor-appointment-detail__tooth em {
+  justify-self: start;
+  min-width: 22px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eaf6ef;
+  color: #2e7d4f;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.doctor-appointment-detail__jaw-actions button:hover,
+.doctor-appointment-detail__tooth:hover,
+.doctor-appointment-detail__jaw-actions button.is-selected,
+.doctor-appointment-detail__tooth.is-selected {
+  border-color: #2e7d4f;
+  background: #f3fbf6;
+  transform: translateY(-1px);
+}
+
+.doctor-appointment-detail__tooth-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.doctor-appointment-detail__tooth-row {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.doctor-appointment-detail__tooth {
+  position: relative;
+  min-height: 52px;
+  padding: 8px 4px;
+  display: grid;
+  place-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.doctor-appointment-detail__tooth.has-history {
+  border-color: #85c99d;
+}
+
+.doctor-appointment-detail__tooth em {
+  position: absolute;
+  right: -5px;
+  top: -8px;
+}
+
+.doctor-appointment-detail__dental-history-head,
+.doctor-appointment-detail__snapshot-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.doctor-appointment-detail__dental-history-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.doctor-appointment-detail__dental-history-head span,
+.doctor-appointment-detail__snapshot-meta span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.doctor-appointment-detail__snapshot-mini-list,
+.doctor-appointment-detail__snapshot-list {
+  display: grid;
+  gap: 12px;
+}
+
+.doctor-appointment-detail__snapshot-mini-card,
+.doctor-appointment-detail__snapshot-card {
+  border: 1px solid #e5edf6;
+  background: #fff;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.doctor-appointment-detail__snapshot-mini-card {
+  display: grid;
+  gap: 8px;
+}
+
+.doctor-appointment-detail__snapshot-mini-card img,
+.doctor-appointment-detail__snapshot-image img {
+  width: 100%;
+  border-radius: 12px;
+  background: #111827;
+  object-fit: contain;
+}
+
+.doctor-appointment-detail__snapshot-mini-card img {
+  max-height: 180px;
+}
+
+.doctor-appointment-detail__snapshot-mini-card strong {
+  font-size: 14px;
+}
+
+.doctor-appointment-detail__snapshot-mini-card p {
+  margin: 0;
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.doctor-appointment-detail__snapshot-card {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.doctor-appointment-detail__snapshot-image {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: #111827;
+  color: #cfd8e3;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.doctor-appointment-detail__snapshot-image img {
+  max-height: 240px;
+}
+
+.doctor-appointment-detail__snapshot-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.doctor-appointment-detail__empty-note {
+  border: 1px dashed #cfd8e3;
+  border-radius: 16px;
+  padding: 16px;
+  color: #6b7280;
+  font-size: 13px;
+  background: #fff;
+}
+
+@media (max-width: 1020px) {
+  .doctor-appointment-detail__dental-layout,
+  .doctor-appointment-detail__snapshot-card {
+    grid-template-columns: 1fr;
+  }
+
+  .doctor-appointment-detail__tooth-row {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .doctor-appointment-detail__jaw-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .doctor-appointment-detail__tooth-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.doctor-appointment-detail__snapshot-link {
+  display: block;
+  width: 100%;
+  text-decoration: none;
+}
+
+.doctor-appointment-detail__snapshot-card--compact {
+  grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.doctor-appointment-detail__snapshot-image--wide {
+  min-height: 220px;
+  align-items: stretch;
+}
+
+.doctor-appointment-detail__snapshot-image--wide img {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  display: block;
+}
+
+.doctor-appointment-detail__snapshot-fields--readonly {
+  gap: 8px;
+}
+
+.doctor-appointment-detail__snapshot-readonly-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.doctor-appointment-detail__snapshot-readonly-row span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.doctor-appointment-detail__snapshot-readonly-row strong {
+  font-size: 14px;
+  color: #0f172a;
+  text-align: right;
+}
+
+.doctor-appointment-detail__snapshot-description {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.doctor-appointment-detail__snapshot-once-editor {
+  margin-top: 8px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 10px;
+  background: #fbfdff;
+}
+
+.doctor-appointment-detail__snapshot-once-editor summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+@media (max-width: 860px) {
+  .doctor-appointment-detail__snapshot-card--compact {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doctor-appointment-detail {
+  &__snapshot-create {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 14px;
+    border: 1px dashed #d7dee5;
+    border-radius: 20px;
+    margin-bottom: 16px;
+    background: #fbfcfd;
+  }
+
+  &__snapshot-image-placeholder {
+    min-height: 150px;
+    border-radius: 18px;
+    display: grid;
+    place-items: center;
+    background: #eef3f6;
+    color: #6b7685;
+    font-size: 13px;
+    text-align: center;
+    padding: 12px;
+
+    &.is-note {
+      background: #f7f9fb;
+      border: 1px dashed #d7dee5;
+    }
+  }
+
+  &__mini-delete-btn {
+    margin-top: 8px;
+    align-self: flex-start;
+    border: 1px solid #cad4de;
+    border-radius: 12px;
+    background: #fff;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #24324a;
+    cursor: pointer;
+
+    &--inline {
+      margin-top: 10px;
+    }
+
+    &:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .doctor-appointment-detail {
+    &__snapshot-create {
+      grid-template-columns: 1fr;
+    }
+  }
+}

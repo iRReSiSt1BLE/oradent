@@ -21,6 +21,8 @@ import PublicDoctorPage from '../../pages/PublicDoctorPage/PublicDoctorPage';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import SmartAppointmentPage from '../../pages/SmartAppointmentPage/SmartAppointmentPage';
 import MyAppointmentsPage from '../../pages/MyAppointmentsPage/MyAppointmentsPage';
+import MyDentalChartPage from '../../pages/MyDentalChartPage/MyDentalChartPage';
+import InteractiveDentalChartPage from '../../pages/InteractiveDentalChartPage/InteractiveDentalChartPage';
 import AdminPatientsPage from '../../pages/AdminPatientsPage/AdminPatientsPage';
 import CabinetsAdminPage from '../../pages/CabinetsAdminPage/CabinetsAdminPage';
 import AdminWeeklyAppointmentsPage from '../../pages/AdminWeeklyAppointmentsPage/AdminWeeklyAppointmentsPage';
@@ -73,6 +75,8 @@ export const router = createBrowserRouter([
             { path: 'appointment', element: <AppointmentPage /> },
             { path: 'smart-appointment', element: <SmartAppointmentPage /> },
             { path: 'my-appointments', element: <MyAppointmentsPage /> },
+            { path: 'my-dental-chart', element: <MyDentalChartPage /> },
+            { path: 'dental-chart-demo', element: <InteractiveDentalChartPage /> },
             {
                 element: <DoctorOnly />,
                 children: [

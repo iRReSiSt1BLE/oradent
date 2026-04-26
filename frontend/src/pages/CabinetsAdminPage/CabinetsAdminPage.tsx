@@ -78,6 +78,12 @@ function buildSetupWebSocketUrl(token: string, setupSessionId: string) {
     return `${protocol}//${base.host}/cabinets/setup/ws?token=${encodeURIComponent(token)}&setupSessionId=${encodeURIComponent(setupSessionId)}`;
 }
 
+function buildDirectPreviewWebSocketUrl(token: string) {
+    const base = new URL(API_BASE_URL);
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${base.host}/capture-agent/preview/ws?token=${encodeURIComponent(token)}`;
+}
+
 const PREVIEW_BINARY_MAGIC = 'OPF1';
 const previewBinaryMagicBytes = new TextEncoder().encode(PREVIEW_BINARY_MAGIC);
 const previewBinaryTextDecoder = new TextDecoder();
@@ -91,6 +97,7 @@ type BinaryPreviewFramePacket = {
 
 type PreviewSignalPayload = {
     setupSessionId?: string;
+    previewSessionId?: string;
     pairKey?: string;
     description?: RTCSessionDescriptionInit;
     candidate?: RTCIceCandidateInit;
@@ -615,6 +622,8 @@ export default function CabinetsAdminPage() {
     const cameraPreviewLiveStreamRef = useRef<MediaStream | null>(null);
     const previewPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const previewWebRtcPairKeyRef = useRef<string | null>(null);
+    const directPreviewSocketRef = useRef<WebSocket | null>(null);
+    const directPreviewSessionIdRef = useRef<string | null>(null);
     const previewWebRtcTimeoutRef = useRef<number | null>(null);
     const microphoneStreamRef = useRef<MediaStream | null>(null);
     const microphoneAudioContextRef = useRef<AudioContext | null>(null);
@@ -1143,6 +1152,25 @@ const matchingDoctors = useMemo(() => {
     function closePreviewPeerConnection() {
         clearPreviewWebRtcTimeout();
 
+        const directSessionId = directPreviewSessionIdRef.current;
+        const directSocket = directPreviewSocketRef.current;
+        if (directSocket) {
+            try {
+                if (directSocket.readyState === WebSocket.OPEN && directSessionId) {
+                    directSocket.send(JSON.stringify({ type: 'preview.stop', payload: { previewSessionId: directSessionId } }));
+                }
+                directSocket.onopen = null;
+                directSocket.onmessage = null;
+                directSocket.onerror = null;
+                directSocket.onclose = null;
+                directSocket.close();
+            } catch {
+                // ignore direct preview close errors
+            }
+        }
+        directPreviewSocketRef.current = null;
+        directPreviewSessionIdRef.current = null;
+
         if (previewPeerConnectionRef.current) {
             try {
                 previewPeerConnectionRef.current.ontrack = null;
@@ -1283,9 +1311,112 @@ const matchingDoctors = useMemo(() => {
                 return;
             }
 
-            setAlert({ variant: 'error', message: 'WebRTC preview не підключився вчасно.' });
-            stopCameraTest();
+            closePreviewPeerConnection();
+            void loadAgentPreviewFrame(cameraTestingKey || '').catch(() => undefined);
         }, 12000);
+    }
+
+    async function startDirectCabinetWebRtcPreview(pairKey: string, cabinetId: string) {
+        if (!token || typeof RTCPeerConnection === 'undefined') {
+            throw new Error('WebRTC preview не підтримується у цьому браузері.');
+        }
+
+        closePreviewPeerConnection();
+        previewWebRtcPairKeyRef.current = pairKey;
+
+        const socket = new WebSocket(buildDirectPreviewWebSocketUrl(token));
+        const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+        const candidateQueue: RTCIceCandidateInit[] = [];
+        directPreviewSocketRef.current = socket;
+        previewPeerConnectionRef.current = pc;
+
+        pc.ontrack = (event) => {
+            clearPreviewWebRtcTimeout();
+            const stream = event.streams[0] || new MediaStream([event.track]);
+            cameraPreviewLiveStreamRef.current = stream;
+            showLiveCameraPreview(stream, new Date().toISOString());
+        };
+
+        pc.onicecandidate = (event) => {
+            if (!event.candidate || previewWebRtcPairKeyRef.current !== pairKey) return;
+            const candidate = event.candidate.toJSON();
+            const previewSessionId = directPreviewSessionIdRef.current;
+            if (!previewSessionId || socket.readyState !== WebSocket.OPEN) {
+                candidateQueue.push(candidate);
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'preview.ice', payload: { previewSessionId, candidate } }));
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+                closePreviewPeerConnection();
+            }
+        };
+
+        socket.onmessage = (event) => {
+            void (async () => {
+                const message = JSON.parse(String(event.data || '{}')) as { type?: string; payload?: PreviewSignalPayload & { message?: string } };
+                const payload = message.payload || {};
+
+                if (message.type === 'preview.session' && payload.previewSessionId) {
+                    directPreviewSessionIdRef.current = String(payload.previewSessionId);
+                    while (candidateQueue.length) {
+                        const candidate = candidateQueue.shift();
+                        socket.send(JSON.stringify({ type: 'preview.ice', payload: { previewSessionId: payload.previewSessionId, candidate } }));
+                    }
+                    return;
+                }
+
+                if (message.type === 'preview.signal') {
+                    if (payload.error) throw new Error(payload.error);
+                    if (payload.previewSessionId) directPreviewSessionIdRef.current = String(payload.previewSessionId);
+                    if (payload.description) await pc.setRemoteDescription(payload.description);
+                    if (payload.candidate) await pc.addIceCandidate(payload.candidate);
+                    return;
+                }
+
+                if (message.type === 'preview.error') {
+                    throw new Error(payload.message || 'WebRTC preview error');
+                }
+            })().catch((error) => {
+                closePreviewPeerConnection();
+                setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'WebRTC preview error' });
+            });
+        };
+
+        socket.onerror = () => {
+            closePreviewPeerConnection();
+        };
+
+        socket.onopen = () => {
+            void (async () => {
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: false });
+                await pc.setLocalDescription(offer);
+                socket.send(JSON.stringify({
+                    type: 'preview.offer',
+                    payload: {
+                        cabinetId,
+                        pairKey,
+                        description: pc.localDescription
+                            ? { type: pc.localDescription.type, sdp: pc.localDescription.sdp || undefined }
+                            : offer,
+                    },
+                }));
+            })().catch((error) => {
+                closePreviewPeerConnection();
+                setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'WebRTC preview error' });
+            });
+        };
+
+        clearPreviewWebRtcTimeout();
+        previewWebRtcTimeoutRef.current = window.setTimeout(() => {
+            if (previewWebRtcPairKeyRef.current !== pairKey || cameraPreviewLiveStreamRef.current) return;
+            closePreviewPeerConnection();
+            void loadAgentPreviewFrame(cameraTestingKey || '').catch(() => undefined);
+        }, 8000);
     }
 
     function clearCameraPreviewUi(placeholderText?: string) {
@@ -1590,6 +1721,11 @@ const matchingDoctors = useMemo(() => {
 
             if (modalMode === 'create' && setupSession?.id) {
                 await startSetupWebRtcPreview(device.sourcePairKey);
+                return;
+            }
+
+            if (modalMode === 'edit' && editingCabinetId) {
+                await startDirectCabinetWebRtcPreview(device.sourcePairKey, editingCabinetId);
                 return;
             }
 

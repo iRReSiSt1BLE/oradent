@@ -308,3 +308,87 @@
     }
   }
 }
+
+.doctor-appointments-page {
+  &__skeleton {
+    min-height: 160px;
+    border: none;
+    border-radius: 24px;
+    display: grid;
+    grid-template-columns: minmax(140px, 170px) 1fr;
+    gap: 22px;
+    padding: 22px;
+    place-items: stretch;
+    background: #ffffff;
+    color: transparent;
+    animation: none;
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(230, 236, 241, 0) 0%, rgba(230, 236, 241, 0.72) 50%, rgba(230, 236, 241, 0) 100%);
+      transform: translateX(-100%);
+      animation: doctor-archive-skeleton 1.4s ease-in-out infinite;
+    }
+  }
+
+  &__skeleton-date,
+  &__skeleton-line,
+  &__skeleton-chip {
+    background: #edf2f6;
+    border-radius: 12px;
+    position: relative;
+    z-index: 1;
+  }
+
+  &__skeleton-date {
+    min-height: 116px;
+  }
+
+  &__skeleton-main {
+    display: grid;
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+  }
+
+  &__skeleton-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: center;
+  }
+
+  &__skeleton-line {
+    height: 16px;
+
+    &--lg {
+      height: 24px;
+      width: min(420px, 70%);
+    }
+
+    &--md {
+      width: min(260px, 46%);
+    }
+  }
+
+  &__skeleton-chip {
+    width: 120px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 720px) {
+  .doctor-appointments-page {
+    &__skeleton {
+      grid-template-columns: 1fr;
+    }
+
+    &__skeleton-row {
+      grid-template-columns: 1fr;
+    }
+  }
+}

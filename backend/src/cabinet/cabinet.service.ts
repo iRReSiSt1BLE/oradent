@@ -576,7 +576,8 @@ export class CabinetService {
   }
 
 
-  async requestPreview(currentUserId: string, dto: RequestCabinetPreviewDto) {
+
+  private async resolvePreviewLinkedAgent(currentUserId: string, dto: RequestCabinetPreviewDto) {
     await this.ensureManagerAccess(currentUserId);
 
     const normalizedPairKey = String(dto.pairKey || '').trim();
@@ -620,9 +621,30 @@ export class CabinetService {
       throw new BadRequestException('Обрана пара агента зараз недоступна.');
     }
 
+    return { linkedAgent, pairKey: normalizedPairKey };
+  }
+
+  async resolveWebRtcPreviewTarget(currentUserId: string, dto: RequestCabinetPreviewDto) {
+    const target = await this.resolvePreviewLinkedAgent(currentUserId, dto);
+    const agentId = this.captureAgentRealtimeService.getAgentIdByKey(target.linkedAgent.agentKey);
+
+    if (!agentId) {
+      throw new BadRequestException('Capture agent зараз офлайн або недоступний для preview.');
+    }
+
+    return {
+      agentId,
+      agentKey: target.linkedAgent.agentKey,
+      pairKey: target.pairKey,
+    };
+  }
+
+  async requestPreview(currentUserId: string, dto: RequestCabinetPreviewDto) {
+    const target = await this.resolvePreviewLinkedAgent(currentUserId, dto);
+
     const preview = await this.captureAgentRealtimeService.requestPreview(
-      linkedAgent.id,
-      normalizedPairKey,
+      target.linkedAgent.id,
+      target.pairKey,
       { width: 960, quality: 0.82, timeoutMs: 7000 },
     );
 
@@ -632,7 +654,7 @@ export class CabinetService {
 
     return {
       preview: {
-        pairKey: normalizedPairKey,
+        pairKey: target.pairKey,
         imageDataUrl: preview.imageDataUrl,
         mimeType: preview.mimeType || 'image/jpeg',
         capturedAt: preview.capturedAt || new Date().toISOString(),

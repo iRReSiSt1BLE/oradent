@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     getConsultationPdfWithPassword,
@@ -336,6 +337,10 @@ export default function MyAppointmentsPage() {
                                                         Переглянути висновок
                                                     </button>
                                                 ) : null}
+
+                                                <Link className="my-appointments-page__action-btn" to={`/my-dental-chart?appointmentId=${item.id}`}>
+                                                    Переглянути зубну карту
+                                                </Link>
 
                                                 {isReviewable(item) && !reviewed ? (
                                                     <button type="button" className="my-appointments-page__action-btn my-appointments-page__action-btn--primary" onClick={() => setReviewTarget(item)}>

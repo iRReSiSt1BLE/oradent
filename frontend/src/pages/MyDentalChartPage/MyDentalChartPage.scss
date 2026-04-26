@@ -1,0 +1,360 @@
+.my-dental-chart {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 112px 0 56px;
+  color: #111827;
+}
+
+.my-dental-chart__hero {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.my-dental-chart__hero span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #2e7d4f;
+  font-weight: 800;
+}
+
+.my-dental-chart__hero h1,
+.my-dental-chart__patient-row h2,
+.my-dental-chart__history-head h2 {
+  margin: 0;
+}
+
+.my-dental-chart__hero h1 {
+  font-size: clamp(30px, 5vw, 58px);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.my-dental-chart__hero p {
+  max-width: 720px;
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.my-dental-chart__panel,
+.my-dental-chart__map,
+.my-dental-chart__history {
+  border: 1px solid #dbe4ef;
+  background: #fbfdff;
+  border-radius: 24px;
+  padding: 18px;
+}
+
+.my-dental-chart__panel {
+  display: grid;
+  gap: 18px;
+}
+
+.my-dental-chart__patient-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.my-dental-chart__patient-row p,
+.my-dental-chart__history-head span,
+.my-dental-chart__snapshot-card span {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.my-dental-chart__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.my-dental-chart__jaw-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.my-dental-chart__jaw-actions button,
+.my-dental-chart__tooth {
+  border: 1px solid #dbe4ef;
+  background: #fff;
+  color: #111827;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.my-dental-chart__jaw-actions button {
+  min-height: 58px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.my-dental-chart__jaw-actions button span,
+.my-dental-chart__tooth em {
+  justify-self: start;
+  min-width: 22px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eaf6ef;
+  color: #2e7d4f;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.my-dental-chart__jaw-actions button:hover,
+.my-dental-chart__tooth:hover,
+.my-dental-chart__jaw-actions button.is-selected,
+.my-dental-chart__tooth.is-selected {
+  border-color: #2e7d4f;
+  background: #f3fbf6;
+  transform: translateY(-1px);
+}
+
+.my-dental-chart__tooth-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.my-dental-chart__tooth-row {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.my-dental-chart__tooth {
+  position: relative;
+  min-height: 52px;
+  padding: 8px 4px;
+  display: grid;
+  place-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.my-dental-chart__tooth.has-history {
+  border-color: #85c99d;
+}
+
+.my-dental-chart__tooth em {
+  position: absolute;
+  right: -5px;
+  top: -8px;
+}
+
+.my-dental-chart__history-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.my-dental-chart__snapshot-list {
+  display: grid;
+  gap: 12px;
+}
+
+.my-dental-chart__snapshot-card {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 14px;
+  border: 1px solid #e5edf6;
+  background: #fff;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.my-dental-chart__snapshot-card img,
+.my-dental-chart__snapshot-card > div:first-child {
+  width: 100%;
+  min-height: 140px;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #111827;
+  color: #cfd8e3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+}
+
+.my-dental-chart__snapshot-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.my-dental-chart__snapshot-card p {
+  margin: 10px 0 0;
+  color: #4b5563;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.my-dental-chart__state {
+  border: 1px dashed #cfd8e3;
+  border-radius: 18px;
+  padding: 18px;
+  color: #6b7280;
+  background: #fff;
+}
+
+.my-dental-chart__state.is-error {
+  color: #b42318;
+  border-color: #f5c2c7;
+  background: #fff8f8;
+}
+
+@media (max-width: 1020px) {
+  .my-dental-chart__layout,
+  .my-dental-chart__snapshot-card {
+    grid-template-columns: 1fr;
+  }
+
+  .my-dental-chart__tooth-row {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .my-dental-chart {
+    width: min(100% - 20px, 1180px);
+    padding-top: 96px;
+  }
+
+  .my-dental-chart__jaw-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .my-dental-chart__tooth-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.my-dental-chart__snapshot-link {
+  display: block;
+  width: 100%;
+  text-decoration: none;
+}
+
+.my-dental-chart__snapshot-link img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.my-dental-chart {
+  &__password-card {
+    display: grid;
+    gap: 12px;
+    width: min(520px, 100%);
+    border: 1px solid #dbe4ef;
+    background: #fff;
+    border-radius: 24px;
+    padding: 22px;
+    margin-bottom: 22px;
+
+    h2,
+    p {
+      margin: 0;
+    }
+
+    p {
+      color: #667487;
+      line-height: 1.55;
+    }
+
+    input {
+      min-height: 46px;
+      border: 1px solid #cad4de;
+      border-radius: 14px;
+      padding: 0 14px;
+      font: inherit;
+    }
+
+    button {
+      min-height: 46px;
+      border: 1px solid #111827;
+      border-radius: 14px;
+      background: #84d8ce;
+      color: #111827;
+      font-weight: 700;
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.7;
+        cursor: default;
+      }
+    }
+  }
+
+  &__password-error {
+    color: #b42318;
+    font-size: 14px;
+  }
+
+  &__snapshot-placeholder {
+    width: 100%;
+    min-height: 180px;
+    border-radius: 20px;
+    display: grid;
+    place-items: center;
+    background: #eef3f6;
+    color: #6d7787;
+    font-size: 13px;
+    text-align: center;
+    padding: 16px;
+
+    &.is-note {
+      background: #f8fafb;
+      border: 1px dashed #d8e0e7;
+    }
+  }
+
+  &__snapshot-content {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+
+    strong {
+      font-size: 18px;
+      line-height: 1.35;
+      color: #102341;
+    }
+
+    span {
+      font-size: 14px;
+      line-height: 1.45;
+      color: #667487;
+    }
+
+    p {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #24324a;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}

@@ -15,9 +15,8 @@
       <header class="agent-header site-brand-header">
         <div class="brand-lockup">
           <div class="brand-mark">ORADENT</div>
-          <div class="brand-tagline">DENTAL CLINIC MANAGEMENT SYSTEM</div>
           <div class="agent-name">Dental Capture Agent</div>
-          <div class="agent-subtitle">Локальне підключення обладнання кабінету</div>
+
         </div>
         <span id="globalStatusBadge" class="status-pill status-pill--idle">Очікування</span>
       </header>
@@ -70,6 +69,20 @@
               </div>
             </div>
             <div id="persistentNote" class="status-line">Готово</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">Знімок</div>
+            <label class="field">
+              <span>Кнопка за замовчуванням знімка</span>
+              <input id="snapshotHotkeyInput" type="text" readonly placeholder="F8" />
+            </label>
+            <div class="actions-grid actions-grid--stacked">
+              <button id="captureHotkeyBtn" class="button button--secondary" type="button">Вибрати кнопку</button>
+              <button id="manualSnapshotBtn" class="button button--primary" type="button">Зробити знімок</button>
+              <button id="resetHotkeyBtn" class="button button--ghost" type="button">F8 за замовчуванням</button>
+            </div>
+            <div id="snapshotStatusText" class="status-line">Знімок доступний під час активного запису прийому. Для кожної камери можна задати окрему кнопку у картці пари.</div>
           </section>
         </aside>
 

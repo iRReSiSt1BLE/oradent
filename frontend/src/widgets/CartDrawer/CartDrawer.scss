@@ -119,6 +119,52 @@
 .cart-drawer__item-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+
+.cart-drawer__quantity-control {
+  display: inline-grid;
+  grid-template-columns: 42px 56px 42px;
+  align-items: center;
+  border: 1.5px solid #111;
+  background: #fff;
+  min-height: 44px;
+}
+
+.cart-drawer__quantity-control button {
+  width: 42px;
+  height: 42px;
+  border: none;
+  background: transparent;
+  color: #111827;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cart-drawer__quantity-control button:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.cart-drawer__quantity-control button:not(:disabled):hover {
+  background: #e6f8f4;
+}
+
+.cart-drawer__quantity-control span {
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid #d5dde3;
+  border-right: 1px solid #d5dde3;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: #111827;
 }
 
 .cart-drawer__remove,

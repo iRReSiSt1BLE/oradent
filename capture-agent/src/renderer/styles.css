@@ -292,3 +292,34 @@ body { padding: 18px; }
 .media-card--mic { align-self: start; min-height: 0; }
 .media-card--mic .listen-row { justify-content: flex-start; }
 .media-card--mic .meter-row { margin-top: 6px; }
+
+.pair-card__hotkey {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 12px;
+  color: #475569;
+}
+
+.pair-card__hotkey span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button:hover:not(:disabled),
+.button:focus-visible:not(:disabled),
+.button--primary-dark:hover:not(:disabled),
+.button--primary-dark:focus-visible:not(:disabled) {
+  color: var(--text);
+}
+
+.button--primary-dark:disabled {
+  color: #ffffff;
+}

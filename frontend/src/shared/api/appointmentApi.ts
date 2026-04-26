@@ -737,11 +737,11 @@ export type AppointmentAgentPreviewFrame = {
     } | null;
 };
 
-export async function startAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string }) {
+export async function startAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string; fps?: number; width?: number; quality?: number }) {
     return http<{ ok: boolean; pairKey: string; message?: string }>(`/capture-agent/appointment-preview/start`, {
         method: 'POST',
         token,
-        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId },
+        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId, fps: payload.fps, width: payload.width, quality: payload.quality },
     });
 }
 

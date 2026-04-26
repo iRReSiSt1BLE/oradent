@@ -8,6 +8,7 @@ type Props = {
     totalUah: number;
     onClose: () => void;
     onRemove: (cartItemId: string) => void;
+    onQuantityChange: (cartItemId: string, quantity: number) => void;
     onClear: () => void;
     onBook: () => void;
 };
@@ -48,7 +49,7 @@ function parseDbI18nValue(raw: any, language: string): string {
     return String(raw);
 }
 
-export default function CartDrawer({ isOpen, items, totalUah, onClose, onRemove, onClear, onBook }: Props) {
+export default function CartDrawer({ isOpen, items, totalUah, onClose, onRemove, onQuantityChange, onClear, onBook }: Props) {
     const { t, language } = useI18n();
     const tx = (key: string, fallback: string) => {
         const value = t(key);
@@ -87,6 +88,26 @@ export default function CartDrawer({ isOpen, items, totalUah, onClose, onRemove,
                                             </p>
                                         </div>
                                         <div className="cart-drawer__item-actions">
+                                            {item.allowMultipleInCart ? (
+                                                <div className="cart-drawer__quantity-control" aria-label={tx('cart.quantity', 'Кількість')}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onQuantityChange(item.cartItemId, item.quantity - 1)}
+                                                        aria-label={tx('cart.decreaseQuantity', 'Зменшити кількість')}
+                                                    >
+                                                        −
+                                                    </button>
+                                                    <span>{item.quantity}</span>
+                                                    <button
+                                                        type="button"
+                                                        disabled={item.maxCartQuantity !== null && item.quantity >= item.maxCartQuantity}
+                                                        onClick={() => onQuantityChange(item.cartItemId, item.quantity + 1)}
+                                                        aria-label={tx('cart.increaseQuantity', 'Збільшити кількість')}
+                                                    >
+                                                        +
+                                                    </button>
+                                                </div>
+                                            ) : null}
                                             <button type="button" className="cart-drawer__remove" onClick={() => onRemove(item.cartItemId)}>
                                                 {tx('cart.remove', 'Видалити')}
                                             </button>

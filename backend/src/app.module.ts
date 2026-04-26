@@ -18,6 +18,8 @@ import { DoctorModule } from './doctor/doctor.module';
 import { DoctorScheduleModule } from './doctor-schedule/doctor-schedule.module';
 import { CabinetModule } from './cabinet/cabinet.module';
 import { CaptureAgentModule } from './capture-agent/capture-agent.module';
+import { HomeContentModule } from './home-content/home-content.module';
+import { DentalChartModule } from './dental-chart/dental-chart.module';
 
 @Module({
     imports: [
@@ -68,6 +70,8 @@ import { CaptureAgentModule } from './capture-agent/capture-agent.module';
         DoctorScheduleModule,
         CabinetModule,
         CaptureAgentModule,
+        HomeContentModule,
+        DentalChartModule,
     ],
     controllers: [],
     providers: [],

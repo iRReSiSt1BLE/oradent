@@ -1,9 +1,20 @@
-﻿.alert-toast {
+.alert-toast-root {
   position: fixed;
   top: 16px;
   right: 16px;
-  width: min(320px, calc(100vw - 32px));
-  z-index: 9999;
+  z-index: 8000;
+  width: min(380px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.alert-toast {
+  position: relative;
+  width: 100%;
+  z-index: auto;
+  pointer-events: auto;
   overflow: hidden;
   border-radius: 12px;
   background: #ffffff;
@@ -15,7 +26,7 @@
   transition: transform 0.2s ease, opacity 0.2s ease;
 
   &.is-closing {
-    transform: translateX(120%);
+    transform: translateX(24px);
     opacity: 0;
   }
 
@@ -126,9 +137,25 @@
 }
 
 @media (max-width: 640px) {
-  .alert-toast {
+  .alert-toast-root {
     top: 10px;
     right: 10px;
     width: min(300px, calc(100vw - 20px));
   }
+}
+
+/* Critical final alert position: always top-level and above header/modals. */
+.alert-toast-root {
+  position: fixed !important;
+  top: 16px !important;
+  right: 16px !important;
+  z-index: 8000 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  pointer-events: none !important;
+}
+
+.alert-toast {
+  pointer-events: auto !important;
 }

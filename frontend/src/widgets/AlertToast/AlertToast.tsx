@@ -1,7 +1,23 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './AlertToast.scss';
 
 type AlertToastVariant = 'success' | 'error' | 'info';
+
+
+function getAlertRoot() {
+    if (typeof document === 'undefined') return null;
+
+    let root = document.getElementById('oradent-alert-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'oradent-alert-root';
+        root.className = 'alert-toast-root';
+        document.body.appendChild(root);
+    }
+
+    return root;
+}
 
 type AlertToastProps = {
     message: string;
@@ -13,7 +29,7 @@ type AlertToastProps = {
 export default function AlertToast({
                                        message,
                                        variant = 'info',
-                                       duration = 8000,
+                                       duration = 1800,
                                        onClose,
                                    }: AlertToastProps) {
     const [isClosing, setIsClosing] = useState(false);
@@ -50,7 +66,8 @@ export default function AlertToast({
         };
     }, [duration]);
 
-    return (
+    const root = getAlertRoot();
+    const toast = (
         <div className={`alert-toast alert-toast--${variant} ${isClosing ? 'is-closing' : ''}`} role="alert">
             <div className="alert-toast__content">
                 <div className="alert-toast__icon">
@@ -90,4 +107,6 @@ export default function AlertToast({
             )}
         </div>
     );
+
+    return root ? createPortal(toast, root) : toast;
 }

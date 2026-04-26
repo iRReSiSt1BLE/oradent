@@ -5,6 +5,7 @@ import { CabinetSetupRealtimeService } from '../cabinet/cabinet-setup-realtime.s
 import { AppointmentPreviewFrameStore } from './appointment-preview-frame.store';
 import { CaptureAgentRealtimeService } from './capture-agent-realtime.service';
 import { CaptureAgentService } from './capture-agent.service';
+import { CaptureAgentPreviewSignalingService } from './capture-agent-preview-signaling.service';
 
 const PREVIEW_BINARY_MAGIC = Buffer.from('OPF1');
 
@@ -75,6 +76,7 @@ export class CaptureAgentGateway implements OnGatewayConnection, OnGatewayDiscon
     private readonly captureAgentRealtimeService: CaptureAgentRealtimeService,
     private readonly cabinetSetupRealtimeService: CabinetSetupRealtimeService,
     private readonly appointmentPreviewFrameStore: AppointmentPreviewFrameStore,
+    private readonly previewSignalingService: CaptureAgentPreviewSignalingService,
   ) {}
 
   private send(client: WebSocket, payload: unknown): void {
@@ -208,6 +210,18 @@ export class CaptureAgentGateway implements OnGatewayConnection, OnGatewayDiscon
       }
 
       if (messageType === 'agent.preview.signal') {
+        const previewSessionId = typeof parsed.payload?.previewSessionId === 'string' ? parsed.payload.previewSessionId.trim() : '';
+        if (previewSessionId) {
+          this.previewSignalingService.relayFromAgent(agentId, {
+            pairKey: typeof parsed.payload?.pairKey === 'string' ? parsed.payload.pairKey : undefined,
+            description: parsed.payload && typeof parsed.payload.description === 'object' ? parsed.payload.description : undefined,
+            candidate: parsed.payload && typeof parsed.payload.candidate === 'object' ? parsed.payload.candidate : undefined,
+            error: typeof parsed.payload?.error === 'string' ? parsed.payload.error : undefined,
+            previewSessionId,
+          });
+          return;
+        }
+
         const setupSessionId = typeof parsed.payload?.setupSessionId === 'string' ? parsed.payload.setupSessionId.trim() : '';
         if (!setupSessionId) {
           return;
