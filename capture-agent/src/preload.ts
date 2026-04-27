@@ -28,6 +28,14 @@ contextBridge.exposeInMainWorld('agentApi', {
     ipcRenderer.invoke('agent:preview-frame', payload) as Promise<{ ok: boolean }>,
   queueRecordingUpload: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:queue-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>,
+  beginRecordingUpload: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:begin-recording-upload', payload) as Promise<{ ok: boolean; entryId: string }>,
+  appendRecordingChunk: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:append-recording-chunk', payload) as Promise<{ ok: boolean; totalBytes: number }>,
+  finalizeRecordingUpload: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:finalize-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>,
+  discardRecordingUpload: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:discard-recording-upload', payload) as Promise<{ ok: boolean }>,
   flushRecordingQueue: () =>
     ipcRenderer.invoke('agent:flush-recording-queue') as Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>,
   onSocketStatus: (callback: (payload: SocketStatusPayload) => void) => {

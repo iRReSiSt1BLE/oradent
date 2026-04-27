@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
 import { getConfig, saveConfig } from './services/config-store';
 import { enrollAgent, pingBackend } from './services/http-client';
 import socketClient, { DeviceSyncSnapshot, SocketStatusPayload } from './services/socket-client';
-import { enqueueRecordingUpload, flushRecordingQueue } from './services/recording-upload';
+import { appendRecordingChunk, beginRecordingUpload, discardRecordingUpload, enqueueRecordingUpload, finalizeRecordingUpload, flushRecordingQueue } from './services/recording-upload';
 import { AgentConfig } from './state/default-config';
 
 let mainWindow: BrowserWindow | null = null;
@@ -44,15 +44,10 @@ function createWindow(): void {
   void mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'));
 }
 
-let queueFlushTimer: NodeJS.Timeout | null = null;
-
 void app.whenReady().then(() => {
   setupMediaPermissions();
   socketClient.onStatus = (payload) => {
     broadcastSocketStatus(payload);
-    if (payload.type === 'connected') {
-      void flushRecordingQueue().catch(() => undefined);
-    }
   };
   socketClient.onCommand = (payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -114,38 +109,45 @@ void app.whenReady().then(() => {
       buffer: payload.buffer as ArrayBuffer,
     });
   });
+  ipcMain.handle('agent:begin-recording-upload', async (_event, payload: Record<string, unknown>) => {
+    return beginRecordingUpload({
+      appointmentId: String(payload.appointmentId || ''),
+      cabinetDeviceId: typeof payload.cabinetDeviceId === 'string' ? payload.cabinetDeviceId : undefined,
+      pairKey: typeof payload.pairKey === 'string' ? payload.pairKey : undefined,
+      mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+      originalFileName: typeof payload.originalFileName === 'string' ? payload.originalFileName : undefined,
+      startedAt: typeof payload.startedAt === 'string' ? payload.startedAt : undefined,
+    });
+  });
+  ipcMain.handle('agent:append-recording-chunk', async (_event, payload: Record<string, unknown>) => {
+    return appendRecordingChunk({
+      entryId: String(payload.entryId || ''),
+      buffer: payload.buffer as ArrayBuffer,
+    });
+  });
+  ipcMain.handle('agent:finalize-recording-upload', async (_event, payload: Record<string, unknown>) => {
+    return finalizeRecordingUpload({
+      entryId: String(payload.entryId || ''),
+      endedAt: typeof payload.endedAt === 'string' ? payload.endedAt : undefined,
+    });
+  });
+  ipcMain.handle('agent:discard-recording-upload', async (_event, payload: Record<string, unknown>) => {
+    return discardRecordingUpload(String(payload.entryId || ''));
+  });
   ipcMain.handle('agent:flush-recording-queue', async () => {
     return flushRecordingQueue();
   });
-
-  if (queueFlushTimer) {
-    clearInterval(queueFlushTimer);
-  }
-  queueFlushTimer = setInterval(() => {
-    void flushRecordingQueue().catch(() => undefined);
-  }, 5000);
 
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (queueFlushTimer) {
-    clearInterval(queueFlushTimer);
-  }
-  queueFlushTimer = setInterval(() => {
-    void flushRecordingQueue().catch(() => undefined);
-  }, 5000);
-
-  createWindow();
+      createWindow();
     }
   });
 });
 
 app.on('window-all-closed', () => {
-  if (queueFlushTimer) {
-    clearInterval(queueFlushTimer);
-    queueFlushTimer = null;
-  }
   if (process.platform !== 'darwin') {
     app.quit();
   }

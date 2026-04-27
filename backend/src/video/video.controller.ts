@@ -13,7 +13,9 @@ import {
     UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
+import { diskStorage, memoryStorage } from 'multer';
+import * as fs from 'fs';
+import * as path from 'path';
 import type { Response } from 'express';
 import { VideoService } from './video.service';
 import { UploadVideoDto } from './dto/upload-video.dto';
@@ -21,6 +23,13 @@ import { UploadAgentVideoDto } from './dto/upload-agent-video.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StreamVideoDto } from './dto/stream-video.dto';
+
+const AGENT_VIDEO_UPLOAD_TMP_DIR = path.join(process.cwd(), 'tmp', 'agent-video-uploads');
+
+function ensureAgentVideoUploadTmpDir() {
+    fs.mkdirSync(AGENT_VIDEO_UPLOAD_TMP_DIR, { recursive: true });
+}
+
 
 type JwtUser = {
     id: string;
@@ -64,9 +73,18 @@ export class VideoController {
     @Post('agent-upload')
     @UseInterceptors(
         FileInterceptor('video', {
-            storage: memoryStorage(),
+            storage: diskStorage({
+                destination: (_req, _file, callback) => {
+                    ensureAgentVideoUploadTmpDir();
+                    callback(null, AGENT_VIDEO_UPLOAD_TMP_DIR);
+                },
+                filename: (_req, file, callback) => {
+                    const safeOriginalName = String(file.originalname || 'agent-recording.bin').replace(/[^a-zA-Z0-9._-]/g, '_');
+                    callback(null, `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeOriginalName}`);
+                },
+            }),
             limits: {
-                fileSize: 1024 * 1024 * 1024,
+                fileSize: 1024 * 1024 * 450,
             },
         }),
     )

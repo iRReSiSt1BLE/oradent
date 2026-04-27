@@ -17,6 +17,10 @@ declare global {
       sendPreviewSignal(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       sendPreviewFrame(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       queueRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      beginRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; entryId: string }>;
+      appendRecordingChunk(payload: Record<string, unknown>): Promise<{ ok: boolean; totalBytes: number }>;
+      finalizeRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      discardRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       flushRecordingQueue(): Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>;
       onSocketStatus(callback: (payload: SocketStatusPayload) => void): () => void;
       onSocketCommand(callback: (payload: SocketCommandPayload) => void): () => void;
@@ -96,7 +100,11 @@ type AgentRecordingSession = {
   pair: PairView;
   stream: MediaStream;
   recorder: MediaRecorder;
-  chunks: BlobPart[];
+  uploadEntryId: string;
+  pendingWrite: Promise<void>;
+  totalBytes: number;
+  stopReason: string | null;
+  maxDurationTimerId: number | null;
   startedAt: string;
   mimeType: string;
   originalFileName: string;
@@ -109,6 +117,13 @@ const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
     },
   ],
 };
+
+const RECORDING_TIMESLICE_MS = 1000;
+const MAX_RECORDING_BYTES = 350 * 1024 * 1024;
+const MAX_RECORDING_DURATION_MS = 45 * 60 * 1000;
+const VIDEO_BITS_PER_SECOND = 1_000_000;
+const AUDIO_BITS_PER_SECOND = 64_000;
+
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -692,8 +707,38 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     audio: pair.audioDeviceId ? { deviceId: { exact: pair.audioDeviceId } } : false,
   });
 
+  const startedAt = String(payload.startedAt || new Date().toISOString());
   const mimeType = pickRecordingMimeType();
-  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  const recorderOptions: MediaRecorderOptions = {
+    videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+    audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+  };
+
+  if (mimeType) {
+    recorderOptions.mimeType = mimeType;
+  }
+
+  const recorder = new MediaRecorder(stream, recorderOptions);
+  const originalFileName = `appointment-${appointmentId}-${cabinetDeviceId}-${Date.now()}.webm`;
+
+  let uploadEntryId = '';
+
+  try {
+    const uploadEntry = await window.agentApi.beginRecordingUpload({
+      appointmentId,
+      cabinetDeviceId,
+      pairKey: pair.pairKey,
+      mimeType: recorder.mimeType || mimeType || 'video/webm',
+      originalFileName,
+      startedAt,
+    });
+
+    uploadEntryId = uploadEntry.entryId;
+  } catch (error) {
+    stopMediaStream(stream);
+    throw error;
+  }
+
   const session: AgentRecordingSession = {
     recordingKey,
     appointmentId,
@@ -701,36 +746,73 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     pair,
     stream,
     recorder,
-    chunks: [],
-    startedAt: String(payload.startedAt || new Date().toISOString()),
+    uploadEntryId,
+    pendingWrite: Promise.resolve(),
+    totalBytes: 0,
+    stopReason: null,
+    maxDurationTimerId: null,
+    startedAt,
     mimeType: recorder.mimeType || mimeType || 'video/webm',
-    originalFileName: `appointment-${appointmentId}-${cabinetDeviceId}.webm`,
+    originalFileName,
   };
 
   recorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      session.chunks.push(event.data);
+    if (!event.data || event.data.size <= 0) {
+      return;
     }
+
+    session.totalBytes += event.data.size;
+
+    if (session.totalBytes > MAX_RECORDING_BYTES) {
+      setStatusLine(`Запис ${pair.displayName} зупиняється: досягнуто безпечний локальний ліміт розміру.`);
+      toast(`Запис ${pair.displayName} автоматично зупинено за лімітом розміру.`, 'info');
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+      return;
+    }
+
+    const chunk = event.data;
+    session.pendingWrite = session.pendingWrite
+      .then(async () => {
+        const buffer = await chunk.arrayBuffer();
+        await window.agentApi.appendRecordingChunk({
+          entryId: session.uploadEntryId,
+          buffer,
+        });
+      })
+      .catch((error) => {
+        session.stopReason = error instanceof Error ? error.message : 'Не вдалося записати фрагмент відео на диск.';
+        if (recorder.state !== 'inactive') {
+          recorder.stop();
+        }
+      });
   };
 
   recorder.onerror = () => {
-    toast(`Помилка локального запису для ${pair.displayName}.`, 'error');
+    session.stopReason = `Помилка локального запису для ${pair.displayName}.`;
+    toast(session.stopReason, 'error');
   };
 
   recorder.onstop = async () => {
+    if (session.maxDurationTimerId !== null) {
+      window.clearTimeout(session.maxDurationTimerId);
+      session.maxDurationTimerId = null;
+    }
+
     try {
-      const blob = new Blob(session.chunks, { type: session.mimeType || 'video/webm' });
-      const buffer = await blob.arrayBuffer();
-      await window.agentApi.queueRecordingUpload({
-        appointmentId: session.appointmentId,
-        cabinetDeviceId: session.cabinetDeviceId,
-        pairKey: session.pair.pairKey,
-        mimeType: session.mimeType || 'video/webm',
-        originalFileName: session.originalFileName,
-        startedAt: session.startedAt,
+      await session.pendingWrite;
+
+      if (session.stopReason) {
+        await window.agentApi.discardRecordingUpload({ entryId: session.uploadEntryId });
+        throw new Error(session.stopReason);
+      }
+
+      await window.agentApi.finalizeRecordingUpload({
+        entryId: session.uploadEntryId,
         endedAt: new Date().toISOString(),
-        buffer,
       });
+
       setStatusLine(`Запис ${session.pair.displayName} збережено локально та поставлено в чергу на відправку.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не вдалося поставити запис у чергу.';
@@ -743,10 +825,18 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     }
   };
 
+  session.maxDurationTimerId = window.setTimeout(() => {
+    if (recorder.state !== 'inactive') {
+      setStatusLine(`Запис ${pair.displayName} автоматично зупиняється за лімітом часу.`);
+      toast(`Запис ${pair.displayName} автоматично зупинено за лімітом часу.`, 'info');
+      recorder.stop();
+    }
+  }, MAX_RECORDING_DURATION_MS);
+
   activeRecordingSessions.set(recordingKey, session);
   updateControls();
-  recorder.start(1000);
-  setStatusLine(`Іде запис: ${pair.displayName}. Кнопка знімка цієї камери: ${pair.snapshotHotkey || config?.snapshotHotkey || 'не задано'}`);
+  recorder.start(RECORDING_TIMESLICE_MS);
+  setStatusLine(`Іде запис: ${pair.displayName}. Відео пишеться фрагментами на диск, без накопичення всього файлу в RAM.`);
   toast(`Почато локальний запис: ${pair.displayName}`, 'info');
 }
 
@@ -769,18 +859,20 @@ async function stopAgentRecordingSession(payload: Record<string, unknown>): Prom
 }
 
 function buildVideoConstraints(deviceId: string, profile: 'local' | 'remote' = 'local'): MediaTrackConstraints {
+  const isLocalRecording = profile === 'local';
+
   return {
     deviceId: { exact: deviceId },
-    width: profile === 'local' ? { ideal: 1280, max: 1920 } : { ideal: 1280, max: 1280 },
-    height: profile === 'local' ? { ideal: 720, max: 1080 } : { ideal: 720, max: 720 },
-    frameRate: profile === 'local' ? { ideal: 24, max: 30 } : { ideal: 18, max: 24 },
+    width: isLocalRecording ? { ideal: 1280, max: 1280 } : { ideal: 960, max: 960 },
+    height: isLocalRecording ? { ideal: 720, max: 720 } : { ideal: 540, max: 540 },
+    frameRate: isLocalRecording ? { ideal: 18, max: 20 } : { ideal: 8, max: 12 },
     facingMode: 'user',
   };
 }
 
 function clampPreviewWidth(value: number, fallback: number): number {
   const normalized = Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.max(360, Math.min(1280, normalized || fallback));
+  return Math.max(320, Math.min(960, normalized || fallback));
 }
 
 function clampPreviewQuality(value: number, fallback: number): number {
@@ -790,7 +882,7 @@ function clampPreviewQuality(value: number, fallback: number): number {
 
 function clampPreviewFps(value: number, fallback = 8): number {
   const normalized = Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.max(3, Math.min(12, normalized || fallback));
+  return Math.max(2, Math.min(6, normalized || fallback));
 }
 
 function normalizePreviewMimeType(value: unknown, fallback = 'image/webp'): string {
@@ -2009,9 +2101,9 @@ window.agentApi.onSocketCommand((message) => {
 
   if (message?.type === 'preview.start') {
     void startContinuousPreview(String(payload.pairKey || ''), {
-      width: Number(payload.width || 720),
-      quality: Number(payload.quality || 0.68),
-      fps: Number(payload.fps || 8),
+      width: Number(payload.width || 640),
+      quality: Number(payload.quality || 0.6),
+      fps: Number(payload.fps || 4),
       mimeType: normalizePreviewMimeType(payload.mimeType, 'image/webp'),
     }).catch((error) => {
       const errorMessage = error instanceof Error ? error.message : 'Не вдалося запустити потоковий preview.';

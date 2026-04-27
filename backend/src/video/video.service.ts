@@ -11,7 +11,9 @@ import { Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash, randomUUID } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
+import { Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { decryptAgentTransportPayload } from './video-transport-crypto';
 import { Video } from './entities/video.entity';
 import { UploadVideoDto } from './dto/upload-video.dto';
@@ -83,6 +85,7 @@ export class VideoService {
 
         return grants.some((grant) => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now.getTime());
     }
+
 
     private async assertAppointmentAccess(
         appointmentId: string,
@@ -190,6 +193,108 @@ export class VideoService {
             this.configService.get<string>('CAPTURE_AGENT_ENROLLMENT_TOKEN') ||
             'oradent-capture-transport'
         );
+    }
+
+    private getOrCreateStorageEncryptionKey(): Buffer {
+        const keyPath = this.configService.get<string>('VIDEO_ENCRYPTION_KEY_PATH');
+
+        if (!keyPath) {
+            throw new InternalServerErrorException('Не задано VIDEO_ENCRYPTION_KEY_PATH');
+        }
+
+        fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+
+        if (!fs.existsSync(keyPath)) {
+            fs.writeFileSync(keyPath, randomBytes(32));
+        }
+
+        const key = fs.readFileSync(keyPath);
+
+        if (key.length !== 32) {
+            throw new InternalServerErrorException('AES key must be exactly 32 bytes');
+        }
+
+        return key;
+    }
+
+    private deriveAgentTransportKey(secret: string): Buffer {
+        return createHash('sha256').update(secret).digest();
+    }
+
+    private async decryptAgentTransportFileToPlainFile(params: {
+        encryptedPath: string;
+        plainPath: string;
+        secret: string;
+        ivBase64: string;
+        authTagBase64: string;
+    }): Promise<{ sha256Hash: string; size: number }> {
+        const decipher = createDecipheriv(
+            'aes-256-gcm',
+            this.deriveAgentTransportKey(params.secret),
+            Buffer.from(params.ivBase64, 'base64'),
+        );
+        decipher.setAuthTag(Buffer.from(params.authTagBase64, 'base64'));
+
+        const hash = createHash('sha256');
+        let size = 0;
+
+        const hashPlainTransform = new Transform({
+            transform(chunk, _encoding, callback) {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                size += buffer.length;
+                hash.update(buffer);
+                callback(null, buffer);
+            },
+        });
+
+        await pipeline(
+            fs.createReadStream(params.encryptedPath),
+            decipher,
+            hashPlainTransform,
+            fs.createWriteStream(params.plainPath),
+        );
+
+        return {
+            sha256Hash: hash.digest('hex'),
+            size,
+        };
+    }
+
+    private async encryptPlainFileToStorage(params: {
+        plainPath: string;
+        encryptedPath: string;
+    }): Promise<{
+        ivBase64: string;
+        authTagBase64: string;
+        algorithm: string;
+    }> {
+        const key = this.getOrCreateStorageEncryptionKey();
+        const iv = randomBytes(12);
+        const cipher = createCipheriv('aes-256-gcm', key, iv);
+
+        await pipeline(
+            fs.createReadStream(params.plainPath),
+            cipher,
+            fs.createWriteStream(params.encryptedPath),
+        );
+
+        return {
+            ivBase64: iv.toString('base64'),
+            authTagBase64: cipher.getAuthTag().toString('base64'),
+            algorithm: 'AES-256-GCM',
+        };
+    }
+
+    private safeUnlink(filePath: string | undefined | null): void {
+        if (!filePath) return;
+
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        } catch {
+            // ignore local temporary cleanup failures
+        }
     }
 
     private async persistPlainVideoBuffer(params: {
@@ -308,6 +413,130 @@ export class VideoService {
         return finalizedVideo;
     }
 
+    private async persistPlainVideoFile(params: {
+        appointmentId: string;
+        originalFileName: string;
+        mimeType: string;
+        startedAt?: string | null;
+        endedAt?: string | null;
+        plainFilePath: string;
+        plainSha256Hash: string;
+        plainSize: number;
+    }): Promise<Video> {
+        const storageRoot = this.configService.get<string>('VIDEO_STORAGE_ROOT');
+        const recordsDir = this.configService.get<string>('VIDEO_RECORDS_DIR') || 'records';
+
+        if (!storageRoot) {
+            throw new InternalServerErrorException('Не задано VIDEO_STORAGE_ROOT у .env');
+        }
+
+        const uuid = randomUUID();
+        const now = new Date();
+        const datePart = now.toISOString().slice(0, 10);
+        const folderName = `${datePart}_${uuid}`;
+        const recordFolderRelativePath = path.join(recordsDir, folderName).replace(/\\/g, '/');
+        const recordFolderFullPath = path.join(storageRoot, recordsDir, folderName);
+        fs.mkdirSync(recordFolderFullPath, { recursive: true });
+
+        const storedFileName = 'video.enc';
+        const manifestFileName = 'manifest.json';
+        const fullVideoPath = path.join(recordFolderFullPath, storedFileName);
+        const fullManifestPath = path.join(recordFolderFullPath, manifestFileName);
+
+        let encryptionResult: {
+            ivBase64: string;
+            authTagBase64: string;
+            algorithm: string;
+        };
+
+        try {
+            encryptionResult = await this.encryptPlainFileToStorage({
+                plainPath: params.plainFilePath,
+                encryptedPath: fullVideoPath,
+            });
+        } catch {
+            throw new InternalServerErrorException('Не вдалося зашифрувати і зберегти відеофайл');
+        }
+
+        const storageRelativePath = path.join(recordFolderRelativePath, storedFileName).replace(/\\/g, '/');
+        const manifestRelativePath = path.join(recordFolderRelativePath, manifestFileName).replace(/\\/g, '/');
+
+        const video = this.videoRepository.create({
+            appointmentId: params.appointmentId,
+            originalFileName: params.originalFileName,
+            storedFileName,
+            storageRelativePath,
+            mimeType: params.mimeType,
+            size: params.plainSize,
+            startedAt: params.startedAt ? new Date(params.startedAt) : null,
+            endedAt: params.endedAt ? new Date(params.endedAt) : null,
+            sha256Hash: params.plainSha256Hash,
+            manifestRelativePath: null,
+            manifestSignature: null,
+            signatureAlgorithm: null,
+            tsaRequestRelativePath: null,
+            tsaResponseRelativePath: null,
+            tsaProvider: null,
+            tsaHashAlgorithm: null,
+            encryptionAlgorithm: encryptionResult.algorithm,
+            encryptionIv: encryptionResult.ivBase64,
+            encryptionAuthTag: encryptionResult.authTagBase64,
+            encryptedAt: new Date(),
+        });
+
+        const savedVideo = await this.videoRepository.save(video);
+
+        const unsignedManifest = {
+            videoId: savedVideo.id,
+            appointmentId: savedVideo.appointmentId,
+            originalFileName: savedVideo.originalFileName,
+            storedFileName: savedVideo.storedFileName,
+            storageRelativePath: savedVideo.storageRelativePath,
+            mimeType: savedVideo.mimeType,
+            size: savedVideo.size,
+            startedAt: savedVideo.startedAt,
+            endedAt: savedVideo.endedAt,
+            createdAt: savedVideo.createdAt,
+            sha256Hash: savedVideo.sha256Hash,
+            encryptionAlgorithm: savedVideo.encryptionAlgorithm,
+            encryptedAt: savedVideo.encryptedAt,
+            manifestVersion: 1,
+        };
+
+        const { signatureBase64, algorithm } = this.videoSignatureService.signManifest(unsignedManifest);
+        const signedManifest = { ...unsignedManifest, signatureAlgorithm: algorithm, manifestSignature: signatureBase64 };
+
+        try {
+            fs.writeFileSync(fullManifestPath, JSON.stringify(signedManifest, null, 2), 'utf-8');
+        } catch {
+            throw new InternalServerErrorException('Не вдалося зберегти маніфест');
+        }
+
+        const tsaResult = await this.videoTsaService.createTimestampForManifest({
+            manifestFullPath: fullManifestPath,
+            recordFolderFullPath,
+        });
+
+        savedVideo.manifestRelativePath = manifestRelativePath;
+        savedVideo.manifestSignature = signatureBase64;
+        savedVideo.signatureAlgorithm = algorithm;
+        savedVideo.tsaRequestRelativePath = path.join(recordFolderRelativePath, tsaResult.tsaRequestRelativeFileName).replace(/\\/g, '/');
+        savedVideo.tsaResponseRelativePath = path.join(recordFolderRelativePath, tsaResult.tsaResponseRelativeFileName).replace(/\\/g, '/');
+        savedVideo.tsaProvider = tsaResult.tsaProvider;
+        savedVideo.tsaHashAlgorithm = tsaResult.tsaHashAlgorithm;
+
+        const finalizedVideo = await this.videoRepository.save(savedVideo);
+
+        const appointment = await this.appointmentRepository.findOne({ where: { id: params.appointmentId } });
+        if (appointment) {
+            appointment.recordingCompleted = true;
+            appointment.recordingCompletedAt = appointment.recordingCompletedAt || new Date();
+            await this.appointmentRepository.save(appointment);
+        }
+
+        return finalizedVideo;
+    }
+
     async saveUploadedVideo(
         file: Express.Multer.File,
         dto: UploadVideoDto,
@@ -356,6 +585,45 @@ export class VideoService {
             throw new ForbiddenException('Capture agent не має права завантажувати відео для цього прийому');
         }
 
+        const uploadedPath = (file as Express.Multer.File & { path?: string }).path;
+        const plainTempPath = uploadedPath ? `${uploadedPath}.plain` : null;
+
+        if (uploadedPath && plainTempPath) {
+            try {
+                const decrypted = await this.decryptAgentTransportFileToPlainFile({
+                    encryptedPath: uploadedPath,
+                    plainPath: plainTempPath,
+                    secret: this.getTransportSecret(),
+                    ivBase64: dto.transportIv,
+                    authTagBase64: dto.transportAuthTag,
+                });
+
+                if (decrypted.sha256Hash.toLowerCase() !== String(dto.sha256Hash || '').trim().toLowerCase()) {
+                    throw new ForbiddenException('SHA-256 відео не збігається');
+                }
+
+                return await this.persistPlainVideoFile({
+                    appointmentId: dto.appointmentId,
+                    originalFileName: dto.originalFileName || file.originalname || 'agent-recording.webm',
+                    mimeType: dto.mimeType || 'video/webm',
+                    startedAt: dto.startedAt || null,
+                    endedAt: dto.endedAt || null,
+                    plainFilePath: plainTempPath,
+                    plainSha256Hash: decrypted.sha256Hash,
+                    plainSize: decrypted.size,
+                });
+            } catch (error) {
+                if (error instanceof ForbiddenException) {
+                    throw error;
+                }
+
+                throw new ForbiddenException('Не вдалося розшифрувати відео від capture agent. Перепідключіть агент, щоб оновити transportKey.');
+            } finally {
+                this.safeUnlink(uploadedPath);
+                this.safeUnlink(plainTempPath);
+            }
+        }
+
         let plainBuffer: Buffer;
         try {
             plainBuffer = decryptAgentTransportPayload({
@@ -382,6 +650,7 @@ export class VideoService {
             plainBuffer,
         });
     }
+
 
     async getVideosByAppointmentId(
         appointmentId: string,

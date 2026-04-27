@@ -17,6 +17,10 @@ declare global {
       sendPreviewSignal(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       sendPreviewFrame(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       queueRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      beginRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; entryId: string }>;
+      appendRecordingChunk(payload: Record<string, unknown>): Promise<{ ok: boolean; totalBytes: number }>;
+      finalizeRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      discardRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       flushRecordingQueue(): Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>;
       onSocketStatus(callback: (payload: SocketStatusPayload) => void): () => void;
       onSocketCommand(callback: (payload: SocketCommandPayload) => void): () => void;
