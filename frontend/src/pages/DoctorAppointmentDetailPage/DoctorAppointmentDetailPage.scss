@@ -645,14 +645,9 @@
 }
 
 .doctor-appointment-detail__dental-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
 }
-
 .doctor-appointment-detail__dental-map,
-.doctor-appointment-detail__dental-history,
 .doctor-appointment-detail__snapshot-editor {
   border: 1px solid #dbe4ef;
   background: #fbfdff;
@@ -874,6 +869,11 @@
 .doctor-appointment-detail__snapshot-card--compact {
   grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
   align-items: start;
+  gap: 18px;
+}
+
+.doctor-appointment-detail__snapshot-card--no-image {
+  grid-template-columns: 1fr;
 }
 
 .doctor-appointment-detail__snapshot-image--wide {
@@ -889,14 +889,16 @@
 }
 
 .doctor-appointment-detail__snapshot-fields--readonly {
-  gap: 8px;
+  gap: 12px;
+  align-content: start;
 }
 
 .doctor-appointment-detail__snapshot-readonly-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 10px 0;
   border-bottom: 1px solid #edf2f7;
 }
 
@@ -914,14 +916,27 @@
 }
 
 .doctor-appointment-detail__snapshot-description {
-  margin: 4px 0 0;
-  padding: 10px 12px;
+  margin: 2px 0 0;
+  padding: 12px 14px;
   border-radius: 12px;
   background: #f8fafc;
   color: #334155;
-  line-height: 1.45;
+  line-height: 1.5;
+}
+.doctor-appointment-detail__snapshot-once-editor {
+  margin-top: 10px;
 }
 
+.doctor-appointment-detail__snapshot-image--wide {
+  background: #f4f7fa;
+  border: 1px solid #e5edf6;
+}
+
+.doctor-appointment-detail__snapshot-image--wide img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 .doctor-appointment-detail__snapshot-once-editor {
   margin-top: 8px;
   border: 1px dashed #cbd5e1;
@@ -1000,4 +1015,568 @@
       grid-template-columns: 1fr;
     }
   }
+}
+/* Interactive dental formula workspace. Scoped to appointment page only. */
+.doctor-appointment-detail {
+  > .container.doctor-appointment-detail__container {
+    width: min(100% - 48px, 1480px);
+    max-width: 1480px;
+    margin: 0 auto;
+    padding-left: 24px;
+    padding-right: 24px;
+    box-sizing: border-box;
+  }
+
+  &__dental-workspace-tabs {
+    display: inline-flex;
+    gap: 8px;
+    padding: 6px;
+    border: 1px solid #d8e2eb;
+    border-radius: 18px;
+    background: #f8fbfd;
+    margin-bottom: 16px;
+
+    button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 14px;
+      padding: 0 16px;
+      background: transparent;
+      color: #566273;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+
+      &.is-active,
+      &:hover {
+        background: #dff7f3;
+        color: #0f172a;
+        box-shadow: 0 8px 18px rgba(108, 201, 191, 0.16);
+      }
+    }
+  }
+
+  &__formula-workspace,
+  &__history-workspace {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+  }
+
+  &__formula-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: center;
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid #d8e2eb;
+    background: #ffffff;
+
+    div:first-child {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    strong {
+      color: #0f172a;
+      font-size: 15px;
+    }
+
+    span {
+      color: #5b6675;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+  }
+
+  &__tooth.has-formula-change {
+    border-color: #6cc9bf;
+    box-shadow: 0 0 0 3px rgba(108, 201, 191, 0.18);
+  }
+}
+
+@media (max-width: 720px) {
+  .doctor-appointment-detail {
+    > .container.doctor-appointment-detail__container {
+      width: min(100% - 16px, 100%);
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    &__formula-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    &__dental-workspace-tabs {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+  }
+}
+.doctor-appointment-detail {
+  &__formula-autosave-note {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    color: #6b7280;
+    font-size: 13px;
+    line-height: 1.45;
+    text-align: right;
+  }
+}
+
+@media (max-width: 720px) {
+  .doctor-appointment-detail {
+    &__formula-autosave-note {
+      justify-content: flex-start;
+      text-align: left;
+    }
+  }
+}
+/* ===== Dental workspace redesign: flat rectangular ===== */
+.doctor-appointment-detail {
+  &__dental-map,
+  &__dental-history,
+  &__snapshot-editor,
+  &__formula-toolbar,
+  &__snapshot-card,
+  &__snapshot-mini-card,
+  &__snapshot-image,
+  &__snapshot-create,
+  &__empty-note,
+  &__snapshot-once-editor,
+  &__dental-workspace-tabs,
+  &__history-dropdown,
+  &__formula-history-dropdown,
+  &__formula-history-row,
+  &__upload-box {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  &__dental-workspace-tabs {
+    display: inline-flex;
+    gap: 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #d8e2eb;
+    margin-bottom: 16px;
+
+    button {
+      min-height: 52px;
+      border: 0;
+      border-right: 1px solid #d8e2eb;
+      border-radius: 0 !important;
+      background: #fff;
+      color: #566273;
+      font-weight: 800;
+      padding: 0 24px;
+      box-shadow: none !important;
+
+      &:last-child {
+        border-right: 0;
+      }
+
+      &:hover,
+      &.is-active {
+        background: #eef7f6;
+        color: #0f172a;
+        box-shadow: none !important;
+      }
+    }
+  }
+
+  &__formula-toolbar {
+    border-radius: 0 !important;
+    padding: 16px 18px;
+  }
+
+  &__tooth.has-formula-change {
+    border-color: #8aa0b5 !important;
+    box-shadow: none !important;
+    background: #f7fafc !important;
+  }
+
+  &__jaw-actions button,
+  &__tooth,
+  &__field input,
+  &__field select,
+  &__field textarea,
+  &__ghost-btn,
+  &__danger-btn,
+  &__primary-btn,
+  &__mini-delete-btn {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  &__jaw-actions button:hover,
+  &__tooth:hover,
+  &__jaw-actions button.is-selected,
+  &__tooth.is-selected {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  &__snapshot-create,
+  &__snapshot-once-editor,
+  &__empty-note {
+    border-style: solid !important;
+  }
+
+  &__empty-note {
+    background: #f8fafc;
+    color: #5b6675;
+  }
+
+  &__snapshot-create {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 1px solid #d8e2eb !important;
+    background: #ffffff;
+    padding: 16px;
+  }
+
+  &__upload-box {
+    display: grid;
+    gap: 10px;
+    border: 1px solid #d8e2eb;
+    padding: 12px;
+    background: #fff;
+  }
+
+  &__upload-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__upload-note {
+    color: #5b6675;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  &__history-dropdown,
+  &__formula-history-dropdown {
+    border: 1px solid #d8e2eb;
+    background: #fff;
+    overflow: hidden;
+
+    summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 14px 16px;
+      font-weight: 800;
+      color: #0f172a;
+      border-bottom: 1px solid #edf2f7;
+      background: #f8fbfd;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+  }
+
+  &__history-dropdown--section {
+    margin-top: 14px;
+  }
+
+  &__formula-history-dropdown {
+    margin-top: 16px;
+  }
+
+  &__formula-history-list {
+    display: grid;
+    gap: 0;
+  }
+
+  &__formula-history-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+    border-top: 1px solid #edf2f7;
+    background: #fff;
+
+    strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #0f172a;
+    }
+
+    p {
+      margin: 0;
+      color: #5b6675;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  }
+
+  &__formula-history-count {
+    min-width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #d8e2eb;
+    background: #f8fafc;
+    color: #0f172a;
+    font-weight: 800;
+    font-size: 12px;
+  }
+
+  &__snapshot-mini-card,
+  &__snapshot-card {
+    background: #fff;
+    border: 1px solid #e5edf6;
+    border-radius: 0 !important;
+  }
+
+  &__snapshot-image,
+  &__snapshot-mini-card img,
+  &__snapshot-image img {
+    border-radius: 0 !important;
+  }
+
+  &__snapshot-image-placeholder {
+    border-radius: 0 !important;
+
+    &.is-note {
+      border: 1px solid #d8e2eb !important;
+      background: #f8fafc !important;
+    }
+  }
+
+  &__mini-delete-btn {
+    border-radius: 0 !important;
+  }
+
+  &__snapshot-description {
+    border-radius: 0 !important;
+    background: #f8fafc;
+  }
+
+  &__field input,
+  &__field select,
+  &__field textarea {
+    border-radius: 0 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .doctor-appointment-detail {
+    &__snapshot-create {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+.doctor-appointment-detail {
+  &__snapshot-list--clean {
+    display: grid;
+    gap: 14px;
+    max-width: 1180px;
+  }
+
+  &__snapshot-record {
+    display: grid;
+    grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+    gap: 18px;
+    padding: 16px;
+    border: 1px solid #d8e2eb;
+    background: #fff;
+  }
+
+  &__snapshot-record--text-only {
+    grid-template-columns: 1fr;
+  }
+
+  &__snapshot-record-image {
+    display: block;
+    border: 1px solid #e3ebf2;
+    background: #f5f8fb;
+    overflow: hidden;
+
+    img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 320px;
+      object-fit: contain;
+      background: #f5f8fb;
+    }
+  }
+
+  &__snapshot-record-body {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+
+  &__snapshot-record-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+
+    div {
+      display: grid;
+      gap: 4px;
+    }
+
+    span,
+    time {
+      color: #5b6675;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+    }
+
+    strong {
+      color: #0f172a;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+  }
+
+  &__snapshot-readonly-clean {
+    display: grid;
+    gap: 10px;
+
+    div,
+    p {
+      margin: 0;
+      padding: 12px 14px;
+      background: #f6f9fb;
+    }
+
+    div {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    span {
+      color: #6b7280;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    strong {
+      color: #0f172a;
+      text-align: right;
+    }
+
+    p {
+      color: #334155;
+      line-height: 1.5;
+    }
+  }
+
+  &__snapshot-inline-editor {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  &__field--soft {
+    background: #f6f9fb;
+
+    input,
+    select,
+    textarea {
+      background: #fff;
+    }
+  }
+
+  &__description-toggle {
+    grid-column: 1 / -1;
+    background: #f6f9fb;
+
+    summary {
+      cursor: pointer;
+      color: #24324a;
+      font-weight: 800;
+      list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+  }
+
+  &__snapshot-record-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__snapshot-section {
+    display: grid;
+    gap: 12px;
+    max-width: 1240px;
+  }
+
+  &__snapshot-section + &__snapshot-section {
+    margin-top: 24px;
+  }
+
+  &__snapshot-section-head {
+    padding: 14px 16px;
+    border: 1px solid #d8e2eb;
+    background: #f6f9fb;
+
+    h3 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 20px;
+    }
+  }
+
+  &__upload-box {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    background: #f6f9fb;
+
+    > span {
+      color: #6b7280;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+  }
+
+  &__upload-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__upload-note {
+    color: #5b6675;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 900px) {
+  .doctor-appointment-detail {
+    &__snapshot-record,
+    &__snapshot-inline-editor {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+.container.doctor-appointment-detail__container{
+  max-width: 1240px !important;
+}
+.doctor-appointment-detail__description-toggle summary{
+  margin-bottom: 10px !important;
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { login } from '../../shared/api/authApi';
 import { saveToken } from '../../shared/utils/authStorage';
+import { API_BASE_URL } from '../../shared/api/http';
 import './LoginPage.scss';
 
 export default function LoginPage() {
@@ -88,7 +89,7 @@ export default function LoginPage() {
                         <span>АБО</span>
                     </div>
 
-                    <a className="auth-retro__google" href="http://localhost:3000/auth/google">
+                    <a className="auth-retro__google" href={`${API_BASE_URL}/auth/google`}>
                         <img src="../../../public/google-icon.svg" alt="" aria-hidden="true" />
                         <span>Google Авторизація</span>
                     </a>

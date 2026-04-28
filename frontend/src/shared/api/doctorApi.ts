@@ -1,6 +1,4 @@
-import { http } from './http';
-
-const API_BASE_URL = 'http://localhost:3000';
+import { API_BASE_URL, http } from './http';
 
 export type DoctorSpecialtyItem = {
     id: string;

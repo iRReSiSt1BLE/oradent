@@ -425,3 +425,293 @@
     }
   }
 }
+/* Embedded mode for DoctorAppointmentDetailPage. Scoped only to the formula block. */
+.interactive-dental-chart-page--embedded {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+
+  .interactive-dental-chart-page__layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .interactive-dental-chart-page__chart-card {
+    order: 1;
+    min-width: 0;
+  }
+
+  .interactive-dental-chart-page__tools {
+    order: 2;
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .interactive-dental-chart-page__summary-panel {
+    order: 3;
+  }
+
+  .interactive-dental-chart-page__tabs {
+    display: none;
+  }
+
+  .interactive-dental-chart-page__svg-host {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .interactive-dental-chart-page__svg-host svg {
+    width: 100%;
+    min-width: 1040px;
+  }
+}
+
+@media (max-width: 980px) {
+  .interactive-dental-chart-page--embedded {
+    .interactive-dental-chart-page__tools {
+      padding: 14px;
+    }
+  }
+}
+/* Appointment embedded tools layout: flat two-column panel like clinical dental formula controls. */
+.interactive-dental-chart-page--embedded {
+  .interactive-dental-chart-page__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .interactive-dental-chart-page__chart-card {
+    order: 1;
+  }
+
+  .interactive-dental-chart-page__tools {
+    order: 2;
+    border: 1px solid #e6eef3;
+    border-radius: 22px;
+    background: #ffffff;
+    box-shadow: none;
+    padding: 20px;
+  }
+
+  .interactive-dental-chart-page__embedded-tools-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px 34px;
+    align-items: start;
+  }
+
+  .interactive-dental-chart-page__embedded-tools-column {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+  }
+
+  .interactive-dental-chart-page__tool-block {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    gap: 8px;
+
+    h2 {
+      margin: 0 0 4px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e8eff1;
+      color: #8c9999;
+      font-size: 17px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+  }
+
+  .interactive-dental-chart-page__tool-head {
+    display: block;
+
+    .interactive-dental-chart-page__ghost-button {
+      display: none;
+    }
+  }
+
+  .interactive-dental-chart-page__button-list,
+  .interactive-dental-chart-page__grid-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 12px;
+
+    button {
+      min-height: 24px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      box-shadow: none;
+      color: #9aa7a6;
+      text-align: left;
+      padding: 2px 4px;
+      font-size: 13px;
+      font-weight: 700;
+      transform: none;
+
+      &:hover,
+      &.is-selected {
+        background: #eef7f5;
+        color: #24324a;
+        box-shadow: none;
+        transform: none;
+      }
+
+      &.is-accent {
+        background: transparent;
+        border: 0;
+        color: #879898;
+      }
+
+      &.is-danger {
+        background: transparent;
+        border: 0;
+        color: #b76a6a;
+      }
+    }
+  }
+
+  .interactive-dental-chart-page__grid-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+
+    button {
+      min-height: 24px;
+      text-align: left;
+      padding: 2px 4px;
+    }
+  }
+
+  .interactive-dental-chart-page__quality-row {
+    min-height: 26px;
+    grid-template-columns: minmax(0, 1fr) 24px 24px 24px;
+    gap: 8px;
+
+    span {
+      color: #9aa7a6;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    button {
+      width: 18px;
+      height: 18px;
+      border-width: 1px;
+
+      &.is-good {
+        background: #6edbe9;
+      }
+
+      &.is-medium {
+        background: #fbf6bc;
+      }
+
+      &.is-bad {
+        background: #f8dada;
+      }
+
+      &:hover,
+      &.is-selected {
+        border-color: #1f2937;
+        box-shadow: 0 3px 8px rgba(15, 23, 42, 0.12);
+        transform: scale(1.06);
+      }
+    }
+  }
+
+  .interactive-dental-chart-page__status {
+    margin-top: 4px;
+    border-radius: 16px;
+    border-style: solid;
+    background: #f8fbfd;
+  }
+
+  .interactive-dental-chart-page__states-under-chart {
+    order: 3;
+  }
+
+  .interactive-dental-chart-page__summary-panel {
+    border: 1px solid #e6eef3;
+    border-radius: 18px;
+    background: #ffffff;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .interactive-dental-chart-page--embedded {
+    .interactive-dental-chart-page__embedded-tools-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .interactive-dental-chart-page__button-list,
+    .interactive-dental-chart-page__grid-actions {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+/* ===== Dental formula editor: flat rectangular redesign ===== */
+.interactive-dental-chart-page {
+  &,
+  * {
+    box-shadow: none !important;
+  }
+
+  &__layout,
+  &__tools,
+  &__chart-card,
+  &__status,
+  &__summary-panel,
+  &__tool-block,
+  &__modal,
+  &__svg-host {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  &__tabs {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  &__tabs button,
+  &__button-list button,
+  &__tool-grid button,
+  &__tool-block button,
+  &__ghost-button,
+  &__modal-actions button {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  &__tabs button:hover,
+  &__tabs button.is-active,
+  &__button-list button:hover,
+  &__button-list button.is-active,
+  &__tool-grid button:hover,
+  &__tool-grid button.is-active,
+  &__tool-block button:hover,
+  &__tool-block button.is-active,
+  &__ghost-button:hover,
+  &__modal-actions button:hover {
+    box-shadow: none !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  &__svg-host {
+    border: 1px solid #d8e2eb !important;
+    background: #fff !important;
+  }
+
+  &__svg-host .interactive-dental-chart-clickable:hover {
+    filter: none !important;
+  }
+}

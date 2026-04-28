@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
@@ -31,6 +31,11 @@ import {
     type DentalTargetType,
 } from '../../shared/api/dentalChartApi';
 import { API_BASE_URL } from '../../shared/api/http';
+import {
+    DentalFormulaEditor,
+    createInitialStates,
+    type DentalFormulaState,
+} from '../InteractiveDentalChartPage/InteractiveDentalChartPage';
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import './DoctorAppointmentDetailPage.scss';
 
@@ -67,7 +72,12 @@ type DentalSnapshotDraft = {
     description: string;
     targetValue: string;
 };
-
+type DentalFormulaHistoryEntry = {
+    id: string;
+    savedAt: string;
+    changedTeeth: number[];
+    state: DentalFormulaState;
+};
 type DentalTargetSelection = {
     targetType: DentalTargetType;
     label: string;
@@ -85,7 +95,114 @@ const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
         { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
     ],
 };
+function buildDentalFormulaStorageKey(appointment: AppointmentItem | null) {
+    const patientId = appointment?.patient?.id || appointment?.patientId || 'unknown-patient';
+    return `oradent:dental-formula:${patientId}`;
+}
 
+function normalizeDentalFormulaState(value: unknown): DentalFormulaState {
+    const empty = createInitialStates(false);
+
+    if (!value || typeof value !== 'object') {
+        return empty;
+    }
+
+    return {
+        ...empty,
+        ...(value as DentalFormulaState),
+    };
+}
+
+function loadStoredDentalFormula(appointment: AppointmentItem | null): DentalFormulaState {
+    if (typeof window === 'undefined') {
+        return createInitialStates(false);
+    }
+
+    try {
+        const raw = window.localStorage.getItem(buildDentalFormulaStorageKey(appointment));
+
+        if (!raw) {
+            return createInitialStates(false);
+        }
+
+        return normalizeDentalFormulaState(JSON.parse(raw));
+    } catch {
+        return createInitialStates(false);
+    }
+}
+function buildDentalFormulaHistoryKey(appointment: AppointmentItem | null) {
+    const patientId = appointment?.patient?.id || appointment?.patientId || 'unknown-patient';
+    return `oradent:dental-formula-history:${patientId}`;
+}
+
+function loadStoredDentalFormulaHistory(appointment: AppointmentItem | null): DentalFormulaHistoryEntry[] {
+    if (typeof window === 'undefined') return [];
+
+    try {
+        const raw = window.localStorage.getItem(buildDentalFormulaHistoryKey(appointment));
+        if (!raw) return [];
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed
+            .map((item) => ({
+                id: typeof item?.id === 'string'
+                    ? item.id
+                    : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                savedAt: typeof item?.savedAt === 'string'
+                    ? item.savedAt
+                    : new Date().toISOString(),
+                changedTeeth: Array.isArray(item?.changedTeeth)
+                    ? item.changedTeeth.filter((value: unknown) => typeof value === 'number')
+                    : [],
+                state: normalizeDentalFormulaState(item?.state),
+            }))
+            .sort((a, b) => +new Date(b.savedAt) - +new Date(a.savedAt));
+    } catch {
+        return [];
+    }
+}
+
+function saveStoredDentalFormulaHistory(
+    appointment: AppointmentItem | null,
+    history: DentalFormulaHistoryEntry[],
+) {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.setItem(
+            buildDentalFormulaHistoryKey(appointment),
+            JSON.stringify(history.slice(0, 30)),
+        );
+    } catch {
+        // ignore
+    }
+}
+
+function collectDentalFormulaDiff(before: DentalFormulaState | null, after: DentalFormulaState | null) {
+    if (!before || !after) {
+        return {
+            changedTeeth: [] as number[],
+            changedKeys: [] as string[],
+        };
+    }
+
+    const changedTeeth: number[] = [];
+    const changedKeys: string[] = [];
+
+    DENTAL_TEETH_ROWS.flat().forEach((tooth) => {
+        const previous = JSON.stringify(before[tooth] || null);
+        const current = JSON.stringify(after[tooth] || null);
+
+        if (previous !== current) {
+            changedTeeth.push(tooth);
+            changedKeys.push(`tooth:${tooth}`);
+        }
+    });
+
+    return { changedTeeth, changedKeys };
+}
 function buildPreviewWsUrl(token: string) {
     const url = new URL(API_BASE_URL);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -120,10 +237,12 @@ function targetValueFromSelection(target: DentalTargetSelection) {
 
 function parseDentalTargetValue(value: string) {
     const [targetType, rawValue] = value.split(':');
+
     if (targetType === 'TOOTH') {
         const toothNumber = Number(rawValue);
+
         return {
-            targetType: 'TOOTH' as DentalTargetType,
+            targetType: 'TOOTH' as const,
             targetId: `tooth-${toothNumber}`,
             toothNumber,
             jaw: null,
@@ -131,9 +250,10 @@ function parseDentalTargetValue(value: string) {
     }
 
     if (targetType === 'JAW') {
-        const jaw = rawValue === 'LOWER' ? 'LOWER' : 'UPPER';
+        const jaw = rawValue === 'LOWER' ? ('LOWER' as const) : ('UPPER' as const);
+
         return {
-            targetType: 'JAW' as DentalTargetType,
+            targetType: 'JAW' as const,
             targetId: jaw === 'UPPER' ? 'upper-jaw' : 'lower-jaw',
             toothNumber: null,
             jaw,
@@ -141,7 +261,7 @@ function parseDentalTargetValue(value: string) {
     }
 
     return {
-        targetType: 'MOUTH' as DentalTargetType,
+        targetType: 'MOUTH' as const,
         targetId: 'mouth',
         toothNumber: null,
         jaw: 'WHOLE' as const,
@@ -160,17 +280,6 @@ function dentalTargetLabel(target: DentalTargetSelection | DentalSnapshotItem) {
     return 'Уся ротова порожнина';
 }
 
-function snapshotMatchesTarget(snapshot: DentalSnapshotItem, target: DentalTargetSelection) {
-    if (target.targetType === 'TOOTH') {
-        return snapshot.targetType === 'TOOTH' && snapshot.toothNumber === target.toothNumber;
-    }
-
-    if (target.targetType === 'JAW') {
-        return snapshot.targetType === 'JAW' && snapshot.jaw === target.jaw;
-    }
-
-    return snapshot.targetType === 'MOUTH';
-}
 
 type CalendarCell =
     | { kind: 'empty'; key: string }
@@ -214,6 +323,7 @@ function shiftMonthKey(monthKey: string, diff: number) {
 function isBeforeCurrentMonth(monthKey: string) {
     return parseMonthKey(monthKey).getTime() < parseMonthKey(currentMonthKey()).getTime();
 }
+
 
 function getMonthLabel(monthKey: string) {
     const [year, month] = monthKey.split('-').map(Number);
@@ -327,6 +437,10 @@ export default function DoctorAppointmentDetailPage() {
     const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
     const [createdFollowUpDate, setCreatedFollowUpDate] = useState<string | null>(null);
 
+    const [dentalFormulaHistory, setDentalFormulaHistory] = useState<DentalFormulaHistoryEntry[]>([]);
+    const [newDentalImageFile, setNewDentalImageFile] = useState<File | null>(null);
+    const newDentalImageInputRef = useRef<HTMLInputElement | null>(null);
+
     const [consultationConclusion, setConsultationConclusion] = useState('');
     const [treatmentPlanText, setTreatmentPlanText] = useState('');
     const [recommendationText, setRecommendationText] = useState('');
@@ -347,7 +461,7 @@ export default function DoctorAppointmentDetailPage() {
     const [selectedCabinetId, setSelectedCabinetId] = useState<string | null>(null);
 
     const [dentalChart, setDentalChart] = useState<DentalChartResponse | null>(null);
-    const [dentalLoading, setDentalLoading] = useState(false);
+    const [, setDentalLoading] = useState(false);
     const [dentalSavingId, setDentalSavingId] = useState<string | null>(null);
     const [dentalDeletingId, setDentalDeletingId] = useState<string | null>(null);
     const [dentalDrafts, setDentalDrafts] = useState<Record<string, DentalSnapshotDraft>>({});
@@ -363,6 +477,14 @@ export default function DoctorAppointmentDetailPage() {
         jaw: 'WHOLE',
     });
 
+    const [dentalWorkspaceTab, setDentalWorkspaceTab] = useState<'formula' | 'history'>('formula');
+
+    const [dentalFormula, setDentalFormula] = useState<DentalFormulaState>(() =>
+        createInitialStates(false),
+    );
+
+    const [savedDentalFormula, setSavedDentalFormula] = useState<DentalFormulaState | null>(null);
+    const [dentalFormulaChangedTeeth, setDentalFormulaChangedTeeth] = useState<number[]>([]);
     const previewRefs = useRef<Record<string, HTMLVideoElement | HTMLImageElement | null>>({});
     const previewVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
     const previewPeerConnectionsRef = useRef<Record<string, RTCPeerConnection | null>>({});
@@ -375,6 +497,7 @@ export default function DoctorAppointmentDetailPage() {
     const previewPollersRef = useRef<Record<string, number | null>>({});
     const previewInFlightRef = useRef<Record<string, boolean>>({});
     const dentalImageUrlsRef = useRef<Record<string, string>>({});
+    const failedDentalImageIdsRef = useRef<Set<string>>(new Set());
     const autoStartedRef = useRef<Set<string>>(new Set());
     const finishAfterUploadsRef = useRef(false);
 
@@ -400,14 +523,32 @@ export default function DoctorAppointmentDetailPage() {
             label: `Зуб ${toothNumber}`,
         })),
     ], []);
-    const selectedDentalHistory = useMemo(
-        () => (dentalChart?.snapshots || []).filter((snapshot) => snapshotMatchesTarget(snapshot, selectedDentalTarget)),
-        [dentalChart?.snapshots, selectedDentalTarget],
+    const currentVisitSnapshots = useMemo(
+        () => (dentalChart?.snapshots || []).filter((snapshot) => snapshot.appointmentId === appointment?.id),
+        [dentalChart?.snapshots, appointment?.id],
     );
+
+    const previousVisitSnapshots = useMemo(
+        () => (dentalChart?.snapshots || []).filter((snapshot) => snapshot.appointmentId !== appointment?.id),
+        [dentalChart?.snapshots, appointment?.id],
+    );
+
+
 
     useEffect(() => {
         setNewDentalDraft((prev) => ({ ...prev, targetValue: targetValueFromSelection(selectedDentalTarget) }));
     }, [selectedDentalTarget]);
+
+    useEffect(() => {
+        if (!appointment?.id) return;
+
+        const stored = loadStoredDentalFormula(appointment);
+
+        setDentalFormula(stored);
+        setSavedDentalFormula(stored);
+        setDentalFormulaChangedTeeth([]);
+        setDentalFormulaHistory(loadStoredDentalFormulaHistory(appointment));
+    }, [appointment?.id, appointment?.patient?.id]);
 
     useEffect(() => {
         async function loadAppointment() {
@@ -466,19 +607,26 @@ export default function DoctorAppointmentDetailPage() {
     useEffect(() => {
         if (!appointment?.id || !token) return;
 
-        void loadDentalChart();
+        void loadDentalChart(false);
+
+        if (isCompleted) {
+            return;
+        }
+
         const timerId = window.setInterval(() => {
             void loadDentalChart(true);
-        }, 4500);
+        }, 30000);
 
         return () => window.clearInterval(timerId);
-    }, [appointment?.id, token]);
+    }, [appointment?.id, token, isCompleted]);
 
     useEffect(() => {
         if (!token || !dentalChart?.snapshots?.length) return;
 
         dentalChart.snapshots.forEach((snapshot) => {
+            if (!snapshot.hasFile) return;
             if (dentalImageUrlsRef.current[snapshot.id]) return;
+            if (failedDentalImageIdsRef.current.has(snapshot.id)) return;
 
             void fetchDentalSnapshotFile(token, snapshot.id)
                 .then((blob) => {
@@ -486,9 +634,19 @@ export default function DoctorAppointmentDetailPage() {
                     dentalImageUrlsRef.current[snapshot.id] = url;
                     setDentalImageUrls((prev) => ({ ...prev, [snapshot.id]: url }));
                 })
-                .catch(() => null);
+                .catch(() => {
+                    failedDentalImageIdsRef.current.add(snapshot.id);
+                });
         });
     }, [dentalChart?.snapshots, token]);
+
+    useEffect(() => {
+        return () => {
+            Object.values(dentalImageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+            dentalImageUrlsRef.current = {};
+            failedDentalImageIdsRef.current.clear();
+        };
+    }, []);
 
     useEffect(() => {
         return () => {
@@ -707,6 +865,68 @@ export default function DoctorAppointmentDetailPage() {
         }
     }
 
+
+    async function captureWebsiteScreenshot() {
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+            setAlert({ variant: 'error', message: 'Браузер не підтримує знімок екрана.' });
+            return;
+        }
+
+        let stream: MediaStream | null = null;
+
+        try {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: false,
+            });
+
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.muted = true;
+            video.playsInline = true;
+
+            await video.play();
+            await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+            const width = video.videoWidth || 1280;
+            const height = video.videoHeight || 720;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+
+            const context = canvas.getContext('2d');
+
+            if (!context) {
+                throw new Error('Не вдалося підготувати canvas для знімка.');
+            }
+
+            context.drawImage(video, 0, 0, width, height);
+
+            const blob = await new Promise<Blob | null>((resolve) =>
+                canvas.toBlob(resolve, 'image/jpeg', 0.9),
+            );
+
+            if (!blob) {
+                throw new Error('Не вдалося створити файл знімка.');
+            }
+
+            const file = new File([blob], `dental-screen-${Date.now()}.jpg`, {
+                type: 'image/jpeg',
+            });
+
+            setNewDentalImageFile(file);
+            setAlert({ variant: 'success', message: 'Знімок екрана готовий до збереження.' });
+        } catch (error) {
+            setAlert({
+                variant: 'error',
+                message: error instanceof Error ? error.message : 'Не вдалося зробити знімок екрана.',
+            });
+        } finally {
+            stream?.getTracks().forEach((track) => track.stop());
+        }
+    }
+
     async function createDentalNote() {
         if (!token || !appointment?.id || isCompleted) return;
 
@@ -714,26 +934,102 @@ export default function DoctorAppointmentDetailPage() {
         const title = newDentalDraft.title.trim();
         const description = newDentalDraft.description.trim();
 
-        if (!title && !description) {
-            setAlert({ variant: 'error', message: 'Додайте підпис або примітку.' });
+        if (!title && !description && !newDentalImageFile) {
+            setAlert({ variant: 'error', message: 'Додайте текст або зображення.' });
             return;
         }
 
         try {
             setDentalSavingId('new');
-            await createDentalSnapshot(token, appointment.id, {
-                ...target,
-                title,
-                description,
+
+            await createDentalSnapshot(
+                token,
+                appointment.id,
+                {
+                    ...target,
+                    title,
+                    description,
+                },
+                newDentalImageFile,
+            );
+            setNewDentalDraft({
+                title: '',
+                description: '',
+                targetValue: targetValueFromSelection(selectedDentalTarget),
             });
-            setNewDentalDraft({ title: '', description: '', targetValue: targetValueFromSelection(selectedDentalTarget) });
+
+            clearNewDentalImage();
+
             await loadDentalChart(true);
-            setAlert({ variant: 'success', message: 'Примітку додано' });
+            setAlert({ variant: 'success', message: 'Запис додано' });
         } catch (error) {
-            setAlert({ variant: 'error', message: error instanceof Error ? error.message : 'Не вдалося додати примітку' });
+            setAlert({
+                variant: 'error',
+                message: error instanceof Error ? error.message : 'Не вдалося додати запис',
+            });
         } finally {
             setDentalSavingId(null);
         }
+    }
+
+
+    function handleNewDentalImageChange(event: ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0] || null;
+        setNewDentalImageFile(file);
+    }
+
+    function clearNewDentalImage() {
+        setNewDentalImageFile(null);
+
+        if (newDentalImageInputRef.current) {
+            newDentalImageInputRef.current.value = '';
+        }
+    }
+
+    function persistDentalFormula(nextState: DentalFormulaState, changedTeeth: number[]) {
+        if (!appointment?.id) return;
+
+        const normalized = normalizeDentalFormulaState(nextState);
+
+        const nextHistory =
+            changedTeeth.length > 0
+                ? [
+                    {
+                        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        savedAt: new Date().toISOString(),
+                        changedTeeth,
+                        state: normalized,
+                    },
+                    ...dentalFormulaHistory,
+                ].slice(0, 30)
+                : dentalFormulaHistory;
+
+        try {
+            window.localStorage.setItem(
+                buildDentalFormulaStorageKey(appointment),
+                JSON.stringify(normalized),
+            );
+
+            saveStoredDentalFormulaHistory(appointment, nextHistory);
+
+            setSavedDentalFormula(normalized);
+            setDentalFormulaHistory(nextHistory);
+        } catch {
+            // localStorage can be unavailable or full; the UI should not break.
+        }
+    }
+
+    function handleDentalFormulaChange(nextState: DentalFormulaState) {
+        const normalized = normalizeDentalFormulaState(nextState);
+
+        const diff = savedDentalFormula
+            ? collectDentalFormulaDiff(savedDentalFormula, normalized)
+            : { changedTeeth: [] as number[], changedKeys: [] as string[] };
+
+        setDentalFormula(normalized);
+        setDentalFormulaChangedTeeth(diff.changedTeeth);
+
+        persistDentalFormula(normalized, diff.changedTeeth);
     }
 
     async function removeDentalSnapshot(snapshotId: string) {
@@ -1222,6 +1518,162 @@ export default function DoctorAppointmentDetailPage() {
         );
     }
 
+
+
+    function renderDentalSnapshotCards(items: DentalSnapshotItem[], emptyText: string, canManage = true) {
+        if (!items.length) {
+            return <div className="doctor-appointment-detail__empty-note">{emptyText}</div>;
+        }
+
+        return (
+            <div className="doctor-appointment-detail__snapshot-list doctor-appointment-detail__snapshot-list--clean">
+                {items.map((snapshot) => {
+                    const draft = dentalDrafts[snapshot.id] || {
+                        title: snapshot.title || '',
+                        description: snapshot.description || '',
+                        targetValue: targetValueFromSnapshot(snapshot),
+                    };
+
+                    const snapshotLocked = Boolean(snapshot.title || snapshot.description);
+                    const imageUrl = snapshot.hasFile ? dentalImageUrls[snapshot.id] : '';
+                    const hasImage = Boolean(imageUrl);
+                    const canEditSnapshot = canManage && !snapshotLocked && !isCompleted;
+                    const canDeleteSnapshot = canManage && !isCompleted;
+
+                    return (
+                        <article
+                            key={snapshot.id}
+                            className={`doctor-appointment-detail__snapshot-record ${
+                                hasImage ? '' : 'doctor-appointment-detail__snapshot-record--text-only'
+                            }`}
+                        >
+                            {hasImage ? (
+                                <a
+                                    href={imageUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="doctor-appointment-detail__snapshot-record-image"
+                                >
+                                    <img src={imageUrl} alt={snapshot.title || 'Dental snapshot'} />
+                                </a>
+                            ) : null}
+
+                            <div className="doctor-appointment-detail__snapshot-record-body">
+                                <div className="doctor-appointment-detail__snapshot-record-top">
+                                    <div>
+                                        <span>{snapshot.doctorName || 'Лікар не вказаний'}</span>
+                                        {snapshot.title ? <strong>{snapshot.title}</strong> : null}
+                                    </div>
+
+                                    <time>{formatDateTime(snapshot.capturedAt || snapshot.createdAt)}</time>
+                                </div>
+
+                                {canEditSnapshot ? (
+                                    <div className="doctor-appointment-detail__snapshot-inline-editor">
+                                        <label className="doctor-appointment-detail__field doctor-appointment-detail__field--soft">
+                                            <span>Область</span>
+                                            <select
+                                                value={draft.targetValue}
+                                                onChange={(event) =>
+                                                    updateDentalDraft(snapshot.id, {
+                                                        targetValue: event.target.value,
+                                                    })
+                                                }
+                                            >
+                                                {dentalTargetOptions.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <label className="doctor-appointment-detail__field doctor-appointment-detail__field--soft">
+                                            <span>Підпис</span>
+                                            <input
+                                                value={draft.title}
+                                                onChange={(event) =>
+                                                    updateDentalDraft(snapshot.id, {
+                                                        title: event.target.value,
+                                                    })
+                                                }
+                                                placeholder="Короткий підпис"
+                                            />
+                                        </label>
+
+                                        <details className="doctor-appointment-detail__description-toggle">
+                                            <summary>{draft.description ? 'Редагувати опис' : '+ Додати опис'}</summary>
+
+                                            <label className="doctor-appointment-detail__field doctor-appointment-detail__field--soft doctor-appointment-detail__field--wide">
+                                                <textarea
+                                                    value={draft.description}
+                                                    onChange={(event) =>
+                                                        updateDentalDraft(snapshot.id, {
+                                                            description: event.target.value,
+                                                        })
+                                                    }
+                                                    placeholder="Додатковий контекст за потреби"
+                                                />
+                                            </label>
+
+                                            {draft.description ? (
+                                                <button
+                                                    type="button"
+                                                    className="doctor-appointment-detail__mini-delete-btn"
+                                                    onClick={() =>
+                                                        updateDentalDraft(snapshot.id, {
+                                                            description: '',
+                                                        })
+                                                    }
+                                                >
+                                                    Прибрати опис
+                                                </button>
+                                            ) : null}
+                                        </details>
+
+                                        <div className="doctor-appointment-detail__snapshot-record-actions">
+                                            <button
+                                                type="button"
+                                                className="doctor-appointment-detail__ghost-btn doctor-appointment-detail__save-snapshot-btn"
+                                                onClick={() => void saveDentalSnapshot(snapshot)}
+                                                disabled={dentalSavingId === snapshot.id || !draft.title.trim()}
+                                            >
+                                                {dentalSavingId === snapshot.id ? (
+                                                    <span className="doctor-appointment-detail__btn-spinner" />
+                                                ) : null}
+                                                Зберегти
+                                            </button>
+
+                                            {canDeleteSnapshot ? (
+                                                <button
+                                                    type="button"
+                                                    className="doctor-appointment-detail__danger-btn"
+                                                    onClick={() => void removeDentalSnapshot(snapshot.id)}
+                                                    disabled={dentalDeletingId === snapshot.id}
+                                                >
+                                                    {dentalDeletingId === snapshot.id ? 'Видалення…' : 'Видалити'}
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="doctor-appointment-detail__snapshot-readonly-clean">
+                                        <div>
+                                            <span>Область</span>
+                                            <strong>{dentalTargetLabel(snapshot)}</strong>
+                                        </div>
+
+                                        {snapshot.description ? <p>{snapshot.description}</p> : null}
+                                    </div>
+                                )}
+                            </div>
+                        </article>
+                    );
+                })}
+            </div>
+        );
+    }
+
     return (
         <div className="page-shell doctor-appointment-detail">
             <div className="container doctor-appointment-detail__container">
@@ -1269,7 +1721,6 @@ export default function DoctorAppointmentDetailPage() {
                                 <div className="doctor-appointment-detail__section-head">
                                     <div>
                                         <h2>Відеозапис</h2>
-                                        <p>{appointment.cabinet?.devices?.length ? 'Для цього прийому доступний локальний запис у кабінеті.' : 'Для цього кабінету джерела запису не налаштовано.'}</p>
                                     </div>
                                 </div>
 
@@ -1377,256 +1828,309 @@ export default function DoctorAppointmentDetailPage() {
                                 <div className="doctor-appointment-detail__section-head">
                                     <div>
                                         <h2>Зубна карта пацієнта</h2>
-                                        <p>Поки без зубної формули: 32 постійні зуби, верхня/нижня щелепа і загальна історія ротової порожнини.</p>
+
                                     </div>
+
+                                </div>
+
+                                <div className="doctor-appointment-detail__dental-workspace-tabs">
                                     <button
                                         type="button"
-                                        className="doctor-appointment-detail__ghost-btn"
-                                        onClick={() => void loadDentalChart(false)}
-                                        disabled={dentalLoading}
+                                        className={dentalWorkspaceTab === 'formula' ? 'is-active' : ''}
+                                        onClick={() => setDentalWorkspaceTab('formula')}
                                     >
-                                        {dentalLoading ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
-                                        Оновити
+                                        Формула
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className={dentalWorkspaceTab === 'history' ? 'is-active' : ''}
+                                        onClick={() => setDentalWorkspaceTab('history')}
+                                    >
+                                        Скріншоти / історія
                                     </button>
                                 </div>
 
-                                <div className="doctor-appointment-detail__dental-layout">
-                                    <div className="doctor-appointment-detail__dental-map">
-                                        <div className="doctor-appointment-detail__jaw-actions">
-                                            <button
-                                                type="button"
-                                                className={selectedDentalTarget.targetType === 'MOUTH' ? 'is-selected' : ''}
-                                                onClick={() => setSelectedDentalTarget({ targetType: 'MOUTH', label: 'Уся ротова порожнина', jaw: 'WHOLE' })}
-                                            >
-                                                Уся ротова порожнина
-                                                <span>{dentalChart?.mouthHistory.length || 0}</span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'UPPER' ? 'is-selected' : ''}
-                                                onClick={() => setSelectedDentalTarget({ targetType: 'JAW', label: 'Верхня щелепа', jaw: 'UPPER' })}
-                                            >
-                                                Верхня щелепа
-                                                <span>{dentalChart?.upperJawHistory.length || 0}</span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'LOWER' ? 'is-selected' : ''}
-                                                onClick={() => setSelectedDentalTarget({ targetType: 'JAW', label: 'Нижня щелепа', jaw: 'LOWER' })}
-                                            >
-                                                Нижня щелепа
-                                                <span>{dentalChart?.lowerJawHistory.length || 0}</span>
-                                            </button>
-                                        </div>
+                                {dentalWorkspaceTab === 'formula' ? (
+                                    <div className="doctor-appointment-detail__formula-workspace">
+                                        <div className="doctor-appointment-detail__formula-toolbar">
+                                            <div>
 
-                                        <div className="doctor-appointment-detail__tooth-grid" aria-label="Зубна карта 32 зуби">
-                                            {DENTAL_TEETH_ROWS.map((row, rowIndex) => (
-                                                <div className="doctor-appointment-detail__tooth-row" key={`row-${rowIndex}`}>
-                                                    {row.map((toothNumber) => {
-                                                        const tooth = dentalChart?.teeth.find((item) => item.number === toothNumber);
-                                                        const isSelected = selectedDentalTarget.targetType === 'TOOTH' && selectedDentalTarget.toothNumber === toothNumber;
-                                                        return (
-                                                            <button
-                                                                type="button"
-                                                                key={toothNumber}
-                                                                className={`doctor-appointment-detail__tooth ${isSelected ? 'is-selected' : ''} ${tooth?.snapshotCount ? 'has-history' : ''}`}
-                                                                onClick={() => setSelectedDentalTarget({ targetType: 'TOOTH', label: `Зуб ${toothNumber}`, toothNumber })}
-                                                            >
-                                                                <span>{toothNumber}</span>
-                                                                {tooth?.snapshotCount ? <em>{tooth.snapshotCount}</em> : null}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className="doctor-appointment-detail__dental-history">
-                                        <div className="doctor-appointment-detail__dental-history-head">
-                                            <h3>{selectedDentalTarget.label}</h3>
-                                            <span>{selectedDentalHistory.length} записів</span>
-                                        </div>
-                                        {selectedDentalHistory.length ? (
-                                            <div className="doctor-appointment-detail__snapshot-mini-list">
-                                                {selectedDentalHistory.map((snapshot) => (
-                                                    <article key={snapshot.id} className="doctor-appointment-detail__snapshot-mini-card">
-                                                        {snapshot.hasFile ? (
-                                                            dentalImageUrls[snapshot.id] ? (
-                                                                <a href={dentalImageUrls[snapshot.id]} target="_blank" rel="noreferrer" className="doctor-appointment-detail__snapshot-link">
-                                                                    <img src={dentalImageUrls[snapshot.id]} alt={snapshot.title || dentalTargetLabel(snapshot)} />
-                                                                </a>
-                                                            ) : <div className="doctor-appointment-detail__snapshot-image-placeholder">Завантаження…</div>
-                                                        ) : <div className="doctor-appointment-detail__snapshot-image-placeholder is-note">Без фото</div>}
-                                                        <strong>{snapshot.title || dentalTargetLabel(snapshot)}</strong>
-                                                        <span>{snapshot.doctorName || 'Лікар не вказаний'} · {formatDateTime(snapshot.capturedAt || snapshot.createdAt)}</span>
-                                                        {snapshot.description ? <p>{snapshot.description}</p> : null}
-                                                        {!isCompleted ? (
-                                                            <button
-                                                                type="button"
-                                                                className="doctor-appointment-detail__mini-delete-btn"
-                                                                onClick={() => void removeDentalSnapshot(snapshot.id)}
-                                                                disabled={dentalDeletingId === snapshot.id}
-                                                            >
-                                                                {dentalDeletingId === snapshot.id ? 'Видалення…' : 'Видалити'}
-                                                            </button>
-                                                        ) : null}
-                                                    </article>
-                                                ))}
+                                                <span>
+            {dentalFormulaChangedTeeth.length
+                ? `Змінено зуби під час цього прийому: ${dentalFormulaChangedTeeth.join(', ')}`
+                : 'Змін у формулі під час цього прийому поки немає.'}
+        </span>
                                             </div>
-                                        ) : (
-                                            <div className="doctor-appointment-detail__empty-note">Для вибраної області ще немає записів.</div>
-                                        )}
-                                    </div>
-                                </div>
 
-                                <div className="doctor-appointment-detail__snapshot-editor">
-                                    <div className="doctor-appointment-detail__dental-history-head">
-                                        <h3>Усі записи по зубній карті</h3>
-                                        <span>{dentalChart?.snapshots.length || 0}</span>
-                                    </div>
-
-                                    {!isCompleted ? (
-                                        <div className="doctor-appointment-detail__snapshot-create">
-                                            <label className="doctor-appointment-detail__field">
-                                                <span>Область</span>
-                                                <select
-                                                    value={newDentalDraft.targetValue}
-                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, targetValue: event.target.value }))}
-                                                >
-                                                    {dentalTargetOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <label className="doctor-appointment-detail__field">
-                                                <span>Підпис</span>
-                                                <input
-                                                    value={newDentalDraft.title}
-                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, title: event.target.value }))}
-                                                    placeholder="Наприклад: глибокий карієс"
-                                                />
-                                            </label>
-                                            <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
-                                                <span>Опис / примітка</span>
-                                                <textarea
-                                                    value={newDentalDraft.description}
-                                                    onChange={(event) => setNewDentalDraft((prev) => ({ ...prev, description: event.target.value }))}
-                                                    placeholder="Можна додати запис навіть без фото"
-                                                />
-                                            </label>
-                                            <button
-                                                type="button"
-                                                className="doctor-appointment-detail__ghost-btn"
-                                                onClick={() => void createDentalNote()}
-                                                disabled={dentalSavingId === 'new'}
-                                            >
-                                                {dentalSavingId === 'new' ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
-                                                Додати запис
-                                            </button>
+                                            <span className="doctor-appointment-detail__formula-autosave-note">
+        Формула автоматично зберігається для пацієнта на цьому пристрої.
+    </span>
                                         </div>
-                                    ) : null}
 
-                                    {dentalChart?.snapshots.length ? (
-                                        <div className="doctor-appointment-detail__snapshot-list">
-                                            {dentalChart.snapshots.map((snapshot) => {
-                                                const draft = dentalDrafts[snapshot.id] || {
-                                                    title: snapshot.title || '',
-                                                    description: snapshot.description || '',
-                                                    targetValue: targetValueFromSnapshot(snapshot),
-                                                };
-                                                const snapshotLocked = Boolean(snapshot.title || snapshot.description);
+                                        <DentalFormulaEditor
+                                            value={dentalFormula}
+                                            onChange={handleDentalFormulaChange}
+                                            readOnly={isCompleted}
+                                            embedded
+                                            changedTeeth={dentalFormulaChangedTeeth}
+                                            onToothSelect={(toothNumber) =>
+                                                setSelectedDentalTarget({
+                                                    targetType: 'TOOTH',
+                                                    label: `Зуб ${toothNumber}`,
+                                                    toothNumber,
+                                                })
+                                            }
+                                        />
+                                        <details className="doctor-appointment-detail__formula-history-dropdown">
+                                            <summary>Історія змін зубної формули</summary>
 
-                                                return (
-                                                    <article className="doctor-appointment-detail__snapshot-card doctor-appointment-detail__snapshot-card--compact" key={snapshot.id}>
-                                                        <div className="doctor-appointment-detail__snapshot-image doctor-appointment-detail__snapshot-image--wide">
-                                                            {snapshot.hasFile ? (
-                                                                dentalImageUrls[snapshot.id] ? (
-                                                                    <a href={dentalImageUrls[snapshot.id]} target="_blank" rel="noreferrer" className="doctor-appointment-detail__snapshot-link">
-                                                                        <img src={dentalImageUrls[snapshot.id]} alt={snapshot.title || 'Dental snapshot'} />
-                                                                    </a>
-                                                                ) : <span>Завантаження…</span>
-                                                            ) : <span>Без фото</span>}
+                                            {dentalFormulaHistory.length ? (
+                                                <div className="doctor-appointment-detail__formula-history-list">
+                                                    {dentalFormulaHistory.map((entry) => (
+                                                        <div key={entry.id} className="doctor-appointment-detail__formula-history-row">
+                                                            <div>
+                                                                <strong>{formatDateTime(entry.savedAt)}</strong>
+                                                                <p>
+                                                                    {entry.changedTeeth.length
+                                                                        ? `Змінені зуби: ${entry.changedTeeth.join(', ')}`
+                                                                        : 'Без зафіксованих змінених зубів'}
+                                                                </p>
+                                                            </div>
+
+                                                            <span className="doctor-appointment-detail__formula-history-count">
+                        {entry.changedTeeth.length}
+                    </span>
                                                         </div>
-                                                        <div className="doctor-appointment-detail__snapshot-fields doctor-appointment-detail__snapshot-fields--readonly">
-                                                            <div className="doctor-appointment-detail__snapshot-meta">
-                                                                <span>{snapshot.doctorName || 'Лікар не вказаний'}</span>
-                                                                <span>{formatDateTime(snapshot.capturedAt || snapshot.createdAt)}</span>
-                                                            </div>
-                                                            {!isCompleted ? (
-                                                                <button
-                                                                    type="button"
-                                                                    className="doctor-appointment-detail__mini-delete-btn doctor-appointment-detail__mini-delete-btn--inline"
-                                                                    onClick={() => void removeDentalSnapshot(snapshot.id)}
-                                                                    disabled={dentalDeletingId === snapshot.id}
-                                                                >
-                                                                    {dentalDeletingId === snapshot.id ? 'Видалення…' : 'Видалити запис'}
-                                                                </button>
-                                                            ) : null}
-                                                            <div className="doctor-appointment-detail__snapshot-readonly-row">
-                                                                <span>Область</span>
-                                                                <strong>{dentalTargetLabel(snapshot)}</strong>
-                                                            </div>
-                                                            <div className="doctor-appointment-detail__snapshot-readonly-row">
-                                                                <span>Підпис</span>
-                                                                <strong>{snapshot.title || 'Ще не підписано'}</strong>
-                                                            </div>
-                                                            {snapshot.description ? (
-                                                                <p className="doctor-appointment-detail__snapshot-description">{snapshot.description}</p>
-                                                            ) : null}
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="doctor-appointment-detail__empty-note">
+                                                    Історія змін ще порожня.
+                                                </div>
+                                            )}
+                                        </details>
+                                    </div>
+                                ) : (
+                                    <div className="doctor-appointment-detail__history-workspace">
+                                        <div className="doctor-appointment-detail__dental-layout">
+                                            <div className="doctor-appointment-detail__dental-map">
+                                                <div className="doctor-appointment-detail__jaw-actions">
+                                                    <button
+                                                        type="button"
+                                                        className={selectedDentalTarget.targetType === 'MOUTH' ? 'is-selected' : ''}
+                                                        onClick={() =>
+                                                            setSelectedDentalTarget({
+                                                                targetType: 'MOUTH',
+                                                                label: 'Уся ротова порожнина',
+                                                                jaw: 'WHOLE',
+                                                            })
+                                                        }
+                                                    >
+                                                        Уся ротова порожнина
+                                                        <span>{dentalChart?.mouthHistory.length || 0}</span>
+                                                    </button>
 
-                                                            {!snapshotLocked && !isCompleted ? (
-                                                                <details className="doctor-appointment-detail__snapshot-once-editor">
-                                                                    <summary>Додати підпис і привʼязати знімок</summary>
-                                                                    <label className="doctor-appointment-detail__field">
-                                                                        <span>Область</span>
-                                                                        <select
-                                                                            value={draft.targetValue}
-                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { targetValue: event.target.value })}
-                                                                        >
-                                                                            {dentalTargetOptions.map((option) => (
-                                                                                <option key={option.value} value={option.value}>{option.label}</option>
-                                                                            ))}
-                                                                        </select>
-                                                                    </label>
-                                                                    <label className="doctor-appointment-detail__field">
-                                                                        <span>Підпис</span>
-                                                                        <input
-                                                                            value={draft.title}
-                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { title: event.target.value })}
-                                                                            placeholder="Наприклад: глибокий карієс"
-                                                                        />
-                                                                    </label>
-                                                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
-                                                                        <span>Опис / примітка</span>
-                                                                        <textarea
-                                                                            value={draft.description}
-                                                                            onChange={(event) => updateDentalDraft(snapshot.id, { description: event.target.value })}
-                                                                            placeholder="Що видно на знімку, контекст, рішення лікаря"
-                                                                        />
-                                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'UPPER' ? 'is-selected' : ''}
+                                                        onClick={() =>
+                                                            setSelectedDentalTarget({
+                                                                targetType: 'JAW',
+                                                                label: 'Верхня щелепа',
+                                                                jaw: 'UPPER',
+                                                            })
+                                                        }
+                                                    >
+                                                        Верхня щелепа
+                                                        <span>{dentalChart?.upperJawHistory.length || 0}</span>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        className={selectedDentalTarget.targetType === 'JAW' && selectedDentalTarget.jaw === 'LOWER' ? 'is-selected' : ''}
+                                                        onClick={() =>
+                                                            setSelectedDentalTarget({
+                                                                targetType: 'JAW',
+                                                                label: 'Нижня щелепа',
+                                                                jaw: 'LOWER',
+                                                            })
+                                                        }
+                                                    >
+                                                        Нижня щелепа
+                                                        <span>{dentalChart?.lowerJawHistory.length || 0}</span>
+                                                    </button>
+                                                </div>
+
+                                                <div className="doctor-appointment-detail__tooth-grid" aria-label="Зубна карта 32 зуби">
+                                                    {DENTAL_TEETH_ROWS.map((row, rowIndex) => (
+                                                        <div className="doctor-appointment-detail__tooth-row" key={`row-${rowIndex}`}>
+                                                            {row.map((toothNumber) => {
+                                                                const tooth = dentalChart?.teeth.find((item) => item.number === toothNumber);
+                                                                const isSelected = selectedDentalTarget.targetType === 'TOOTH' && selectedDentalTarget.toothNumber === toothNumber;
+                                                                const formulaChanged = dentalFormulaChangedTeeth.includes(toothNumber);
+
+                                                                return (
                                                                     <button
                                                                         type="button"
-                                                                        className="doctor-appointment-detail__ghost-btn"
-                                                                        onClick={() => void saveDentalSnapshot(snapshot)}
-                                                                        disabled={dentalSavingId === snapshot.id}
+                                                                        key={toothNumber}
+                                                                        className={`doctor-appointment-detail__tooth ${isSelected ? 'is-selected' : ''} ${tooth?.snapshotCount ? 'has-history' : ''} ${formulaChanged ? 'has-formula-change' : ''}`}
+                                                                        onClick={() =>
+                                                                            setSelectedDentalTarget({
+                                                                                targetType: 'TOOTH',
+                                                                                label: `Зуб ${toothNumber}`,
+                                                                                toothNumber,
+                                                                            })
+                                                                        }
                                                                     >
-                                                                        {dentalSavingId === snapshot.id ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
-                                                                        Зберегти один раз
+                                                                        <span>{toothNumber}</span>
+                                                                        {tooth?.snapshotCount ? <em>{tooth.snapshotCount}</em> : null}
                                                                     </button>
-                                                                </details>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="doctor-appointment-detail__snapshot-editor">
+                                            <div className="doctor-appointment-detail__dental-history-head">
+                                                <h3>Усі записи по зубній карті</h3>
+                                                <span>{dentalChart?.snapshots.length || 0}</span>
+                                            </div>
+
+                                            {!isCompleted ? (
+                                                <div className="doctor-appointment-detail__snapshot-create">
+                                                    <label className="doctor-appointment-detail__field">
+                                                        <span>Область</span>
+                                                        <select
+                                                            value={newDentalDraft.targetValue}
+                                                            onChange={(event) =>
+                                                                setNewDentalDraft((prev) => ({
+                                                                    ...prev,
+                                                                    targetValue: event.target.value,
+                                                                }))
+                                                            }
+                                                        >
+                                                            {dentalTargetOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </label>
+
+                                                    <label className="doctor-appointment-detail__field">
+                                                        <span>Підпис</span>
+                                                        <input
+                                                            value={newDentalDraft.title}
+                                                            onChange={(event) =>
+                                                                setNewDentalDraft((prev) => ({
+                                                                    ...prev,
+                                                                    title: event.target.value,
+                                                                }))
+                                                            }
+                                                            placeholder="Наприклад: глибокий карієс"
+                                                        />
+                                                    </label>
+
+                                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
+                                                        <textarea
+                                                            value={newDentalDraft.description}
+                                                            onChange={(event) =>
+                                                                setNewDentalDraft((prev) => ({
+                                                                    ...prev,
+                                                                    description: event.target.value,
+                                                                }))
+                                                            }
+                                                            placeholder="Що видно на знімку, контекст, рішення лікаря"
+                                                        />
+                                                    </label>
+
+                                                    <div className="doctor-appointment-detail__upload-box doctor-appointment-detail__field--wide">
+                                                        <span>Фото / знімок</span>
+
+                                                        <input
+                                                            ref={newDentalImageInputRef}
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleNewDentalImageChange}
+                                                            hidden
+                                                        />
+
+                                                        <div className="doctor-appointment-detail__upload-actions">
+                                                            <button
+                                                                type="button"
+                                                                className="doctor-appointment-detail__ghost-btn"
+                                                                onClick={() => newDentalImageInputRef.current?.click()}
+                                                            >
+                                                                {newDentalImageFile ? 'Замінити файл' : 'Завантажити фото'}
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="doctor-appointment-detail__ghost-btn"
+                                                                onClick={() => void captureWebsiteScreenshot()}
+                                                            >
+                                                                Знімок екрана
+                                                            </button>
+
+                                                            {newDentalImageFile ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="doctor-appointment-detail__danger-btn"
+                                                                    onClick={clearNewDentalImage}
+                                                                >
+                                                                    Прибрати файл
+                                                                </button>
                                                             ) : null}
                                                         </div>
-                                                    </article>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : (
-                                        <div className="doctor-appointment-detail__empty-note">Записів ще немає.</div>
-                                    )}
-                                </div>
-                            </div>
 
+                                                        <small className="doctor-appointment-detail__upload-note">
+                                                            {newDentalImageFile ? `Вибрано: ${newDentalImageFile.name}` : 'Фото не обов’язкове.'}
+                                                        </small>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        className="doctor-appointment-detail__ghost-btn"
+                                                        onClick={() => void createDentalNote()}
+                                                        disabled={dentalSavingId === 'new'}
+                                                    >
+                                                        {dentalSavingId === 'new' ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
+                                                        Зберегти запис
+                                                    </button>
+                                                </div>
+                                            ) : null}
+
+                                            <section className="doctor-appointment-detail__snapshot-section">
+                                                <div className="doctor-appointment-detail__snapshot-section-head">
+                                                    <h3>Поточний візит ({currentVisitSnapshots.length})</h3>
+                                                </div>
+
+                                                {renderDentalSnapshotCards(
+                                                    currentVisitSnapshots,
+                                                    'У поточному візиті записів ще немає.',
+                                                    true,
+                                                )}
+                                            </section>
+
+                                            <section className="doctor-appointment-detail__snapshot-section">
+                                                <div className="doctor-appointment-detail__snapshot-section-head">
+                                                    <h3>Попередні візити ({previousVisitSnapshots.length})</h3>
+                                                </div>
+
+                                                {renderDentalSnapshotCards(
+                                                    previousVisitSnapshots,
+                                                    'У попередніх візитах записів ще немає.',
+                                                    false,
+                                                )}
+                                            </section>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             <div className="doctor-appointment-detail__panel">
                                 <div className="doctor-appointment-detail__section-head">
                                     <div>
@@ -1676,16 +2180,6 @@ export default function DoctorAppointmentDetailPage() {
                                         />
                                     </label>
 
-                                    <label className="doctor-appointment-detail__field doctor-appointment-detail__field--wide">
-                                        <span>Email для надсилання висновку</span>
-                                        <input
-                                            type="email"
-                                            value={consultationEmail}
-                                            onChange={(event) => setConsultationEmail(event.target.value)}
-                                            placeholder="patient@example.com"
-                                            disabled={isCompleted}
-                                        />
-                                    </label>
                                 </div>
                             </div>
 

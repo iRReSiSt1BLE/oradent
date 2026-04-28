@@ -1,6 +1,4 @@
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-
+import { API_BASE_URL } from './http';
 export type VideoRecord = {
     id: string;
     appointmentId: string | null;

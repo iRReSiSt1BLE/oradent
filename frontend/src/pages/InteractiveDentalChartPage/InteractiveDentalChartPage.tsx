@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import dentalChartSvg from '../../assets/dental-chart-interactive.svg?raw';
 import './InteractiveDentalChartPage.scss';
 
@@ -8,10 +8,10 @@ type PeriodontalLevel = 'p0' | 'p1' | 'p2';
 type GumInflammation = 'none' | 'mild' | 'medium' | 'severe';
 type Quality = 'good' | 'medium' | 'bad';
 type SurfaceKind = 'none' | 'caries' | 'fissure' | 'filling' | 'cervical-caries' | 'cervical-filling';
-type SurfaceZone = 'left' | 'right' | 'top' | 'bottom' | 'center' | 'front' | 'back' | 'cervical';
+export type SurfaceZone = 'left' | 'right' | 'top' | 'bottom' | 'center' | 'front' | 'back' | 'cervical';
 type ToolGroup = 'tooth' | 'lesions' | 'perio' | 'endo' | 'restoration' | 'summary';
 
-type SurfacePaint = {
+export type SurfacePaint = {
     kind: SurfaceKind;
     quality?: Quality;
     order?: number;
@@ -30,7 +30,7 @@ type ToolAction =
     | { type: 'cervical'; paint: SurfacePaint; label: string }
     | { type: 'crown'; quality: Quality };
 
-type ToothState = {
+export type ToothState = {
     visible: boolean;
     absent: boolean;
     rootChanged: boolean;
@@ -43,6 +43,18 @@ type ToothState = {
     crown: Quality | null;
     cervical: SurfacePaint;
     surfaces: Record<SurfaceZone, SurfacePaint>;
+};
+export type DentalFormulaState = Record<number, ToothState>;
+
+export type DentalFormulaEditorProps = {
+    value?: DentalFormulaState | null;
+    initialValue?: DentalFormulaState | null;
+    onChange?: (state: DentalFormulaState) => void;
+    readOnly?: boolean;
+    embedded?: boolean;
+    className?: string;
+    changedTeeth?: number[];
+    onToothSelect?: (toothNumber: number) => void;
 };
 
 type PaintOptions = {
@@ -140,7 +152,7 @@ function createDefaultToothState(visible = false): ToothState {
     };
 }
 
-function createInitialStates(visible = false): Record<number, ToothState> {
+export function createInitialStates(visible = false): DentalFormulaState {
     return Object.fromEntries(TEETH.map((tooth) => [tooth, createDefaultToothState(visible)]));
 }
 
@@ -150,6 +162,33 @@ function cloneToothState(state: ToothState): ToothState {
         cervical: clonePaint(state.cervical),
         surfaces: cloneSurfaces(state.surfaces),
     };
+}
+function normalizeDentalFormulaState(value?: DentalFormulaState | null): DentalFormulaState {
+    const base = createInitialStates(false);
+
+    if (!value || typeof value !== 'object') {
+        return base;
+    }
+
+    TEETH.forEach((tooth) => {
+        const incoming = value[tooth];
+
+        if (!incoming || typeof incoming !== 'object') {
+            return;
+        }
+
+        base[tooth] = {
+            ...createDefaultToothState(false),
+            ...incoming,
+            cervical: incoming.cervical ? clonePaint(incoming.cervical) : { kind: 'none' },
+            surfaces: {
+                ...cloneSurfaces(DEFAULT_SURFACES),
+                ...(incoming.surfaces || {}),
+            },
+        };
+    });
+
+    return base;
 }
 
 function qualityColor(quality: Quality) {
@@ -881,7 +920,12 @@ function showPreviewTooth(svg: SVGSVGElement, tooth: number) {
     });
 }
 
-function applySvgState(svg: SVGSVGElement, states: Record<number, ToothState>, previewTooth: number | null = null) {
+function applySvgState(
+    svg: SVGSVGElement,
+    states: DentalFormulaState,
+    previewTooth: number | null = null,
+    changedTeeth: number[] = [],
+) {
     resetSvg(svg);
 
     forEachIdentifiedElement(svg, (element) => {
@@ -905,7 +949,7 @@ function applySvgState(svg: SVGSVGElement, states: Record<number, ToothState>, p
         showBaseTooth(svg, tooth, state);
 
         if (state.absent) {
-            paintRegex(svg, new RegExp(`^head_(left|right|top|bottom|center)_${tooth}$`), { visible: false });
+            paintRegex(svg, new RegExp(`^head_(left|right|top|bottom|center)_${tooth}(?:_|$)`), { visible: false });
             paintRegex(svg, new RegExp(`^topview_(left|right|front|back|center)_${tooth}(?:_|$)`), {
                 fill: state.rootChanged ? COLORS.rootChanged : COLORS.root,
                 stroke: null,
@@ -1001,6 +1045,19 @@ function applySvgState(svg: SVGSVGElement, states: Record<number, ToothState>, p
                 visible: true,
             });
         }
+        if (changedTeeth.includes(tooth) && !state.absent) {
+            paintRegex(svg, new RegExp(`^head_(left|right|top|bottom|center)_${tooth}$`), {
+                stroke: '#24324a',
+                strokeWidth: '1.2',
+                visible: true,
+            });
+
+            paintRegex(svg, new RegExp(`^topview_(left|right|front|back|center)_${tooth}(?:_|$)`), {
+                stroke: '#24324a',
+                strokeWidth: '1.2',
+                visible: true,
+            });
+        }
     });
 }
 
@@ -1035,10 +1092,30 @@ function visibleTeeth(states: Record<number, ToothState>) {
     return TEETH.filter((tooth) => states[tooth].visible);
 }
 
-export default function InteractiveDentalChartPage() {
+export function DentalFormulaEditor({
+                                        value,
+                                        initialValue,
+                                        onChange,
+                                        readOnly = false,
+                                        embedded = false,
+                                        className = '',
+                                        changedTeeth = [],
+                                        onToothSelect,
+                                    }: DentalFormulaEditorProps) {
     const hostRef = useRef<HTMLDivElement | null>(null);
     const paintOrderRef = useRef(1);
-    const [states, setStates] = useState<Record<number, ToothState>>(() => createInitialStates(false));
+    const isControlled = typeof value !== 'undefined';
+
+    const [internalStates, setInternalStates] = useState<DentalFormulaState>(() =>
+        normalizeDentalFormulaState(value || initialValue || null),
+    );
+
+    const controlledStates = useMemo(
+        () => normalizeDentalFormulaState(value || null),
+        [value],
+    );
+
+    const states = isControlled ? controlledStates : internalStates;
     const [activeGroup, setActiveGroup] = useState<ToolGroup>('tooth');
     const [pendingAction, setPendingAction] = useState<ToolAction | null>(null);
     const [message, setMessage] = useState('Оберіть інструмент і клікніть по зубу або конкретній поверхні. Інструмент скидається після застосування.');
@@ -1047,6 +1124,12 @@ export default function InteractiveDentalChartPage() {
 
     const summary = useMemo(() => buildSummary(states), [states]);
     const visibleCount = useMemo(() => visibleTeeth(states).length, [states]);
+
+    useEffect(() => {
+        if (!isControlled && initialValue) {
+            setInternalStates(normalizeDentalFormulaState(initialValue));
+        }
+    }, [initialValue, isControlled]);
 
     useLayoutEffect(() => {
         const host = hostRef.current;
@@ -1062,8 +1145,8 @@ export default function InteractiveDentalChartPage() {
         ensureHitAreas(svg);
         ensureSurfaceHitAreas(svg);
         captureOriginalOrder(svg);
-        applySvgState(svg, states, pendingAction?.type === 'intact-one' ? hoverTooth : null);
-    }, [states, activeGroup, pendingAction, hoverTooth]);
+        applySvgState(svg, states, pendingAction?.type === 'intact-one' ? hoverTooth : null, changedTeeth);
+    }, [states, activeGroup, pendingAction, hoverTooth, changedTeeth]);
 
     function nextPaintOrder() {
         const current = paintOrderRef.current;
@@ -1072,21 +1155,44 @@ export default function InteractiveDentalChartPage() {
     }
 
     function requestConfirmation(title: string, description: string, onConfirm: () => void, confirmLabel = 'Підтвердити') {
-        setConfirmState({ title, description, onConfirm, confirmLabel });
+        setConfirmState({title, description, onConfirm, confirmLabel});
+    }
+
+    function commitStates(nextOrUpdater: DentalFormulaState | ((prev: DentalFormulaState) => DentalFormulaState)) {
+        if (readOnly) return;
+
+        if (isControlled) {
+            const next = typeof nextOrUpdater === 'function'
+                ? nextOrUpdater(states)
+                : nextOrUpdater;
+
+            onChange?.(normalizeDentalFormulaState(next));
+            return;
+        }
+
+        setInternalStates((prev) => {
+            const next = typeof nextOrUpdater === 'function'
+                ? nextOrUpdater(prev)
+                : nextOrUpdater;
+
+            return normalizeDentalFormulaState(next);
+        });
     }
 
     function updateTeeth(teeth: readonly number[], patcher: (state: ToothState) => ToothState, nextMessage?: string) {
-        setStates((prev) => {
-            const next = { ...prev };
+        commitStates((prev) => {
+            const next = {...prev};
             teeth.forEach((tooth) => {
                 next[tooth] = patcher(cloneToothState(prev[tooth]));
             });
             return next;
         });
+
         if (nextMessage) setMessage(nextMessage);
     }
 
     function setAction(action: ToolAction) {
+        if (readOnly) return;
         setPendingAction(action);
         setMessage(`Активний інструмент: ${actionLabel(action)}. Клікайте по зубах або поверхнях — інструмент залишиться активним, поки ви його не скинете.`);
     }
@@ -1102,14 +1208,15 @@ export default function InteractiveDentalChartPage() {
     }
 
     function applyAllIntact() {
+        if (readOnly) return;
         const hidden = TEETH.filter((tooth) => !states[tooth].visible);
         if (!hidden.length) {
             setMessage('Усі зуби вже відображаються. “Всі інтактні” додає тільки відсутні зуби та не перезаписує існуючі.');
             return;
         }
 
-        setStates((prev) => {
-            const next = { ...prev };
+        commitStates((prev) => {
+            const next = {...prev};
             hidden.forEach((tooth) => {
                 next[tooth] = prev[tooth].visible ? cloneToothState(prev[tooth]) : createDefaultToothState(true);
             });
@@ -1120,6 +1227,7 @@ export default function InteractiveDentalChartPage() {
     }
 
     function clearMap(force = false) {
+        if (readOnly) return;
         if (!force && visibleCount > 0) {
             requestConfirmation(
                 'Очистити карту?',
@@ -1133,44 +1241,53 @@ export default function InteractiveDentalChartPage() {
             return;
         }
 
-        setStates(createInitialStates(false));
+        commitStates(createInitialStates(false));
         setHoverTooth(null);
         setMessage('Карту очищено. Видимі тільки номери та лінії.');
     }
 
     function applyGlobalPeriodontal(level: PeriodontalLevel) {
+        if (readOnly) return;
         const targets = visibleTeeth(states);
         if (!targets.length) {
             setMessage('Спочатку додайте зуби через “Всі інтактні” або “Один інтактний”.');
             return;
         }
 
-        updateTeeth(targets, (state) => ({ ...state, periodontalLevel: level }), `Пародонт ${level.toUpperCase()} застосовано до всіх видимих зубів.`);
+        updateTeeth(targets, (state) => ({
+            ...state,
+            periodontalLevel: level
+        }), `Пародонт ${level.toUpperCase()} застосовано до всіх видимих зубів.`);
     }
 
     function applyGlobalTartar(value: boolean) {
+        if (readOnly) return;
         const targets = visibleTeeth(states).filter((tooth) => !states[tooth].absent);
         if (!targets.length) {
             setMessage('Немає видимих присутніх зубів для зубного каменю.');
             return;
         }
 
-        updateTeeth(targets, (state) => ({ ...state, tartar: value }), value ? 'Зубний камінь показано на всіх видимих зубах.' : 'Зубний камінь приховано.');
+        updateTeeth(targets, (state) => ({
+            ...state,
+            tartar: value
+        }), value ? 'Зубний камінь показано на всіх видимих зубах.' : 'Зубний камінь приховано.');
     }
 
     function overwriteSingleIntact(tooth: number) {
-        setStates((prev) => ({ ...prev, [tooth]: createDefaultToothState(true) }));
+        commitStates((prev) => ({...prev, [tooth]: createDefaultToothState(true)}));
         setMessage(`Зуб ${tooth} додано як інтактний.`);
         setHoverTooth(null);
     }
 
     function hideToothCompletely(tooth: number) {
-        setStates((prev) => ({ ...prev, [tooth]: createDefaultToothState(false) }));
+        commitStates((prev) => ({...prev, [tooth]: createDefaultToothState(false)}));
         setMessage(`Зуб ${tooth} повністю прибрано зі схеми.`);
         setHoverTooth(null);
     }
 
     function applyActionToTooth(tooth: number, action: ToolAction, surfaceZone?: SurfaceZone) {
+        if (readOnly) return;
         if (!TOOTH_SET.has(tooth)) return;
 
         if (action.type === 'intact-one') {
@@ -1213,7 +1330,7 @@ export default function InteractiveDentalChartPage() {
                 state.crown = null;
                 state.periodontitis = 'none';
                 state.tartar = false;
-                state.cervical = { kind: 'none' };
+                state.cervical = {kind: 'none'};
                 state.surfaces = cloneSurfaces(DEFAULT_SURFACES);
             } else if (action.type === 'root') {
                 state.rootChanged = action.changed;
@@ -1233,10 +1350,10 @@ export default function InteractiveDentalChartPage() {
                 state.absent = false;
                 state.crown = null;
                 const zone = surfaceZone || 'front';
-                state.surfaces[zone] = { ...clonePaint(action.paint), order };
+                state.surfaces[zone] = {...clonePaint(action.paint), order};
             } else if (action.type === 'cervical') {
                 state.absent = false;
-                state.cervical = { ...clonePaint(action.paint), order };
+                state.cervical = {...clonePaint(action.paint), order};
             } else if (action.type === 'crown') {
                 state.absent = false;
                 state.crown = action.quality;
@@ -1249,7 +1366,17 @@ export default function InteractiveDentalChartPage() {
     }
 
     function handleSvgClick(event: MouseEvent<HTMLDivElement>) {
-        if (!pendingAction) return;
+        if (!pendingAction) {
+            const target = event.target as Element | null;
+            const element = target?.closest<SVGElement>('[id]') || null;
+            const tooth = element ? getToothFromId(sourceIdFromElement(element)) || getToothFromId(element.id) : null;
+
+            if (tooth) {
+                onToothSelect?.(tooth);
+            }
+
+            return;
+        }
 
         const resolved = resolveActionTarget(event, pendingAction);
         if (!resolved?.tooth) return;
@@ -1274,15 +1401,27 @@ export default function InteractiveDentalChartPage() {
             <section className="interactive-dental-chart-page__tool-block">
                 <div className="interactive-dental-chart-page__tool-head">
                     <h2>Тип зуба</h2>
-                    <button type="button" className="interactive-dental-chart-page__ghost-button" onClick={clearAction}>Скинути інструмент</button>
+                    <button type="button" className="interactive-dental-chart-page__ghost-button"
+                            onClick={clearAction}>Скинути інструмент
+                    </button>
                 </div>
                 <div className="interactive-dental-chart-page__button-list">
                     <button type="button" className="is-accent" onClick={() => applyAllIntact()}>Всі інтактні</button>
-                    <button type="button" className={toolButtonClass({ type: 'intact-one' })} onClick={() => setAction({ type: 'intact-one' })}>Один інтактний</button>
-                    <button type="button" className={toolButtonClass({ type: 'absent' })} onClick={() => setAction({ type: 'absent' })}>Відсутній зуб</button>
-                    <button type="button" className={toolButtonClass({ type: 'hide-tooth' })} onClick={() => setAction({ type: 'hide-tooth' })}>Прибрати зуб</button>
-                    <button type="button" className={toolButtonClass({ type: 'root', changed: false })} onClick={() => setAction({ type: 'root', changed: false })}>Корінь зуба</button>
-                    <button type="button" className={toolButtonClass({ type: 'root', changed: true })} onClick={() => setAction({ type: 'root', changed: true })}>Змінений у кольорі</button>
+                    <button type="button" className={toolButtonClass({type: 'intact-one'})}
+                            onClick={() => setAction({type: 'intact-one'})}>Один інтактний
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'absent'})}
+                            onClick={() => setAction({type: 'absent'})}>Відсутній зуб
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'hide-tooth'})}
+                            onClick={() => setAction({type: 'hide-tooth'})}>Прибрати зуб
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'root', changed: false})}
+                            onClick={() => setAction({type: 'root', changed: false})}>Корінь зуба
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'root', changed: true})}
+                            onClick={() => setAction({type: 'root', changed: true})}>Змінений у кольорі
+                    </button>
                     <button type="button" className="is-danger" onClick={() => clearMap()}>Очистити карту</button>
                 </div>
             </section>
@@ -1294,10 +1433,44 @@ export default function InteractiveDentalChartPage() {
             <section className="interactive-dental-chart-page__tool-block">
                 <h2>Ураження</h2>
                 <div className="interactive-dental-chart-page__button-list">
-                    <button type="button" className={toolButtonClass({ type: 'surface', label: 'Фісурна пігментація', paint: { kind: 'fissure' } })} onClick={() => setAction({ type: 'surface', label: 'Фісурна пігментація', paint: { kind: 'fissure' } })}>Фісурна пігментація</button>
-                    <button type="button" className={toolButtonClass({ type: 'surface', label: 'Карієс', paint: { kind: 'caries' } })} onClick={() => setAction({ type: 'surface', label: 'Карієс', paint: { kind: 'caries' } })}>Карієс</button>
-                    <button type="button" className={toolButtonClass({ type: 'cervical', label: 'Пришийковий карієс', paint: { kind: 'cervical-caries' } })} onClick={() => setAction({ type: 'cervical', label: 'Пришийковий карієс', paint: { kind: 'cervical-caries' } })}>Пришийковий карієс</button>
-                    <button type="button" className={toolButtonClass({ type: 'surface', label: 'Очистити область', paint: { kind: 'none' } })} onClick={() => setAction({ type: 'surface', label: 'Очистити область', paint: { kind: 'none' } })}>Очистити область</button>
+                    <button type="button" className={toolButtonClass({
+                        type: 'surface',
+                        label: 'Фісурна пігментація',
+                        paint: {kind: 'fissure'}
+                    })} onClick={() => setAction({
+                        type: 'surface',
+                        label: 'Фісурна пігментація',
+                        paint: {kind: 'fissure'}
+                    })}>Фісурна пігментація
+                    </button>
+                    <button type="button"
+                            className={toolButtonClass({type: 'surface', label: 'Карієс', paint: {kind: 'caries'}})}
+                            onClick={() => setAction({
+                                type: 'surface',
+                                label: 'Карієс',
+                                paint: {kind: 'caries'}
+                            })}>Карієс
+                    </button>
+                    <button type="button" className={toolButtonClass({
+                        type: 'cervical',
+                        label: 'Пришийковий карієс',
+                        paint: {kind: 'cervical-caries'}
+                    })} onClick={() => setAction({
+                        type: 'cervical',
+                        label: 'Пришийковий карієс',
+                        paint: {kind: 'cervical-caries'}
+                    })}>Пришийковий карієс
+                    </button>
+                    <button type="button" className={toolButtonClass({
+                        type: 'surface',
+                        label: 'Очистити область',
+                        paint: {kind: 'none'}
+                    })} onClick={() => setAction({
+                        type: 'surface',
+                        label: 'Очистити область',
+                        paint: {kind: 'none'}
+                    })}>Очистити область
+                    </button>
                 </div>
             </section>
         );
@@ -1311,10 +1484,35 @@ export default function InteractiveDentalChartPage() {
                     <button type="button" onClick={() => applyGlobalPeriodontal('p0')}>Здоровий пародонт</button>
                     <button type="button" onClick={() => applyGlobalPeriodontal('p1')}>Весь 1 ст</button>
                     <button type="button" onClick={() => applyGlobalPeriodontal('p2')}>Весь 2 ст</button>
-                    <button type="button" className={toolButtonClass({ type: 'gum', inflammation: 'none', label: 'Без запалення' })} onClick={() => setAction({ type: 'gum', inflammation: 'none', label: 'Без запалення' })}>Без запалення</button>
-                    <button type="button" className={toolButtonClass({ type: 'gum', inflammation: 'mild', label: 'Запалення 1 ст' })} onClick={() => setAction({ type: 'gum', inflammation: 'mild', label: 'Запалення 1 ст' })}>Запалення 1 ст</button>
-                    <button type="button" className={toolButtonClass({ type: 'gum', inflammation: 'medium', label: 'Запалення 2 ст' })} onClick={() => setAction({ type: 'gum', inflammation: 'medium', label: 'Запалення 2 ст' })}>Запалення 2 ст</button>
-                    <button type="button" className={toolButtonClass({ type: 'gum', inflammation: 'severe', label: 'Запалення 3 ст' })} onClick={() => setAction({ type: 'gum', inflammation: 'severe', label: 'Запалення 3 ст' })}>Запалення 3 ст</button>
+                    <button type="button"
+                            className={toolButtonClass({type: 'gum', inflammation: 'none', label: 'Без запалення'})}
+                            onClick={() => setAction({type: 'gum', inflammation: 'none', label: 'Без запалення'})}>Без
+                        запалення
+                    </button>
+                    <button type="button"
+                            className={toolButtonClass({type: 'gum', inflammation: 'mild', label: 'Запалення 1 ст'})}
+                            onClick={() => setAction({
+                                type: 'gum',
+                                inflammation: 'mild',
+                                label: 'Запалення 1 ст'
+                            })}>Запалення 1 ст
+                    </button>
+                    <button type="button"
+                            className={toolButtonClass({type: 'gum', inflammation: 'medium', label: 'Запалення 2 ст'})}
+                            onClick={() => setAction({
+                                type: 'gum',
+                                inflammation: 'medium',
+                                label: 'Запалення 2 ст'
+                            })}>Запалення 2 ст
+                    </button>
+                    <button type="button"
+                            className={toolButtonClass({type: 'gum', inflammation: 'severe', label: 'Запалення 3 ст'})}
+                            onClick={() => setAction({
+                                type: 'gum',
+                                inflammation: 'severe',
+                                label: 'Запалення 3 ст'
+                            })}>Запалення 3 ст
+                    </button>
                     <button type="button" onClick={() => applyGlobalTartar(true)}>Зубний камінь</button>
                     <button type="button" onClick={() => applyGlobalTartar(false)}>Без каменю</button>
                 </div>
@@ -1327,48 +1525,108 @@ export default function InteractiveDentalChartPage() {
             <section className="interactive-dental-chart-page__tool-block">
                 <h2>Endo</h2>
                 <div className="interactive-dental-chart-page__button-list">
-                    <button type="button" className={toolButtonClass({ type: 'canal', status: 'open' })} onClick={() => setAction({ type: 'canal', status: 'open' })}>Канал не запломбований</button>
-                    <button type="button" className={toolButtonClass({ type: 'canal', status: 'filled' })} onClick={() => setAction({ type: 'canal', status: 'filled' })}>Канал запломбований</button>
-                    <button type="button" className={toolButtonClass({ type: 'canal', status: 'partial' })} onClick={() => setAction({ type: 'canal', status: 'partial' })}>Канал частково запломбований</button>
-                    <button type="button" className={toolButtonClass({ type: 'periodontitis', size: '3mm' })} onClick={() => setAction({ type: 'periodontitis', size: '3mm' })}>Періодонтит 3мм</button>
-                    <button type="button" className={toolButtonClass({ type: 'periodontitis', size: '3-5mm' })} onClick={() => setAction({ type: 'periodontitis', size: '3-5mm' })}>Періодонтит 3-5мм</button>
-                    <button type="button" className={toolButtonClass({ type: 'periodontitis', size: '5mm' })} onClick={() => setAction({ type: 'periodontitis', size: '5mm' })}>Періодонтит 5мм</button>
-                    <button type="button" className={toolButtonClass({ type: 'periodontitis', size: 'none' })} onClick={() => setAction({ type: 'periodontitis', size: 'none' })}>Без періодонтиту</button>
+                    <button type="button" className={toolButtonClass({type: 'canal', status: 'open'})}
+                            onClick={() => setAction({type: 'canal', status: 'open'})}>Канал не запломбований
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'canal', status: 'filled'})}
+                            onClick={() => setAction({type: 'canal', status: 'filled'})}>Канал запломбований
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'canal', status: 'partial'})}
+                            onClick={() => setAction({type: 'canal', status: 'partial'})}>Канал частково запломбований
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'periodontitis', size: '3mm'})}
+                            onClick={() => setAction({type: 'periodontitis', size: '3mm'})}>Періодонтит 3мм
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'periodontitis', size: '3-5mm'})}
+                            onClick={() => setAction({type: 'periodontitis', size: '3-5mm'})}>Періодонтит 3-5мм
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'periodontitis', size: '5mm'})}
+                            onClick={() => setAction({type: 'periodontitis', size: '5mm'})}>Періодонтит 5мм
+                    </button>
+                    <button type="button" className={toolButtonClass({type: 'periodontitis', size: 'none'})}
+                            onClick={() => setAction({type: 'periodontitis', size: 'none'})}>Без періодонтиту
+                    </button>
                 </div>
             </section>
         );
     }
 
     function renderRestorationTools() {
-        const filling = (quality: Quality): ToolAction => ({ type: 'surface', label: `Пломба ${readableQuality(quality)}`, paint: { kind: 'filling', quality } });
-        const cervical = (quality: Quality): ToolAction => ({ type: 'cervical', label: `Пришийкова пломба ${readableQuality(quality)}`, paint: { kind: 'cervical-filling', quality } });
-        const crown = (quality: Quality): ToolAction => ({ type: 'crown', quality });
+        const filling = (quality: Quality): ToolAction => ({
+            type: 'surface',
+            label: `Пломба ${readableQuality(quality)}`,
+            paint: {kind: 'filling', quality}
+        });
+        const cervical = (quality: Quality): ToolAction => ({
+            type: 'cervical',
+            label: `Пришийкова пломба ${readableQuality(quality)}`,
+            paint: {kind: 'cervical-filling', quality}
+        });
+        const crown = (quality: Quality): ToolAction => ({type: 'crown', quality});
 
         return (
             <section className="interactive-dental-chart-page__tool-block">
                 <h2>Конструкції</h2>
                 <div className="interactive-dental-chart-page__quality-row">
                     <span>Пломба</span>
-                    <button type="button" aria-label="Пломба good" className={`is-good ${isActionSelected(pendingAction, filling('good')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(filling('good'))} />
-                    <button type="button" aria-label="Пломба medium" className={`is-medium ${isActionSelected(pendingAction, filling('medium')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(filling('medium'))} />
-                    <button type="button" aria-label="Пломба bad" className={`is-bad ${isActionSelected(pendingAction, filling('bad')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(filling('bad'))} />
+                    <button type="button" aria-label="Пломба good"
+                            className={`is-good ${isActionSelected(pendingAction, filling('good')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(filling('good'))}/>
+                    <button type="button" aria-label="Пломба medium"
+                            className={`is-medium ${isActionSelected(pendingAction, filling('medium')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(filling('medium'))}/>
+                    <button type="button" aria-label="Пломба bad"
+                            className={`is-bad ${isActionSelected(pendingAction, filling('bad')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(filling('bad'))}/>
                 </div>
                 <div className="interactive-dental-chart-page__quality-row">
                     <span>Пришийкова пломба</span>
-                    <button type="button" aria-label="Пришийкова пломба good" className={`is-good ${isActionSelected(pendingAction, cervical('good')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(cervical('good'))} />
-                    <button type="button" aria-label="Пришийкова пломба medium" className={`is-medium ${isActionSelected(pendingAction, cervical('medium')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(cervical('medium'))} />
-                    <button type="button" aria-label="Пришийкова пломба bad" className={`is-bad ${isActionSelected(pendingAction, cervical('bad')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(cervical('bad'))} />
+                    <button type="button" aria-label="Пришийкова пломба good"
+                            className={`is-good ${isActionSelected(pendingAction, cervical('good')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(cervical('good'))}/>
+                    <button type="button" aria-label="Пришийкова пломба medium"
+                            className={`is-medium ${isActionSelected(pendingAction, cervical('medium')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(cervical('medium'))}/>
+                    <button type="button" aria-label="Пришийкова пломба bad"
+                            className={`is-bad ${isActionSelected(pendingAction, cervical('bad')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(cervical('bad'))}/>
                 </div>
                 <div className="interactive-dental-chart-page__quality-row">
                     <span>Коронка</span>
-                    <button type="button" aria-label="Коронка good" className={`is-good ${isActionSelected(pendingAction, crown('good')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(crown('good'))} />
-                    <button type="button" aria-label="Коронка medium" className={`is-medium ${isActionSelected(pendingAction, crown('medium')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(crown('medium'))} />
-                    <button type="button" aria-label="Коронка bad" className={`is-bad ${isActionSelected(pendingAction, crown('bad')) ? 'is-selected' : ''}`.trim()} onClick={() => setAction(crown('bad'))} />
+                    <button type="button" aria-label="Коронка good"
+                            className={`is-good ${isActionSelected(pendingAction, crown('good')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(crown('good'))}/>
+                    <button type="button" aria-label="Коронка medium"
+                            className={`is-medium ${isActionSelected(pendingAction, crown('medium')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(crown('medium'))}/>
+                    <button type="button" aria-label="Коронка bad"
+                            className={`is-bad ${isActionSelected(pendingAction, crown('bad')) ? 'is-selected' : ''}`.trim()}
+                            onClick={() => setAction(crown('bad'))}/>
                 </div>
                 <div className="interactive-dental-chart-page__button-list">
-                    <button type="button" className={toolButtonClass({ type: 'bolt' })} onClick={() => setAction({ type: 'bolt' })}>Штифт</button>
-                    <button type="button" className={toolButtonClass({ type: 'surface', label: 'Очистити ділянку зуба', paint: { kind: 'none' } })} onClick={() => setAction({ type: 'surface', label: 'Очистити ділянку зуба', paint: { kind: 'none' } })}>Очистити ділянку зуба</button>
-                    <button type="button" className={toolButtonClass({ type: 'cervical', label: 'Очистити пришийкову зону', paint: { kind: 'none' } })} onClick={() => setAction({ type: 'cervical', label: 'Очистити пришийкову зону', paint: { kind: 'none' } })}>Очистити пришийкову зону</button>
+                    <button type="button" className={toolButtonClass({type: 'bolt'})}
+                            onClick={() => setAction({type: 'bolt'})}>Штифт
+                    </button>
+                    <button type="button" className={toolButtonClass({
+                        type: 'surface',
+                        label: 'Очистити ділянку зуба',
+                        paint: {kind: 'none'}
+                    })} onClick={() => setAction({
+                        type: 'surface',
+                        label: 'Очистити ділянку зуба',
+                        paint: {kind: 'none'}
+                    })}>Очистити ділянку зуба
+                    </button>
+                    <button type="button" className={toolButtonClass({
+                        type: 'cervical',
+                        label: 'Очистити пришийкову зону',
+                        paint: {kind: 'none'}
+                    })} onClick={() => setAction({
+                        type: 'cervical',
+                        label: 'Очистити пришийкову зону',
+                        paint: {kind: 'none'}
+                    })}>Очистити пришийкову зону
+                    </button>
                 </div>
             </section>
         );
@@ -1395,56 +1653,140 @@ export default function InteractiveDentalChartPage() {
     }
 
     return (
-        <main className="interactive-dental-chart-page">
+        <main
+            className={`interactive-dental-chart-page ${embedded ? 'interactive-dental-chart-page--embedded' : ''} ${className}`}>
             <section className="interactive-dental-chart-page__layout">
-                <aside className="interactive-dental-chart-page__tools">
-                    <div className="interactive-dental-chart-page__tabs">
-                        {(Object.keys(TOOL_GROUP_LABELS) as ToolGroup[]).map((group) => (
-                            <button key={group} type="button" className={activeGroup === group ? 'is-active' : ''} onClick={() => setActiveGroup(group)}>
-                                {TOOL_GROUP_LABELS[group]}
-                            </button>
-                        ))}
-                    </div>
+                {embedded ? (
+                    <>
+                        <section className="interactive-dental-chart-page__chart-card">
+                            <div className="interactive-dental-chart-page__chart-head">
+                                <strong>Видимих зубів: {visibleCount}</strong>
+                            </div>
 
-                    {activeGroup === 'tooth' ? renderToothTools() : null}
-                    {activeGroup === 'lesions' ? renderLesionTools() : null}
-                    {activeGroup === 'perio' ? renderPerioTools() : null}
-                    {activeGroup === 'endo' ? renderEndoTools() : null}
-                    {activeGroup === 'restoration' ? renderRestorationTools() : null}
-                    {activeGroup === 'summary' ? renderSummary() : null}
+                            <div
+                                className={`interactive-dental-chart-page__svg-host ${isSurfacePreciseAction(pendingAction) ? 'is-surface-mode' : ''}`}
+                                ref={hostRef}
+                                onClick={handleSvgClick}
+                                onMouseMove={handleSvgMouseMove}
+                                onMouseLeave={() => setHoverTooth(null)}
+                            />
+                        </section>
 
-                    <div className="interactive-dental-chart-page__status">
-                        <div className="interactive-dental-chart-page__status-head">
-                            <span>Інструмент</span>
-                            {pendingAction ? <button type="button" className="interactive-dental-chart-page__ghost-button" onClick={clearAction}>Скинути</button> : null}
+                        <aside className="interactive-dental-chart-page__tools">
+                            <div className="interactive-dental-chart-page__embedded-tools-grid">
+                                <div className="interactive-dental-chart-page__embedded-tools-column">
+                                    {renderToothTools()}
+                                    {renderLesionTools()}
+                                    {renderPerioTools()}
+                                </div>
+
+                                <div className="interactive-dental-chart-page__embedded-tools-column">
+                                    {renderEndoTools()}
+                                    {renderRestorationTools()}
+                                </div>
+                            </div>
+
+                            <div className="interactive-dental-chart-page__status">
+                                <div className="interactive-dental-chart-page__status-head">
+                                    <span>Інструмент</span>
+                                    {pendingAction ? (
+                                        <button
+                                            type="button"
+                                            className="interactive-dental-chart-page__ghost-button"
+                                            onClick={clearAction}
+                                        >
+                                            Скинути
+                                        </button>
+                                    ) : null}
+                                </div>
+
+                                <strong
+                                    className={pendingAction ? 'is-active' : ''}>{actionLabel(pendingAction)}</strong>
+                                <p>{message}</p>
+                            </div>
+                        </aside>
+
+                        <div className="interactive-dental-chart-page__states-under-chart">
+                            {renderSummary()}
                         </div>
-                        <strong className={pendingAction ? 'is-active' : ''}>{actionLabel(pendingAction)}</strong>
-                        <p>{message}</p>
-                    </div>
-                </aside>
+                    </>
+                ) : (
+                    <>
+                        <aside className="interactive-dental-chart-page__tools">
+                            <div className="interactive-dental-chart-page__tabs">
+                                {(Object.keys(TOOL_GROUP_LABELS) as ToolGroup[]).map((group) => (
+                                    <button
+                                        key={group}
+                                        type="button"
+                                        className={activeGroup === group ? 'is-active' : ''}
+                                        onClick={() => setActiveGroup(group)}
+                                    >
+                                        {TOOL_GROUP_LABELS[group]}
+                                    </button>
+                                ))}
+                            </div>
 
-                <section className="interactive-dental-chart-page__chart-card">
-                    <div className="interactive-dental-chart-page__chart-head">
-                        <strong>Видимих зубів: {visibleCount}</strong>
-                        <span>Активний інструмент не зникає після кліку. Його можна змінити в будь-якому розділі або скинути окремою кнопкою.</span>
-                    </div>
-                    <div
-                        className={`interactive-dental-chart-page__svg-host ${isSurfacePreciseAction(pendingAction) ? 'is-surface-mode' : ''}`}
-                        ref={hostRef}
-                        onClick={handleSvgClick}
-                        onMouseMove={handleSvgMouseMove}
-                        onMouseLeave={() => setHoverTooth(null)}
-                    />
-                </section>
+                            {activeGroup === 'tooth' ? renderToothTools() : null}
+                            {activeGroup === 'lesions' ? renderLesionTools() : null}
+                            {activeGroup === 'perio' ? renderPerioTools() : null}
+                            {activeGroup === 'endo' ? renderEndoTools() : null}
+                            {activeGroup === 'restoration' ? renderRestorationTools() : null}
+                            {activeGroup === 'summary' ? renderSummary() : null}
+
+                            <div className="interactive-dental-chart-page__status">
+                                <div className="interactive-dental-chart-page__status-head">
+                                    <span>Інструмент</span>
+                                    {pendingAction ? (
+                                        <button
+                                            type="button"
+                                            className="interactive-dental-chart-page__ghost-button"
+                                            onClick={clearAction}
+                                        >
+                                            Скинути
+                                        </button>
+                                    ) : null}
+                                </div>
+
+                                <strong
+                                    className={pendingAction ? 'is-active' : ''}>{actionLabel(pendingAction)}</strong>
+                                <p>{message}</p>
+                            </div>
+                        </aside>
+
+                        <section className="interactive-dental-chart-page__chart-card">
+                            <div className="interactive-dental-chart-page__chart-head">
+                                <strong>Видимих зубів: {visibleCount}</strong>
+                                <span>Активний інструмент не зникає після кліку. Його можна змінити в будь-якому розділі або скинути окремою кнопкою.</span>
+                            </div>
+
+                            <div
+                                className={`interactive-dental-chart-page__svg-host ${isSurfacePreciseAction(pendingAction) ? 'is-surface-mode' : ''}`}
+                                ref={hostRef}
+                                onClick={handleSvgClick}
+                                onMouseMove={handleSvgMouseMove}
+                                onMouseLeave={() => setHoverTooth(null)}
+                            />
+                        </section>
+                    </>
+                )}
             </section>
 
             {confirmState ? (
                 <div className="interactive-dental-chart-page__modal-backdrop" role="presentation">
-                    <div className="interactive-dental-chart-page__modal" role="dialog" aria-modal="true" aria-labelledby="dental-chart-confirm-title">
+                    <div
+                        className="interactive-dental-chart-page__modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="dental-chart-confirm-title"
+                    >
                         <h3 id="dental-chart-confirm-title">{confirmState.title}</h3>
                         <p>{confirmState.description}</p>
+
                         <div className="interactive-dental-chart-page__modal-actions">
-                            <button type="button" className="is-secondary" onClick={() => setConfirmState(null)}>Скасувати</button>
+                            <button type="button" className="is-secondary" onClick={() => setConfirmState(null)}>
+                                Скасувати
+                            </button>
+
                             <button
                                 type="button"
                                 className="is-primary"
@@ -1460,4 +1802,7 @@ export default function InteractiveDentalChartPage() {
             ) : null}
         </main>
     );
+}
+export default function InteractiveDentalChartPage() {
+    return <DentalFormulaEditor />;
 }

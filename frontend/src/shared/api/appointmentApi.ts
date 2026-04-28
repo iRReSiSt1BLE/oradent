@@ -1,4 +1,4 @@
-import { http } from './http';
+import { API_BASE_URL, http } from './http';
 
 export type GuestAppointmentPayload = {
     lastName: string;
@@ -704,7 +704,7 @@ export async function getConsultationPdfWithPassword(
     appointmentId: string,
     password: string,
 ): Promise<Blob> {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/appointment/${appointmentId}/consultation-pdf-auth`, {
+    const response = await fetch(`${API_BASE_URL}/appointment/${appointmentId}/consultation-pdf-auth`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -737,19 +737,36 @@ export type AppointmentAgentPreviewFrame = {
     } | null;
 };
 
-export async function startAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string; fps?: number; width?: number; quality?: number }) {
+export async function startAppointmentAgentPreview(
+    token: string,
+    appointmentId: string,
+    payload: { cabinetDeviceId: string; fps?: number; width?: number; quality?: number },
+) {
     return http<{ ok: boolean; pairKey: string; message?: string }>(`/capture-agent/appointment-preview/start`, {
         method: 'POST',
         token,
-        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId, fps: payload.fps, width: payload.width, quality: payload.quality },
+        body: JSON.stringify({
+            appointmentId,
+            cabinetDeviceId: payload.cabinetDeviceId,
+            fps: payload.fps,
+            width: payload.width,
+            quality: payload.quality,
+        }),
     });
 }
 
-export async function stopAppointmentAgentPreview(token: string, appointmentId: string, payload: { cabinetDeviceId: string }) {
+export async function stopAppointmentAgentPreview(
+    token: string,
+    appointmentId: string,
+    payload: { cabinetDeviceId: string },
+) {
     return http<{ ok: boolean; message?: string }>(`/capture-agent/appointment-preview/stop`, {
         method: 'POST',
         token,
-        body: { appointmentId, cabinetDeviceId: payload.cabinetDeviceId },
+        body: JSON.stringify({
+            appointmentId,
+            cabinetDeviceId: payload.cabinetDeviceId,
+        }),
     });
 }
 
