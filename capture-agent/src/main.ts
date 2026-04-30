@@ -97,6 +97,9 @@ void app.whenReady().then(() => {
   ipcMain.handle('agent:preview-frame', (_event, payload: Record<string, unknown>) => {
     return { ok: socketClient.sendPreviewFrame(payload || {}) };
   });
+  ipcMain.handle('agent:recording-state', (_event, payload: Record<string, unknown>) => {
+    return { ok: socketClient.sendRecordingState(payload || {}) };
+  });
   ipcMain.handle('agent:queue-recording-upload', async (_event, payload: Record<string, unknown>) => {
     return enqueueRecordingUpload({
       appointmentId: String(payload.appointmentId || ''),

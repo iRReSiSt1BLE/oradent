@@ -1580,3 +1580,139 @@
 .doctor-appointment-detail__description-toggle summary{
   margin-bottom: 10px !important;
 }
+.doctor-appointment-detail__recording-state {
+  border: 1px solid #d7e1ec;
+  background: #f8fbff;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+
+  strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 12px;
+    color: #111827;
+  }
+
+  span {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #6b7280;
+  }
+}
+
+.doctor-appointment-detail__recording-state--starting {
+  background: #f4fbff;
+  border-color: #b8d8ef;
+}
+
+.doctor-appointment-detail__recording-state--recording {
+  background: #f1fcf8;
+  border-color: #96c7b8;
+}
+
+.doctor-appointment-detail__recording-state--processing {
+  background: #fff9ed;
+  border-color: #e7c989;
+}
+
+.doctor-appointment-detail__recording-state--uploaded {
+  background: #f4fbf2;
+  border-color: #a7cf98;
+}
+
+.doctor-appointment-detail__recording-state--failed {
+  background: #fff1f1;
+  border-color: #e0a0a0;
+}
+
+.doctor-appointment-detail__recording-state-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+
+  span {
+    border: 1px solid #dbe4ef;
+    background: #fff;
+    padding: 4px 7px;
+    color: #44505d;
+  }
+}
+
+@media (max-width: 640px) {
+  .doctor-appointment-detail__recording-state {
+    display: grid;
+  }
+
+  .doctor-appointment-detail__recording-state-meta {
+    justify-content: flex-start;
+  }
+}
+
+.doctor-appointment-detail__evidence-card {
+  border: 1px solid #d7e1ec;
+  background: #fbfdff;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+
+  strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 12px;
+    color: #111827;
+  }
+
+  span {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #64748b;
+  }
+}
+
+.doctor-appointment-detail__evidence-card--valid {
+  background: #f3fbf6;
+  border-color: #9ac9aa;
+}
+
+.doctor-appointment-detail__evidence-card--incomplete {
+  background: #fff9ed;
+  border-color: #e7c989;
+}
+
+.doctor-appointment-detail__evidence-card--empty {
+  background: #f8fafc;
+  border-color: #d7e1ec;
+}
+
+.doctor-appointment-detail__evidence-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+
+  span {
+    border: 1px solid #dbe4ef;
+    background: #fff;
+    padding: 4px 7px;
+    color: #44505d;
+  }
+}
+
+@media (max-width: 640px) {
+  .doctor-appointment-detail__evidence-card {
+    display: grid;
+  }
+
+  .doctor-appointment-detail__evidence-card-meta {
+    justify-content: flex-start;
+  }
+}

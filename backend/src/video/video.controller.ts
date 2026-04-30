@@ -13,7 +13,7 @@ import {
     UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage, memoryStorage } from 'multer';
+import { diskStorage } from 'multer';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Response } from 'express';
@@ -24,10 +24,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StreamVideoDto } from './dto/stream-video.dto';
 
+const VIDEO_UPLOAD_TMP_DIR = path.join(process.cwd(), 'tmp', 'video-uploads');
 const AGENT_VIDEO_UPLOAD_TMP_DIR = path.join(process.cwd(), 'tmp', 'agent-video-uploads');
 
-function ensureAgentVideoUploadTmpDir() {
-    fs.mkdirSync(AGENT_VIDEO_UPLOAD_TMP_DIR, { recursive: true });
+function ensureUploadTmpDir(dirPath: string) {
+    fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function makeSafeUploadFileName(file: Express.Multer.File, fallback: string) {
+    const safeOriginalName = String(file.originalname || fallback).replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeOriginalName}`;
 }
 
 
@@ -46,7 +52,15 @@ export class VideoController {
     @Post('upload')
     @UseInterceptors(
         FileInterceptor('video', {
-            storage: memoryStorage(),
+            storage: diskStorage({
+                destination: (_req, _file, callback) => {
+                    ensureUploadTmpDir(VIDEO_UPLOAD_TMP_DIR);
+                    callback(null, VIDEO_UPLOAD_TMP_DIR);
+                },
+                filename: (_req, file, callback) => {
+                    callback(null, makeSafeUploadFileName(file, 'doctor-upload.webm'));
+                },
+            }),
             limits: {
                 fileSize: 1024 * 1024 * 500,
             },
@@ -75,12 +89,11 @@ export class VideoController {
         FileInterceptor('video', {
             storage: diskStorage({
                 destination: (_req, _file, callback) => {
-                    ensureAgentVideoUploadTmpDir();
+                    ensureUploadTmpDir(AGENT_VIDEO_UPLOAD_TMP_DIR);
                     callback(null, AGENT_VIDEO_UPLOAD_TMP_DIR);
                 },
                 filename: (_req, file, callback) => {
-                    const safeOriginalName = String(file.originalname || 'agent-recording.bin').replace(/[^a-zA-Z0-9._-]/g, '_');
-                    callback(null, `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeOriginalName}`);
+                    callback(null, makeSafeUploadFileName(file, 'agent-recording.bin'));
                 },
             }),
             limits: {

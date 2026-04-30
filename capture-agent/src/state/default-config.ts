@@ -30,7 +30,7 @@ export const defaultConfig: AgentConfig = {
   agentToken: '',
   agentId: '',
   agentName: process.env.ORADENT_CAPTURE_AGENT_NAME || 'Oradent Capture Agent',
-  transportKey: process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || 'oradent-capture-transport',
+  transportKey: process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || '',
   activePairKey: '',
   configuredPairs: [],
   snapshotHotkey: 'F8',

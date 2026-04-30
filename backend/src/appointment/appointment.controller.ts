@@ -252,6 +252,24 @@ export class AppointmentController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @Get(':id/agent-recording/state')
+    getAgentRecordingState(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+    ) {
+        return this.appointmentService.getAgentRecordingState(req.user.id, id);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Get(':id/recording/evidence')
+    getAppointmentRecordingEvidence(
+        @Req() req: { user: JwtUser },
+        @Param('id') id: string,
+    ) {
+        return this.appointmentService.getAppointmentRecordingEvidence(req.user.id, id);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Post(':id/agent-recording/start')
     startAgentRecording(
         @Req() req: { user: JwtUser },

@@ -12,7 +12,7 @@ import * as argon2 from 'argon2';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
-import { Transform } from 'stream';
+import { Transform, Writable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { decryptAgentTransportPayload } from './video-transport-crypto';
 import { Video } from './entities/video.entity';
@@ -188,11 +188,17 @@ export class VideoService {
     }
 
     private getTransportSecret() {
-        return (
+        const secret = (
             this.configService.get<string>('CAPTURE_AGENT_TRANSPORT_KEY') ||
             this.configService.get<string>('CAPTURE_AGENT_ENROLLMENT_TOKEN') ||
-            'oradent-capture-transport'
-        );
+            ''
+        ).trim();
+
+        if (!secret) {
+            throw new InternalServerErrorException('Не задано CAPTURE_AGENT_TRANSPORT_KEY або CAPTURE_AGENT_ENROLLMENT_TOKEN');
+        }
+
+        return secret;
     }
 
     private getOrCreateStorageEncryptionKey(): Buffer {
@@ -295,6 +301,25 @@ export class VideoService {
         } catch {
             // ignore local temporary cleanup failures
         }
+    }
+
+    private async hashPlainFile(filePath: string): Promise<{ sha256Hash: string; size: number }> {
+        const hash = createHash('sha256');
+        let size = 0;
+
+        await pipeline(
+            fs.createReadStream(filePath),
+            new Writable({
+                write(chunk, _encoding, callback) {
+                    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                    size += buffer.length;
+                    hash.update(buffer);
+                    callback();
+                },
+            }),
+        );
+
+        return { sha256Hash: hash.digest('hex'), size };
     }
 
     private async persistPlainVideoBuffer(params: {
@@ -551,6 +576,25 @@ export class VideoService {
         }
 
         await this.assertAppointmentAccess(dto.appointmentId, actor);
+
+        const uploadedPath = (file as Express.Multer.File & { path?: string }).path;
+        if (uploadedPath) {
+            try {
+                const hashed = await this.hashPlainFile(uploadedPath);
+                return await this.persistPlainVideoFile({
+                    appointmentId: dto.appointmentId,
+                    originalFileName: file.originalname || 'doctor-upload.webm',
+                    mimeType: file.mimetype || 'video/webm',
+                    startedAt: dto.startedAt || null,
+                    endedAt: dto.endedAt || null,
+                    plainFilePath: uploadedPath,
+                    plainSha256Hash: hashed.sha256Hash,
+                    plainSize: hashed.size,
+                });
+            } finally {
+                this.safeUnlink(uploadedPath);
+            }
+        }
 
         return this.persistPlainVideoBuffer({
             appointmentId: dto.appointmentId,

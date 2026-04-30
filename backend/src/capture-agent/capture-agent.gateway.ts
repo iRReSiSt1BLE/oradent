@@ -205,6 +205,7 @@ export class CaptureAgentGateway implements OnGatewayConnection, OnGatewayDiscon
       }
 
       if (messageType === 'agent.recording.state') {
+        await this.captureAgentRealtimeService.updateRecordingState(agentId, parsed.payload || {});
         this.logger.log(`Recording state from agent ${agentId}: ${JSON.stringify(parsed.payload || {})}`);
         return;
       }

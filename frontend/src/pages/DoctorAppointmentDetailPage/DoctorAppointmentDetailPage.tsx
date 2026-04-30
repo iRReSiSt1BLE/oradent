@@ -5,6 +5,7 @@ import {
     completeDoctorAppointment,
     startAppointmentAgentPreview,
     getAppointmentAgentPreviewFrame,
+    getAppointmentAgentRecordingState,
     startAppointmentAgentRecording,
     stopAppointmentAgentPreview,
     stopAppointmentAgentRecording,
@@ -13,6 +14,7 @@ import {
     getManualAvailabilityDay,
     getManualAvailabilityMonth,
     updateAppointmentVisitFlowStatus,
+    type AppointmentAgentRecordingState,
     type AppointmentCabinetDevice,
     type AppointmentItem,
     type ManualAvailabilityDayResponse,
@@ -56,10 +58,16 @@ type RecorderSlotState = {
     hasMedia: boolean;
     previewActive: boolean;
     previewLoading: boolean;
-    previewImageDataUrl: string | null;
-    previewCapturedAt: string | null;
+    previewImageDataUrl: string | null;    previewCapturedAt: string | null;
     previewError: string | null;
     previewWebRtcActive: boolean;
+    recordingState: string | null;
+    recordingStateLabel: string;
+    recordingStateAt: string | null;
+    recordingBytes: number | null;
+    recordingHash: string | null;
+    recordingEntryId: string | null;
+    recordingTimeline: AppointmentAgentRecordingState[];
 };
 
 type AlertState = {
@@ -211,6 +219,82 @@ function buildPreviewWsUrl(token: string) {
     return url.toString();
 }
 
+function normalizeRecordingState(state?: string | null) {
+    return String(state || '').trim().toLowerCase();
+}
+
+function getRecordingStateLabel(state?: string | null) {
+    switch (normalizeRecordingState(state)) {
+        case 'start_requested': return 'Команда старту';
+        case 'starting': return 'Запуск агента';
+        case 'media_opening': return 'Відкриття камери';
+        case 'media_ready': return 'Камера готова';
+        case 'upload_entry_ready': return 'Журнал запису готовий';
+        case 'recording': return 'Йде запис';
+        case 'stop_requested': return 'Команда зупинки';
+        case 'stopping': return 'Зупинка запису';
+        case 'finalizing': return 'Фіналізація файлу';
+        case 'queued': return 'Очікує повторного upload';
+        case 'uploaded': return 'Відео завантажено';
+        case 'failed': return 'Помилка запису';
+        default: return state ? String(state) : 'Очікування';
+    }
+}
+
+function isAgentRecordingState(state?: string | null) {
+    return ['starting', 'media_opening', 'media_ready', 'upload_entry_ready', 'recording'].includes(normalizeRecordingState(state));
+}
+
+function isAgentBusyState(state?: string | null) {
+    return ['start_requested', 'stop_requested', 'stopping', 'finalizing', 'queued'].includes(normalizeRecordingState(state));
+}
+
+function isAgentTerminalState(state?: string | null) {
+    return ['uploaded', 'failed'].includes(normalizeRecordingState(state));
+}
+
+function getRecordingStateTone(state?: string | null) {
+    const normalized = normalizeRecordingState(state);
+    if (normalized === 'recording') return 'recording';
+    if (['start_requested', 'starting', 'media_opening', 'media_ready', 'upload_entry_ready'].includes(normalized)) return 'starting';
+    if (['stop_requested', 'stopping', 'finalizing', 'queued'].includes(normalized)) return 'processing';
+    if (normalized === 'uploaded') return 'uploaded';
+    if (normalized === 'failed') return 'failed';
+    return 'idle';
+}
+
+function formatBytes(bytes?: number | null) {
+    if (!Number.isFinite(bytes || NaN) || !bytes || bytes <= 0) return null;
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
+    return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function pickLatestRecordingStates(states: AppointmentAgentRecordingState[]) {
+    const byCabinetDevice = new Map<string, AppointmentAgentRecordingState>();
+
+    states.forEach((state) => {
+        if (!state.cabinetDeviceId) return;
+        const previous = byCabinetDevice.get(state.cabinetDeviceId);
+        const previousSequence = previous?.sequence ?? 0;
+        const nextSequence = state.sequence ?? previousSequence + 1;
+
+        if (!previous || nextSequence >= previousSequence) {
+            byCabinetDevice.set(state.cabinetDeviceId, state);
+        }
+    });
+
+    return byCabinetDevice;
+}
+
+function statesForCabinetDevice(states: AppointmentAgentRecordingState[], cabinetDeviceId: string) {
+    return states.filter((state) => state.cabinetDeviceId === cabinetDeviceId);
+}
 function targetValueFromSnapshot(snapshot: DentalSnapshotItem) {
     if (snapshot.targetType === 'TOOTH' && snapshot.toothNumber) {
         return `TOOTH:${snapshot.toothNumber}`;
@@ -491,6 +575,8 @@ export default function DoctorAppointmentDetailPage() {
     const previewSocketsRef = useRef<Record<string, WebSocket | null>>({});
     const previewSessionIdsRef = useRef<Record<string, string | null>>({});
     const previewFallbackTimersRef = useRef<Record<string, number | null>>({});
+    const previewRestartTimersRef = useRef<Record<string, number | null>>({});
+    const previewRestartAttemptsRef = useRef<Record<string, number>>({});
     const previewStreamsRef = useRef<Record<string, MediaStream | null>>({});
     const streamsRef = useRef<Record<string, MediaStream | null>>({});
     const recordersRef = useRef<Record<string, MediaRecorder | null>>({});
@@ -500,6 +586,16 @@ export default function DoctorAppointmentDetailPage() {
     const failedDentalImageIdsRef = useRef<Set<string>>(new Set());
     const autoStartedRef = useRef<Set<string>>(new Set());
     const finishAfterUploadsRef = useRef(false);
+    const slotsRef = useRef<RecorderSlotState[]>([]);
+    const expandedSlotsRef = useRef<Record<string, boolean>>({});
+
+    useEffect(() => {
+        slotsRef.current = slots;
+    }, [slots]);
+
+    useEffect(() => {
+        expandedSlotsRef.current = expandedSlots;
+    }, [expandedSlots]);
 
     const hasAnyRecording = useMemo(() => slots.some((slot) => slot.recording), [slots]);
     const hasAnyUploading = useMemo(() => slots.some((slot) => slot.uploading), [slots]);
@@ -697,6 +793,13 @@ export default function DoctorAppointmentDetailPage() {
             previewCapturedAt: null,
             previewError: null,
             previewWebRtcActive: false,
+            recordingState: null,
+            recordingStateLabel: 'Очікування',
+            recordingStateAt: null,
+            recordingBytes: null,
+            recordingHash: null,
+            recordingEntryId: null,
+            recordingTimeline: [],
         }));
 
         setSlots(preparedSlots);
@@ -733,6 +836,13 @@ export default function DoctorAppointmentDetailPage() {
             });
             previewPollersRef.current = {};
             previewInFlightRef.current = {};
+            Object.values(previewRestartTimersRef.current).forEach((timerId) => {
+                if (typeof timerId === 'number') {
+                    window.clearTimeout(timerId);
+                }
+            });
+            previewRestartTimersRef.current = {};
+            previewRestartAttemptsRef.current = {};
             Object.keys(previewSocketsRef.current).forEach((slotId) => cleanupWebRtcPreview(slotId));
 
             if (appointment?.id && token) {
@@ -749,6 +859,67 @@ export default function DoctorAppointmentDetailPage() {
             });
         };
     }, []);
+
+
+
+    useEffect(() => {
+        if (!appointment?.id || !token) return;
+
+        let cancelled = false;
+        let timerId: number | null = null;
+
+        const applyRecordingState = async () => {
+            try {
+                const response = await getAppointmentAgentRecordingState(token, appointment.id);
+                if (cancelled) return;
+
+                const timeline = Array.isArray(response.states) ? response.states : [];
+                const currentStates = Array.isArray(response.currentStates) && response.currentStates.length
+                    ? response.currentStates
+                    : Array.from(pickLatestRecordingStates(timeline).values());
+                const latestByDevice = pickLatestRecordingStates(currentStates.length ? currentStates : timeline);
+
+                setSlots((prev) => prev.map((slot) => {
+                    const state = latestByDevice.get(slot.id);
+                    if (!state) return slot;
+
+                    const stateName = normalizeRecordingState(state.state);
+                    const recording = isAgentRecordingState(stateName);
+                    const uploading = isAgentBusyState(stateName);
+                    const terminal = isAgentTerminalState(stateName);
+                    const slotTimeline = statesForCabinetDevice(timeline, slot.id);
+
+                    return {
+                        ...slot,
+                        recording,
+                        uploading,
+                        showPreview: terminal ? false : (slot.showPreview || recording || uploading),
+                        recordingState: state.state || null,
+                        recordingStateLabel: getRecordingStateLabel(state.state),
+                        recordingStateAt: state.reportedAt || state.receivedAt || null,
+                        recordingBytes: typeof state.totalBytes === 'number' ? state.totalBytes : slot.recordingBytes,
+                        recordingHash: state.sha256Hash || slot.recordingHash,
+                        recordingEntryId: state.entryId || slot.recordingEntryId,
+                        recordingTimeline: slotTimeline,
+                    };
+                }));
+            } catch {
+                // State polling is diagnostic. Recording itself should continue even if this request fails.
+            }
+        };
+
+        void applyRecordingState();
+        timerId = window.setInterval(() => {
+            void applyRecordingState();
+        }, 3000);
+
+        return () => {
+            cancelled = true;
+            if (typeof timerId === 'number') {
+                window.clearInterval(timerId);
+            }
+        };
+    }, [appointment?.id, token]);
 
 
 
@@ -1056,6 +1227,48 @@ export default function DoctorAppointmentDetailPage() {
         delete previewInFlightRef.current[slotId];
     }
 
+    function clearPreviewRestart(slotId: string) {
+        const timerId = previewRestartTimersRef.current[slotId];
+        if (typeof timerId === 'number') {
+            window.clearTimeout(timerId);
+        }
+        delete previewRestartTimersRef.current[slotId];
+        delete previewRestartAttemptsRef.current[slotId];
+    }
+
+    function shouldAutoRecoverPreview(slotId: string) {
+        const slot = slotsRef.current.find((item) => item.id === slotId);
+        if (!slot?.videoDeviceId) return false;
+        return Boolean(slot.showPreview || slot.previewActive || slot.recording || slot.uploading || expandedSlotsRef.current[slotId]);
+    }
+
+    function schedulePreviewRestart(slotId: string, reason?: string) {
+        if (!appointment?.id || !token) return;
+        if (!shouldAutoRecoverPreview(slotId)) return;
+        if (typeof previewRestartTimersRef.current[slotId] === 'number') return;
+
+        const attempt = (previewRestartAttemptsRef.current[slotId] || 0) + 1;
+        previewRestartAttemptsRef.current[slotId] = attempt;
+        const delayMs = Math.min(6000, 900 + attempt * 600);
+        const message = reason && /failed to fetch/i.test(reason)
+            ? 'Backend тимчасово недоступний. Відновлюємо preview…'
+            : 'Відновлюємо preview після reconnect…';
+
+        updateSlot(slotId, {
+            showPreview: true,
+            previewActive: true,
+            previewLoading: true,
+            previewError: message,
+            previewWebRtcActive: false,
+        });
+
+        previewRestartTimersRef.current[slotId] = window.setTimeout(() => {
+            delete previewRestartTimersRef.current[slotId];
+            if (!shouldAutoRecoverPreview(slotId)) return;
+            void startSlotPreview(slotId, { recover: true });
+        }, delayMs);
+    }
+
     function cleanupWebRtcPreview(slotId: string) {
         const fallbackTimer = previewFallbackTimersRef.current[slotId];
         if (typeof fallbackTimer === 'number') {
@@ -1146,11 +1359,12 @@ export default function DoctorAppointmentDetailPage() {
                         video.srcObject = stream;
                         void video.play().catch(() => undefined);
                     }
+                    previewRestartAttemptsRef.current[slotId] = 0;
                     updateSlot(slotId, {
                         previewLoading: false,
                         previewError: null,
                         previewImageDataUrl: null,
-                        previewCapturedAt: new Date().toISOString(),
+                previewCapturedAt: new Date().toISOString(),
                         previewWebRtcActive: true,
                     });
                     finish(true);
@@ -1168,8 +1382,17 @@ export default function DoctorAppointmentDetailPage() {
                 };
 
                 pc.onconnectionstatechange = () => {
-                    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-                        finish(false);
+                    if (pc.connectionState === 'connected') {
+                        previewRestartAttemptsRef.current[slotId] = 0;
+                        updateSlot(slotId, { previewError: null, previewLoading: false });
+                        return;
+                    }
+                    if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
+                        if (settled) {
+                            schedulePreviewRestart(slotId, `WebRTC ${pc.connectionState}`);
+                        } else {
+                            finish(false);
+                        }
                     }
                 };
 
@@ -1240,9 +1463,19 @@ export default function DoctorAppointmentDetailPage() {
                     })();
                 };
 
-                socket.onerror = () => finish(false);
+                socket.onerror = () => {
+                    if (settled) {
+                        schedulePreviewRestart(slotId, 'Preview signaling socket error');
+                    } else {
+                        finish(false);
+                    }
+                };
                 socket.onclose = () => {
-                    if (!settled) finish(false);
+                    if (!settled) {
+                        finish(false);
+                        return;
+                    }
+                    schedulePreviewRestart(slotId, 'Preview signaling socket closed');
                 };
 
                 previewFallbackTimersRef.current[slotId] = window.setTimeout(() => finish(false), 7000);
@@ -1263,11 +1496,17 @@ export default function DoctorAppointmentDetailPage() {
                 quality: 0.82,
             });
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'Не вдалося запустити live-preview.';
             updateSlot(slotId, {
-                previewActive: false,
-                previewLoading: false,
-                previewError: error instanceof Error ? error.message : 'Не вдалося запустити live-preview.',
+                showPreview: true,
+                previewActive: true,
+                previewLoading: true,
+                previewError: /failed to fetch/i.test(message)
+                    ? 'Backend тимчасово недоступний. Відновлюємо preview…'
+                    : message,
+                previewWebRtcActive: false,
             });
+            schedulePreviewRestart(slotId, message);
             return;
         }
 
@@ -1280,6 +1519,7 @@ export default function DoctorAppointmentDetailPage() {
             try {
                 const frame = await getAppointmentAgentPreviewFrame(token, appointment.id, slotId);
                 if (frame.preview?.imageDataUrl) {
+                    previewRestartAttemptsRef.current[slotId] = 0;
                     updateSlot(slotId, {
                         previewLoading: false,
                         previewError: null,
@@ -1289,10 +1529,14 @@ export default function DoctorAppointmentDetailPage() {
                     });
                 }
             } catch (error) {
+                const message = error instanceof Error ? error.message : 'Не вдалося отримати кадр preview.';
                 updateSlot(slotId, {
-                    previewLoading: false,
-                    previewError: error instanceof Error ? error.message : 'Не вдалося отримати кадр preview.',
+                    previewLoading: true,
+                    previewError: /failed to fetch/i.test(message)
+                        ? 'Backend тимчасово недоступний. Відновлюємо preview…'
+                        : message,
                 });
+                schedulePreviewRestart(slotId, message);
             } finally {
                 previewInFlightRef.current[slotId] = false;
             }
@@ -1304,7 +1548,7 @@ export default function DoctorAppointmentDetailPage() {
         }, 250);
     }
 
-    async function startSlotPreview(slotId: string) {
+    async function startSlotPreview(slotId: string, options?: { recover?: boolean }) {
         if (!appointment?.id || !token) return;
 
         const slot = slots.find((item) => item.id === slotId);
@@ -1313,6 +1557,9 @@ export default function DoctorAppointmentDetailPage() {
             return;
         }
 
+        if (!options?.recover) {
+            clearPreviewRestart(slotId);
+        }
         clearPreviewPoller(slotId);
         cleanupWebRtcPreview(slotId);
         updateSlot(slotId, {
@@ -1321,7 +1568,7 @@ export default function DoctorAppointmentDetailPage() {
             previewLoading: true,
             previewError: null,
             previewImageDataUrl: null,
-            previewCapturedAt: null,
+                previewCapturedAt: null,
             previewWebRtcActive: false,
         });
 
@@ -1333,6 +1580,7 @@ export default function DoctorAppointmentDetailPage() {
     }
 
     async function stopSlotPreview(slotId: string, options?: { clearFrame?: boolean }) {
+        clearPreviewRestart(slotId);
         clearPreviewPoller(slotId);
         cleanupWebRtcPreview(slotId);
 
@@ -1394,6 +1642,9 @@ export default function DoctorAppointmentDetailPage() {
                 previewError: null,
                 previewImageDataUrl: null,
                 previewCapturedAt: null,
+                recordingState: 'start_requested',
+                recordingStateLabel: getRecordingStateLabel('start_requested'),
+                recordingStateAt: new Date().toISOString(),
             });
             if (slot.videoDeviceId) {
                 void startSlotPreview(slotId);
@@ -1414,7 +1665,12 @@ export default function DoctorAppointmentDetailPage() {
         const slot = slots.find((item) => item.id === slotId);
         if (!slot || slot.uploading || !slot.recording) return;
 
-        updateSlot(slotId, { uploading: true });
+        updateSlot(slotId, {
+            uploading: true,
+            recordingState: 'stop_requested',
+            recordingStateLabel: getRecordingStateLabel('stop_requested'),
+            recordingStateAt: new Date().toISOString(),
+        });
         try {
             await stopAppointmentAgentRecording(token, appointment.id, { cabinetDeviceId: slotId });
             await stopSlotPreview(slotId);
@@ -1741,7 +1997,7 @@ export default function DoctorAppointmentDetailPage() {
                                                         <div className="doctor-appointment-detail__video-item-actions">
                                                             <span className={`doctor-appointment-detail__status-dot ${slot.recording ? 'is-active' : ''} ${slot.uploading ? 'is-uploading' : ''}`} />
                                                             <span className={`doctor-appointment-detail__status-label ${slot.recording ? 'is-recording' : ''} ${slot.uploading ? 'is-uploading' : ''}`}>
-                                                                {slot.uploading ? 'Завантаження' : slot.recording ? 'Йде запис' : 'Готово'}
+                                                                {slot.recordingStateLabel || (slot.uploading ? 'Обробка' : slot.recording ? 'Йде запис' : 'Готово')}
                                                             </span>
                                                             <button
                                                                 type="button"
@@ -1753,6 +2009,22 @@ export default function DoctorAppointmentDetailPage() {
                                                             </button>
                                                         </div>
                                                     </div>
+
+                                                    <div className={`doctor-appointment-detail__recording-state doctor-appointment-detail__recording-state--${getRecordingStateTone(slot.recordingState)}`}>
+                                                        <div>
+                                                            <strong>{slot.recordingStateLabel}</strong>
+                                                            <span>
+                                                                {slot.recordingStateAt ? formatDateTime(slot.recordingStateAt) : 'Очікування подій від Capture Agent'}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="doctor-appointment-detail__recording-state-meta">
+                                                            {formatBytes(slot.recordingBytes) ? <span>{formatBytes(slot.recordingBytes)}</span> : null}
+                                                            {slot.recordingHash ? <span>SHA-256: {slot.recordingHash.slice(0, 12)}…</span> : null}
+                                                            {slot.recordingTimeline.length ? <span>{slot.recordingTimeline.length} подій</span> : null}
+                                                        </div>
+                                                    </div>
+
 
                                                     <div className={`doctor-appointment-detail__preview-panel ${expanded ? 'is-open' : ''}`}>
                                                         <div className="doctor-appointment-detail__preview-inner">
@@ -1799,7 +2071,7 @@ export default function DoctorAppointmentDetailPage() {
                                                                     disabled={slot.uploading || isCompleted || !slot.hasMedia}
                                                                 >
                                                                     {slot.uploading ? <span className="doctor-appointment-detail__btn-spinner" /> : null}
-                                                                    {slot.uploading ? 'Завантаження...' : 'Почати запис'}
+                                                                    {slot.uploading ? slot.recordingStateLabel || 'Обробка...' : 'Почати запис'}
                                                                 </button>
                                                             ) : (
                                                                 <button
@@ -1814,7 +2086,7 @@ export default function DoctorAppointmentDetailPage() {
                                                         </div>
                                                     ) : (
                                                         <div className="doctor-appointment-detail__auto-note">
-                                                            {slot.recording ? 'Автозапис активний' : slot.hasMedia ? 'Очікуємо автозапуск' : 'Немає доступного пристрою'}
+                                                            {slot.recording ? slot.recordingStateLabel || 'Автозапис активний' : slot.hasMedia ? 'Очікуємо автозапуск' : 'Немає доступного пристрою'}
                                                         </div>
                                                     )}
                                                 </div>

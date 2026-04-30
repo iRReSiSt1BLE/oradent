@@ -507,6 +507,105 @@ export async function payMyAppointmentGooglePayTest(
     });
 }
 
+
+export type AppointmentAgentRecordingState = {
+    state?: string;
+    appointmentId?: string;
+    cabinetDeviceId?: string;
+    pairKey?: string;
+    entryId?: string;
+    totalBytes?: number;
+    sha256Hash?: string;
+    uploaded?: boolean;
+    message?: string;
+    command?: 'start' | 'stop' | string;
+    sent?: boolean;
+    heartbeat?: boolean;
+    duplicateStartIgnored?: boolean;
+    mimeType?: string;
+    originalFileName?: string;
+    startedAt?: string;
+    reportedAt?: string;
+    receivedAt?: string;
+    agentId?: string;
+    eventId?: string;
+    sequence?: number;
+};
+
+export type AppointmentAgentRecordingStateResponse = {
+    ok: boolean;
+    appointmentId: string;
+    currentState?: AppointmentAgentRecordingState | null;
+    currentStates?: AppointmentAgentRecordingState[];
+    states: AppointmentAgentRecordingState[];
+};
+
+export async function getAppointmentAgentRecordingState(token: string, appointmentId: string) {
+    return http<AppointmentAgentRecordingStateResponse>(
+        `/appointment/${appointmentId}/agent-recording/state`,
+        {
+            method: 'GET',
+            token,
+        },
+    );
+}
+
+
+export type AppointmentRecordingEvidenceCheckMap = {
+    sha256Hash: boolean;
+    encryptedFile: boolean;
+    manifest: boolean;
+    manifestSignature: boolean;
+    tsaRequest: boolean;
+    tsaResponse: boolean;
+    encryption: boolean;
+    uploadedEvent: boolean;
+    hashMatchesUploadedEvent: boolean;
+};
+
+export type AppointmentRecordingEvidenceVideo = {
+    id: string;
+    appointmentId: string | null;
+    originalFileName: string;
+    mimeType: string;
+    size: number;
+    createdAt: string;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    status: 'valid' | 'incomplete' | string;
+    statusLabel: string;
+    sha256Hash: string | null;
+    sha256Prefix: string | null;
+    checks: AppointmentRecordingEvidenceCheckMap;
+    artifacts?: Record<string, unknown>;
+};
+
+export type AppointmentRecordingEvidenceResponse = {
+    ok: boolean;
+    appointmentId: string;
+    status: 'valid' | 'incomplete' | 'empty' | string;
+    statusLabel: string;
+    videoCount: number;
+    validVideoCount: number;
+    eventCount: number;
+    hasEventLog: boolean;
+    hasUploadedEvent: boolean;
+    latestSha256Hash: string | null;
+    latestSha256Prefix: string | null;
+    latestVideo: AppointmentRecordingEvidenceVideo | null;
+    videos: AppointmentRecordingEvidenceVideo[];
+};
+
+export async function getAppointmentRecordingEvidence(token: string, appointmentId: string) {
+    return http<AppointmentRecordingEvidenceResponse>(
+        `/appointment/${appointmentId}/recording/evidence`,
+        {
+            method: 'GET',
+            token,
+        },
+    );
+}
+
 export async function startAppointmentAgentRecording(
     token: string,
     appointmentId: string,

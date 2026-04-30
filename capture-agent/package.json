@@ -7,10 +7,11 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.js",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && npm run copy-assets",
     "start": "npm run build && electron .",
     "make": "npm run build && electron-forge make",
-    "package": "npm run build && electron-forge package"
+    "package": "npm run build && electron-forge package",
+    "copy-assets": "tsc scripts/copy-assets.ts --module CommonJS --target ES2022 --esModuleInterop --skipLibCheck --outDir .build-scripts && node .build-scripts/copy-assets.js"
   },
   "dependencies": {
     "electron": "35.7.5",

@@ -19,7 +19,8 @@ declare global {
       queueRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
       beginRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; entryId: string }>;
       appendRecordingChunk(payload: Record<string, unknown>): Promise<{ ok: boolean; totalBytes: number }>;
-      finalizeRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>;
+      finalizeRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string; sha256Hash?: string; totalBytes?: number }>;
+      sendRecordingState(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       discardRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       flushRecordingQueue(): Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>;
       onSocketStatus(callback: (payload: SocketStatusPayload) => void): () => void;
@@ -105,6 +106,7 @@ type AgentRecordingSession = {
   totalBytes: number;
   stopReason: string | null;
   maxDurationTimerId: number | null;
+  heartbeatTimerId: number | null;
   startedAt: string;
   mimeType: string;
   originalFileName: string;
@@ -121,7 +123,7 @@ const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
 const RECORDING_TIMESLICE_MS = 1000;
 const MAX_RECORDING_BYTES = 350 * 1024 * 1024;
 const MAX_RECORDING_DURATION_MS = 45 * 60 * 1000;
-const VIDEO_BITS_PER_SECOND = 1_000_000;
+const VIDEO_BITS_PER_SECOND = 1_200_000;
 const AUDIO_BITS_PER_SECOND = 64_000;
 
 
@@ -356,7 +358,11 @@ async function uploadDentalSnapshotFromSession(session: AgentRecordingSession, f
     throw new Error('Agent token is missing.');
   }
 
-  const encrypted = await encryptBlobForTransport(frame.blob, config.transportKey || 'oradent-capture-transport');
+  if (!config.transportKey) {
+    throw new Error('Не задано transportKey для доказового знімка. Перереєструй агента або онови transport key.');
+  }
+
+  const encrypted = await encryptBlobForTransport(frame.blob, config.transportKey);
   const formData = new FormData();
   const originalFileName = `dental-snapshot-${session.appointmentId}-${Date.now()}.jpg`;
   formData.append('image', encrypted.encryptedBlob, `${originalFileName}.enc`);
@@ -645,13 +651,17 @@ function buildRecordingKey(appointmentId: string, cabinetDeviceId: string): stri
 }
 
 function pickRecordingMimeType(): string {
-  const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  const candidates = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=h264,opus', 'video/webm;codecs=vp9,opus', 'video/webm'];
   for (const mimeType of candidates) {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mimeType)) {
       return mimeType;
     }
   }
   return 'video/webm';
+}
+
+function notifyRecordingState(payload: Record<string, unknown>): void {
+  void window.agentApi.sendRecordingState(payload).catch(() => undefined);
 }
 
 function resolveRecordingPair(payload: Record<string, unknown>): PairView | null {
@@ -693,22 +703,68 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
   }
 
   const recordingKey = buildRecordingKey(appointmentId, cabinetDeviceId);
-  if (activeRecordingSessions.has(recordingKey)) {
+  const existingSession = activeRecordingSessions.get(recordingKey);
+  if (existingSession) {
+    notifyRecordingState({
+      state: 'recording',
+      appointmentId: existingSession.appointmentId,
+      cabinetDeviceId: existingSession.cabinetDeviceId,
+      pairKey: existingSession.pair.pairKey,
+      entryId: existingSession.uploadEntryId,
+      totalBytes: existingSession.totalBytes,
+      startedAt: existingSession.startedAt,
+      mimeType: existingSession.mimeType,
+      originalFileName: existingSession.originalFileName,
+      duplicateStartIgnored: true,
+    });
     return;
   }
 
   const pair = resolveRecordingPair(payload);
   if (!pair) {
+    notifyRecordingState({
+      state: 'failed',
+      appointmentId,
+      cabinetDeviceId,
+      message: 'Не вдалося знайти або зібрати пару пристроїв для запису.',
+    });
     throw new Error('Не вдалося знайти або зібрати пару пристроїв для запису.');
   }
+
+  const startedAt = String(payload.startedAt || new Date().toISOString());
+  const mimeType = pickRecordingMimeType();
+
+  notifyRecordingState({
+    state: 'starting',
+    appointmentId,
+    cabinetDeviceId,
+    pairKey: pair.pairKey,
+    startedAt,
+    mimeType,
+  });
+
+  notifyRecordingState({
+    state: 'media_opening',
+    appointmentId,
+    cabinetDeviceId,
+    pairKey: pair.pairKey,
+    startedAt,
+    mimeType,
+  });
 
   const stream = await navigator.mediaDevices.getUserMedia({
     video: buildVideoConstraints(pair.videoDeviceId, 'local'),
     audio: pair.audioDeviceId ? { deviceId: { exact: pair.audioDeviceId } } : false,
   });
 
-  const startedAt = String(payload.startedAt || new Date().toISOString());
-  const mimeType = pickRecordingMimeType();
+  notifyRecordingState({
+    state: 'media_ready',
+    appointmentId,
+    cabinetDeviceId,
+    pairKey: pair.pairKey,
+    startedAt,
+    mimeType,
+  });
   const recorderOptions: MediaRecorderOptions = {
     videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
     audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
@@ -734,8 +790,25 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     });
 
     uploadEntryId = uploadEntry.entryId;
+    notifyRecordingState({
+      state: 'upload_entry_ready',
+      appointmentId,
+      cabinetDeviceId,
+      pairKey: pair.pairKey,
+      entryId: uploadEntryId,
+      startedAt,
+      mimeType: recorder.mimeType || mimeType || 'video/webm',
+      originalFileName,
+    });
   } catch (error) {
     stopMediaStream(stream);
+    notifyRecordingState({
+      state: 'failed',
+      appointmentId,
+      cabinetDeviceId,
+      pairKey: pair.pairKey,
+      message: error instanceof Error ? error.message : 'Не вдалося підготувати локальний файл запису.',
+    });
     throw error;
   }
 
@@ -751,6 +824,7 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     totalBytes: 0,
     stopReason: null,
     maxDurationTimerId: null,
+    heartbeatTimerId: null,
     startedAt,
     mimeType: recorder.mimeType || mimeType || 'video/webm',
     originalFileName,
@@ -789,8 +863,29 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
       });
   };
 
+  recorder.onstart = () => {
+    notifyRecordingState({
+      state: 'recording',
+      appointmentId,
+      cabinetDeviceId,
+      pairKey: pair.pairKey,
+      entryId: uploadEntryId,
+      startedAt,
+      mimeType: session.mimeType,
+      originalFileName,
+    });
+  };
+
   recorder.onerror = () => {
     session.stopReason = `Помилка локального запису для ${pair.displayName}.`;
+    notifyRecordingState({
+      state: 'failed',
+      appointmentId,
+      cabinetDeviceId,
+      pairKey: pair.pairKey,
+      entryId: uploadEntryId,
+      message: session.stopReason,
+    });
     toast(session.stopReason, 'error');
   };
 
@@ -801,6 +896,15 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
     }
 
     try {
+      notifyRecordingState({
+        state: 'finalizing',
+        appointmentId: session.appointmentId,
+        cabinetDeviceId: session.cabinetDeviceId,
+        pairKey: session.pair.pairKey,
+        entryId: session.uploadEntryId,
+        totalBytes: session.totalBytes,
+      });
+
       await session.pendingWrite;
 
       if (session.stopReason) {
@@ -808,17 +912,43 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
         throw new Error(session.stopReason);
       }
 
-      await window.agentApi.finalizeRecordingUpload({
+      const finalized = await window.agentApi.finalizeRecordingUpload({
         entryId: session.uploadEntryId,
         endedAt: new Date().toISOString(),
       });
 
-      setStatusLine(`Запис ${session.pair.displayName} збережено локально та поставлено в чергу на відправку.`);
+      notifyRecordingState({
+        state: finalized.uploaded ? 'uploaded' : 'queued',
+        appointmentId: session.appointmentId,
+        cabinetDeviceId: session.cabinetDeviceId,
+        pairKey: session.pair.pairKey,
+        entryId: session.uploadEntryId,
+        totalBytes: finalized.totalBytes ?? session.totalBytes,
+        sha256Hash: finalized.sha256Hash,
+        uploaded: finalized.uploaded,
+      });
+
+      setStatusLine(finalized.uploaded
+        ? `Запис ${session.pair.displayName} завантажено на сервер і передано на доказове збереження.`
+        : `Запис ${session.pair.displayName} збережено локально та поставлено в чергу на відправку.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не вдалося поставити запис у чергу.';
+      notifyRecordingState({
+        state: 'failed',
+        appointmentId: session.appointmentId,
+        cabinetDeviceId: session.cabinetDeviceId,
+        pairKey: session.pair.pairKey,
+        entryId: session.uploadEntryId,
+        totalBytes: session.totalBytes,
+        message,
+      });
       setStatusLine(message);
       toast(message, 'error');
     } finally {
+      if (session.heartbeatTimerId !== null) {
+        window.clearInterval(session.heartbeatTimerId);
+        session.heartbeatTimerId = null;
+      }
       stopMediaStream(session.stream);
       activeRecordingSessions.delete(recordingKey);
       updateControls();
@@ -834,6 +964,20 @@ async function startAgentRecordingSession(payload: Record<string, unknown>): Pro
   }, MAX_RECORDING_DURATION_MS);
 
   activeRecordingSessions.set(recordingKey, session);
+  session.heartbeatTimerId = window.setInterval(() => {
+    notifyRecordingState({
+      state: 'recording',
+      appointmentId: session.appointmentId,
+      cabinetDeviceId: session.cabinetDeviceId,
+      pairKey: session.pair.pairKey,
+      entryId: session.uploadEntryId,
+      totalBytes: session.totalBytes,
+      startedAt: session.startedAt,
+      mimeType: session.mimeType,
+      originalFileName: session.originalFileName,
+      heartbeat: true,
+    });
+  }, 5000);
   updateControls();
   recorder.start(RECORDING_TIMESLICE_MS);
   setStatusLine(`Іде запис: ${pair.displayName}. Відео пишеться фрагментами на диск, без накопичення всього файлу в RAM.`);
@@ -854,6 +998,14 @@ async function stopAgentRecordingSession(payload: Record<string, unknown>): Prom
   }
 
   if (session.recorder.state !== 'inactive') {
+    notifyRecordingState({
+      state: 'stopping',
+      appointmentId: session.appointmentId,
+      cabinetDeviceId: session.cabinetDeviceId,
+      pairKey: session.pair.pairKey,
+      entryId: session.uploadEntryId,
+      totalBytes: session.totalBytes,
+    });
     session.recorder.stop();
   }
 }
@@ -971,7 +1123,11 @@ async function encryptBlobForTransport(blob: Blob, secret: string): Promise<{
   transportAuthTag: string;
 }> {
   const plainBuffer = await blob.arrayBuffer();
-  const keyMaterial = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret || 'oradent-capture-transport'));
+  if (!secret) {
+    throw new Error('Не задано transportKey для шифрування доказового файлу.');
+  }
+
+  const keyMaterial = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
   const key = await crypto.subtle.importKey('raw', keyMaterial, 'AES-GCM', false, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encryptedWithTag = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, plainBuffer));

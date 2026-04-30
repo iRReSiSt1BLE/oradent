@@ -69,7 +69,8 @@ type RawRecordingMeta = {
   totalBytes: number;
 };
 
-const DEFAULT_SECRET = process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || 'oradent-capture-transport';
+const LEGACY_DEFAULT_TRANSPORT_SECRET = 'oradent-capture-transport';
+const LOCAL_ENV_TRANSPORT_SECRET = process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || '';
 const MAX_RAW_RECORDING_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_QUEUE_UPLOAD_ATTEMPTS_PER_FLUSH = 1;
 
@@ -122,23 +123,26 @@ function writeRawMeta(meta: RawRecordingMeta): void {
 
 async function resolveTransportSecret(): Promise<{ secret: string; hint: 'configured' | 'default' }> {
   let config = getConfig();
-  let transportSecret = String(config.transportKey || DEFAULT_SECRET);
+  let transportSecret = String(config.transportKey || LOCAL_ENV_TRANSPORT_SECRET || '').trim();
+  if (transportSecret === LEGACY_DEFAULT_TRANSPORT_SECRET) {
+    transportSecret = '';
+  }
 
-  if (config.agentToken && (!config.transportKey || config.transportKey === DEFAULT_SECRET)) {
-    try {
-      const response = await getAgentTransportSecret(config);
-      if (response.transportKey) {
-        config = saveConfig({ transportKey: response.transportKey });
-        transportSecret = response.transportKey;
-      }
-    } catch {
-      transportSecret = String(config.transportKey || DEFAULT_SECRET);
+  if (config.agentToken && !transportSecret) {
+    const response = await getAgentTransportSecret(config);
+    if (response.transportKey) {
+      config = saveConfig({ transportKey: response.transportKey });
+      transportSecret = response.transportKey;
     }
+  }
+
+  if (!transportSecret) {
+    throw new Error('Не задано transportKey для доказового завантаження відео. Перереєструй агента або налаштуй CAPTURE_AGENT_TRANSPORT_KEY на backend.');
   }
 
   return {
     secret: transportSecret,
-    hint: transportSecret === DEFAULT_SECRET ? 'default' : 'configured',
+    hint: 'configured',
   };
 }
 
@@ -353,7 +357,7 @@ export async function appendRecordingChunk(input: AppendRecordingChunkInput): Pr
   return { ok: true, totalBytes: nextTotal };
 }
 
-export async function finalizeRecordingUpload(input: FinalizeRecordingUploadInput): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }> {
+export async function finalizeRecordingUpload(input: FinalizeRecordingUploadInput): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string; sha256Hash: string; totalBytes: number }> {
   const entryId = String(input.entryId || '').trim();
   if (!entryId) {
     throw new Error('Cannot finalize recording queue: entryId is missing.');
@@ -402,7 +406,7 @@ export async function finalizeRecordingUpload(input: FinalizeRecordingUploadInpu
     deleteEntry(entryId);
   }
 
-  return { ok: true, queued: true, uploaded, entryId };
+  return { ok: true, queued: true, uploaded, entryId, sha256Hash: meta.sha256Hash, totalBytes: rawMeta.totalBytes };
 }
 
 export async function discardRecordingUpload(entryId: string): Promise<{ ok: boolean }> {
@@ -414,7 +418,7 @@ export async function discardRecordingUpload(entryId: string): Promise<{ ok: boo
   return { ok: true };
 }
 
-export async function enqueueRecordingUpload(input: QueueRecordingUploadInput): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }> {
+export async function enqueueRecordingUpload(input: QueueRecordingUploadInput): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string; sha256Hash: string; totalBytes: number }> {
   const started = await beginRecordingUpload({
     appointmentId: input.appointmentId,
     cabinetDeviceId: input.cabinetDeviceId,

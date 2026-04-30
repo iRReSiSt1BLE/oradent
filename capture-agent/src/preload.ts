@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('agentApi', {
     ipcRenderer.invoke('agent:preview-signal', payload) as Promise<{ ok: boolean }>,
   sendPreviewFrame: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:preview-frame', payload) as Promise<{ ok: boolean }>,
+  sendRecordingState: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('agent:recording-state', payload) as Promise<{ ok: boolean }>,
   queueRecordingUpload: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:queue-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>,
   beginRecordingUpload: (payload: Record<string, unknown>) =>
@@ -33,7 +35,7 @@ contextBridge.exposeInMainWorld('agentApi', {
   appendRecordingChunk: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:append-recording-chunk', payload) as Promise<{ ok: boolean; totalBytes: number }>,
   finalizeRecordingUpload: (payload: Record<string, unknown>) =>
-    ipcRenderer.invoke('agent:finalize-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string }>,
+    ipcRenderer.invoke('agent:finalize-recording-upload', payload) as Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string; sha256Hash?: string; totalBytes?: number }>,
   discardRecordingUpload: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke('agent:discard-recording-upload', payload) as Promise<{ ok: boolean }>,
   flushRecordingQueue: () =>

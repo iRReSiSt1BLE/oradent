@@ -32,7 +32,10 @@ import { AdminRefundAppointmentDto } from './dto/admin-refund-appointment.dto';
 import { VideoAccessGrant } from '../video/entities/video-access-grant.entity';
 import { CaptureAgentService } from '../capture-agent/capture-agent.service';
 import { CaptureAgentRealtimeService } from '../capture-agent/capture-agent-realtime.service';
+import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
+import * as fs from 'fs';
+import * as path from 'path';
 
 
 
@@ -71,6 +74,7 @@ export class AppointmentService {
         private readonly videoAccessGrantRepository: Repository<VideoAccessGrant>,
         private readonly captureAgentService: CaptureAgentService,
         private readonly captureAgentRealtimeService: CaptureAgentRealtimeService,
+        private readonly configService: ConfigService,
     ) {}
 
     private parseAppointmentDateOrThrow(raw: string): Date {
@@ -2794,7 +2798,22 @@ export class AppointmentService {
 
         const startedAt = new Date().toISOString();
         let sentCount = 0;
+        const skippedTargets: Array<{ id: string; name: string; startMode?: string | null; reason: string; currentState?: unknown }> = [];
+
         for (const device of filteredDevices) {
+            const gate = await this.captureAgentRealtimeService.canSendRecordingCommandPersistent(appointment.id, device.id, command);
+
+            if (!gate.allowed) {
+                skippedTargets.push({
+                    id: device.id,
+                    name: device.name,
+                    startMode: device.startMode,
+                    reason: gate.reason || 'Команда пропущена, щоб не дублювати стан запису.',
+                    currentState: gate.currentState || null,
+                });
+                continue;
+            }
+
             const sent = this.captureAgentRealtimeService.sendToAgentKey(agent.agentKey, {
                 type: command === 'start' ? 'agent.recording.start' : 'agent.recording.stop',
                 payload: {
@@ -2809,23 +2828,184 @@ export class AppointmentService {
             });
             if (sent) {
                 sentCount += 1;
+                await this.captureAgentRealtimeService.updateRecordingState(agent.id, {
+                    state: command === 'start' ? 'start_requested' : 'stop_requested',
+                    appointmentId: appointment.id,
+                    cabinetDeviceId: device.id,
+                    command,
+                    sent: true,
+                    reportedAt: new Date().toISOString(),
+                });
             }
         }
 
-        if (sentCount === 0 && !options?.bestEffort) {
+        if (sentCount === 0 && skippedTargets.length === 0 && !options?.bestEffort) {
             throw new BadRequestException('Не вдалося передати команду запису до capture agent.');
         }
 
         return {
-            ok: sentCount > 0,
-            message: command === 'start' ? 'Команду старту запису надіслано до capture agent.' : 'Команду зупинки запису надіслано до capture agent.',
+            ok: sentCount > 0 || skippedTargets.length > 0,
+            message: command === 'start'
+                ? (sentCount > 0 ? 'Команду старту запису надіслано до capture agent.' : 'Старт запису вже був активний, повторну команду пропущено.')
+                : (sentCount > 0 ? 'Команду зупинки запису надіслано до capture agent.' : 'Зупинку запису вже було оброблено або запис не активний.'),
             command,
             sentCount,
+            skippedCount: skippedTargets.length,
             targets: filteredDevices.map((item) => ({
                 id: item.id,
                 name: item.name,
                 startMode: item.startMode,
             })),
+            skippedTargets,
+        };
+    }
+
+    async getAgentRecordingState(userId: string, appointmentId: string) {
+        const appointment = await this.getAppointmentOrThrow(appointmentId);
+        await this.ensureWeeklyBoardAccess(userId, appointment);
+
+        const [states, currentStates, currentState] = await Promise.all([
+            this.captureAgentRealtimeService.getRecordingStatesByAppointmentPersistent(appointment.id),
+            this.captureAgentRealtimeService.getCurrentRecordingStatesByAppointmentPersistent(appointment.id),
+            this.captureAgentRealtimeService.getLatestRecordingStateByAppointmentPersistent(appointment.id),
+        ]);
+
+        return {
+            ok: true,
+            appointmentId: appointment.id,
+            currentState,
+            currentStates,
+            states,
+            persisted: true,
+        };
+    }
+
+    private resolveEvidenceFile(relativePath: string | null | undefined) {
+        const normalized = String(relativePath || '').trim();
+        if (!normalized) {
+            return { configured: false, exists: false };
+        }
+
+        const storageRoot = this.configService.get<string>('VIDEO_STORAGE_ROOT');
+        if (!storageRoot) {
+            return { configured: true, exists: false };
+        }
+
+        const fullPath = path.join(storageRoot, normalized);
+        return {
+            configured: true,
+            exists: fs.existsSync(fullPath),
+        };
+    }
+
+    private buildVideoEvidence(video: Video, uploadedStates: Array<{ sha256Hash?: string }>) {
+        const encryptedFile = this.resolveEvidenceFile(video.storageRelativePath);
+        const manifest = this.resolveEvidenceFile(video.manifestRelativePath);
+        const tsaRequest = this.resolveEvidenceFile(video.tsaRequestRelativePath);
+        const tsaResponse = this.resolveEvidenceFile(video.tsaResponseRelativePath);
+        const hasSha256 = Boolean(video.sha256Hash);
+        const hasManifestSignature = Boolean(video.manifestSignature);
+        const hasEncryption = Boolean(video.encryptionAlgorithm && video.encryptionIv && video.encryptionAuthTag && video.encryptedAt);
+        const matchingUploadState = uploadedStates.find((state) => state.sha256Hash && video.sha256Hash && state.sha256Hash === video.sha256Hash);
+        const hasUploadedEvent = Boolean(matchingUploadState || uploadedStates.length > 0);
+        const hashMatchesUploadedEvent = uploadedStates.length === 0 || Boolean(matchingUploadState);
+
+        const checks = {
+            sha256Hash: hasSha256,
+            encryptedFile: encryptedFile.exists,
+            manifest: manifest.exists,
+            manifestSignature: hasManifestSignature,
+            tsaRequest: tsaRequest.exists,
+            tsaResponse: tsaResponse.exists,
+            encryption: hasEncryption,
+            uploadedEvent: hasUploadedEvent,
+            hashMatchesUploadedEvent,
+        };
+
+        const critical = [
+            checks.sha256Hash,
+            checks.encryptedFile,
+            checks.manifest,
+            checks.manifestSignature,
+            checks.tsaRequest,
+            checks.tsaResponse,
+            checks.encryption,
+            checks.hashMatchesUploadedEvent,
+        ];
+        const status = critical.every(Boolean) ? 'valid' : 'incomplete';
+
+        return {
+            id: video.id,
+            appointmentId: video.appointmentId,
+            originalFileName: video.originalFileName,
+            mimeType: video.mimeType,
+            size: Number(video.size || 0),
+            createdAt: video.createdAt,
+            startedAt: video.startedAt,
+            endedAt: video.endedAt,
+            status,
+            statusLabel: status === 'valid' ? 'Цілісність підтверджено' : 'Доказові артефакти неповні',
+            sha256Hash: video.sha256Hash,
+            sha256Prefix: video.sha256Hash ? `${video.sha256Hash.slice(0, 12)}…` : null,
+            checks,
+            artifacts: {
+                encryptedFile: video.storageRelativePath,
+                manifest: video.manifestRelativePath,
+                signatureAlgorithm: video.signatureAlgorithm,
+                tsaRequest: video.tsaRequestRelativePath,
+                tsaResponse: video.tsaResponseRelativePath,
+                tsaProvider: video.tsaProvider,
+                tsaHashAlgorithm: video.tsaHashAlgorithm,
+                encryptionAlgorithm: video.encryptionAlgorithm,
+            },
+        };
+    }
+
+    async getAppointmentRecordingEvidence(userId: string, appointmentId: string) {
+        const appointment = await this.getAppointmentOrThrow(appointmentId);
+        await this.ensureWeeklyBoardAccess(userId, appointment);
+
+        const [videos, states] = await Promise.all([
+            this.videoRepository.find({
+                where: { appointmentId: appointment.id },
+                order: { createdAt: 'DESC' },
+            }),
+            this.captureAgentRealtimeService.getRecordingStatesByAppointmentPersistent(appointment.id),
+        ]);
+
+        const uploadedStates = states
+            .filter((event) => String(event.state || '').toLowerCase() === 'uploaded')
+            .map((event) => ({ sha256Hash: event.sha256Hash }));
+
+        const videoEvidence = videos.map((video) => this.buildVideoEvidence(video, uploadedStates));
+        const validCount = videoEvidence.filter((item) => item.status === 'valid').length;
+        const latestVideo = videoEvidence[0] || null;
+        const hasEventLog = states.length > 0;
+        const hasUploadedEvent = states.some((event) => String(event.state || '').toLowerCase() === 'uploaded');
+        const status = videos.length === 0
+            ? 'empty'
+            : videoEvidence.every((item) => item.status === 'valid') && hasEventLog
+                ? 'valid'
+                : 'incomplete';
+
+        return {
+            ok: true,
+            appointmentId: appointment.id,
+            status,
+            statusLabel: status === 'valid'
+                ? 'Цілісність запису підтверджено'
+                : status === 'empty'
+                    ? 'Відеозаписів ще немає'
+                    : 'Доказовість запису неповна',
+            videoCount: videos.length,
+            validVideoCount: validCount,
+            eventCount: states.length,
+            hasEventLog,
+            hasUploadedEvent,
+            latestSha256Hash: latestVideo?.sha256Hash || null,
+            latestSha256Prefix: latestVideo?.sha256Prefix || null,
+            latestVideo,
+            videos: videoEvidence,
         };
     }
 

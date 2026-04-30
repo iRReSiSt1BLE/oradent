@@ -19,6 +19,7 @@ import { CaptureAgentTransportController } from './capture-agent-transport.contr
 import { CaptureAgent } from './entities/capture-agent.entity';
 import { CaptureDevicePair } from './entities/capture-device-pair.entity';
 import { CaptureDevice } from './entities/capture-device.entity';
+import { AppointmentRecordingEvent } from './entities/appointment-recording-event.entity';
 import { Doctor } from '../doctor/entities/doctor.entity';
 
 @Module({
@@ -33,6 +34,7 @@ import { Doctor } from '../doctor/entities/doctor.entity';
       CabinetSetupSession,
       Appointment,
       Doctor,
+      AppointmentRecordingEvent,
     ]),
     forwardRef(() => CabinetModule),
   ],

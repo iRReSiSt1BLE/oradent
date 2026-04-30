@@ -1,4 +1,4 @@
-import { Controller, Get, Headers } from '@nestjs/common';
+import { Controller, Get, Headers, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CaptureAgentService } from './capture-agent.service';
 
@@ -13,12 +13,19 @@ export class CaptureAgentTransportController {
   async getTransportSecret(@Headers('x-agent-token') agentToken?: string) {
     await this.captureAgentService.validateAgentToken(agentToken);
 
+    const transportKey = (
+      this.configService.get<string>('CAPTURE_AGENT_TRANSPORT_KEY') ||
+      this.configService.get<string>('CAPTURE_AGENT_ENROLLMENT_TOKEN') ||
+      ''
+    ).trim();
+
+    if (!transportKey) {
+      throw new InternalServerErrorException('Не задано CAPTURE_AGENT_TRANSPORT_KEY або CAPTURE_AGENT_ENROLLMENT_TOKEN');
+    }
+
     return {
       ok: true,
-      transportKey:
-        this.configService.get<string>('CAPTURE_AGENT_TRANSPORT_KEY') ||
-        this.configService.get<string>('CAPTURE_AGENT_ENROLLMENT_TOKEN') ||
-        'oradent-capture-transport',
+      transportKey,
     };
   }
 }

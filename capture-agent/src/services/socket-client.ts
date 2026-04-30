@@ -324,6 +324,16 @@ class SocketClient {
     return true;
   }
 
+  sendRecordingState(payload: Record<string, unknown>): boolean {
+    return this.send({
+      type: 'agent.recording.state',
+      payload: {
+        ...payload,
+        reportedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   private send(data: unknown): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return false;
