@@ -87,6 +87,23 @@ function buildWsBaseUrl(backendUrl: string): string {
   throw new Error('Для віддаленого сервера websocket дозволено тільки через WSS.');
 }
 
+
+function buildRecordingStateQueueKey(payload: Record<string, unknown>): string {
+  const appointmentId = String(payload.appointmentId || '').trim();
+  const cabinetDeviceId = String(payload.cabinetDeviceId || '').trim();
+
+  if (appointmentId && cabinetDeviceId) {
+    return `${appointmentId}::${cabinetDeviceId}`;
+  }
+
+  return `anonymous::${Date.now()}::${Math.random().toString(36).slice(2)}`;
+}
+
+function isTerminalRecordingState(payload: Record<string, unknown>): boolean {
+  const state = String(payload.state || '').trim().toLowerCase();
+  return state === 'uploaded' || state === 'queued' || state === 'failed' || state === 'discarded';
+}
+
 class SocketClient {
   private socket: WebSocket | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -95,6 +112,7 @@ class SocketClient {
   private manualDisconnect = false;
   private lastConfig: AgentConfig | null = null;
   private lastSnapshot: DeviceSyncSnapshot = { devices: [], devicePairs: [] };
+  private readonly pendingRecordingStates = new Map<string, Record<string, unknown>>();
   onStatus: (payload: SocketStatusPayload) => void = () => undefined;
   onCommand: (payload: SocketCommandPayload) => void = () => undefined;
 
@@ -121,6 +139,43 @@ class SocketClient {
         payload: { sentAt: new Date().toISOString() },
       });
     }, intervalMs);
+  }
+
+  private flushPendingRecordingStates(): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || this.pendingRecordingStates.size === 0) {
+      return;
+    }
+
+    for (const [key, payload] of [...this.pendingRecordingStates.entries()]) {
+      const sent = this.send({
+        type: 'agent.recording.state',
+        payload: {
+          ...payload,
+          replayed: true,
+          reportedAt: payload.reportedAt || new Date().toISOString(),
+        },
+      });
+
+      if (sent) {
+        this.pendingRecordingStates.delete(key);
+      }
+    }
+  }
+
+  private rememberPendingRecordingState(payload: Record<string, unknown>): void {
+    const key = buildRecordingStateQueueKey(payload);
+    this.pendingRecordingStates.set(key, payload);
+
+    if (this.pendingRecordingStates.size <= 100) {
+      return;
+    }
+
+    const removableKey = [...this.pendingRecordingStates.entries()]
+      .find(([, value]) => !isTerminalRecordingState(value))?.[0] || this.pendingRecordingStates.keys().next().value;
+
+    if (removableKey) {
+      this.pendingRecordingStates.delete(removableKey);
+    }
   }
 
   private scheduleReconnect(): void {
@@ -198,6 +253,7 @@ class SocketClient {
           devicePairs: snapshot.devicePairs,
         },
       });
+      this.flushPendingRecordingStates();
       this.startHeartbeat(config);
     });
 
@@ -242,6 +298,7 @@ class SocketClient {
         }
 
         if (parsed.type === 'agent.ready') {
+          this.flushPendingRecordingStates();
           this.onStatus({ type: 'connected', message: String(parsed.payload?.message || 'Агента синхронізовано') });
           return;
         }
@@ -325,13 +382,22 @@ class SocketClient {
   }
 
   sendRecordingState(payload: Record<string, unknown>): boolean {
-    return this.send({
+    const statePayload = {
+      ...payload,
+      reportedAt: payload.reportedAt || new Date().toISOString(),
+    };
+
+    const sent = this.send({
       type: 'agent.recording.state',
-      payload: {
-        ...payload,
-        reportedAt: new Date().toISOString(),
-      },
+      payload: statePayload,
     });
+
+    if (!sent) {
+      this.rememberPendingRecordingState(statePayload);
+      return false;
+    }
+
+    return true;
   }
 
   private send(data: unknown): boolean {

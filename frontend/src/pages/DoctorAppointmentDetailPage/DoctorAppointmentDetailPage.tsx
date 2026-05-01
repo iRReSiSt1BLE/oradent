@@ -3,9 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import AlertToast from '../../widgets/AlertToast/AlertToast';
 import {
     completeDoctorAppointment,
-    startAppointmentAgentPreview,
-    getAppointmentAgentPreviewFrame,
     getAppointmentAgentRecordingState,
+    getAppointmentRecordingEvidence,
     startAppointmentAgentRecording,
     stopAppointmentAgentPreview,
     stopAppointmentAgentRecording,
@@ -15,6 +14,7 @@ import {
     getManualAvailabilityMonth,
     updateAppointmentVisitFlowStatus,
     type AppointmentAgentRecordingState,
+    type AppointmentRecordingEvidenceResponse,
     type AppointmentCabinetDevice,
     type AppointmentItem,
     type ManualAvailabilityDayResponse,
@@ -33,6 +33,7 @@ import {
     type DentalTargetType,
 } from '../../shared/api/dentalChartApi';
 import { API_BASE_URL } from '../../shared/api/http';
+import { buildRtcConfiguration, getWebRtcIceServers } from '../../shared/api/captureAgentApi';
 import {
     DentalFormulaEditor,
     createInitialStates,
@@ -46,6 +47,8 @@ type MediaDeviceOption = {
     label: string;
 };
 
+type PreviewNetworkType = 'host' | 'srflx' | 'relay' | 'unknown';
+
 type RecorderSlotState = {
     id: string;
     name: string;
@@ -58,9 +61,10 @@ type RecorderSlotState = {
     hasMedia: boolean;
     previewActive: boolean;
     previewLoading: boolean;
-    previewImageDataUrl: string | null;    previewCapturedAt: string | null;
+    previewCapturedAt: string | null;
     previewError: string | null;
     previewWebRtcActive: boolean;
+    previewNetworkType: PreviewNetworkType | null;
     recordingState: string | null;
     recordingStateLabel: string;
     recordingStateAt: string | null;
@@ -98,11 +102,6 @@ const DENTAL_TEETH_ROWS = [
     [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38],
 ];
 
-const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
-    iceServers: [
-        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    ],
-};
 function buildDentalFormulaStorageKey(appointment: AppointmentItem | null) {
     const patientId = appointment?.patient?.id || appointment?.patientId || 'unknown-patient';
     return `oradent:dental-formula:${patientId}`;
@@ -261,6 +260,13 @@ function getRecordingStateTone(state?: string | null) {
     if (normalized === 'uploaded') return 'uploaded';
     if (normalized === 'failed') return 'failed';
     return 'idle';
+}
+
+function getEvidenceTone(status?: string | null) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'valid') return 'valid';
+    if (normalized === 'empty') return 'empty';
+    return 'incomplete';
 }
 
 function formatBytes(bytes?: number | null) {
@@ -514,6 +520,7 @@ export default function DoctorAppointmentDetailPage() {
     const [audioDevices, setAudioDevices] = useState<MediaDeviceOption[]>([]);
     const [slots, setSlots] = useState<RecorderSlotState[]>([]);
     const [expandedSlots, setExpandedSlots] = useState<Record<string, boolean>>({});
+    const [recordingEvidence, setRecordingEvidence] = useState<AppointmentRecordingEvidenceResponse | null>(null);
 
     const [alert, setAlert] = useState<AlertState>(null);
     const [finishing, setFinishing] = useState(false);
@@ -569,19 +576,18 @@ export default function DoctorAppointmentDetailPage() {
 
     const [savedDentalFormula, setSavedDentalFormula] = useState<DentalFormulaState | null>(null);
     const [dentalFormulaChangedTeeth, setDentalFormulaChangedTeeth] = useState<number[]>([]);
-    const previewRefs = useRef<Record<string, HTMLVideoElement | HTMLImageElement | null>>({});
     const previewVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
     const previewPeerConnectionsRef = useRef<Record<string, RTCPeerConnection | null>>({});
     const previewSocketsRef = useRef<Record<string, WebSocket | null>>({});
     const previewSessionIdsRef = useRef<Record<string, string | null>>({});
     const previewFallbackTimersRef = useRef<Record<string, number | null>>({});
     const previewRestartTimersRef = useRef<Record<string, number | null>>({});
+    const previewManualStopRef = useRef<Record<string, boolean>>({});
     const previewRestartAttemptsRef = useRef<Record<string, number>>({});
+    const previewStatsTimersRef = useRef<Record<string, number | null>>({});
     const previewStreamsRef = useRef<Record<string, MediaStream | null>>({});
     const streamsRef = useRef<Record<string, MediaStream | null>>({});
     const recordersRef = useRef<Record<string, MediaRecorder | null>>({});
-    const previewPollersRef = useRef<Record<string, number | null>>({});
-    const previewInFlightRef = useRef<Record<string, boolean>>({});
     const dentalImageUrlsRef = useRef<Record<string, string>>({});
     const failedDentalImageIdsRef = useRef<Set<string>>(new Set());
     const autoStartedRef = useRef<Set<string>>(new Set());
@@ -789,10 +795,10 @@ export default function DoctorAppointmentDetailPage() {
             hasMedia: Boolean(device.cameraDeviceId || device.microphoneDeviceId),
             previewActive: false,
             previewLoading: false,
-            previewImageDataUrl: null,
             previewCapturedAt: null,
             previewError: null,
             previewWebRtcActive: false,
+            previewNetworkType: null,
             recordingState: null,
             recordingStateLabel: 'Очікування',
             recordingStateAt: null,
@@ -829,21 +835,16 @@ export default function DoctorAppointmentDetailPage() {
 
     useEffect(() => {
         return () => {
-            Object.values(previewPollersRef.current).forEach((timerId) => {
-                if (typeof timerId === 'number') {
-                    window.clearInterval(timerId);
-                }
-            });
-            previewPollersRef.current = {};
-            previewInFlightRef.current = {};
             Object.values(previewRestartTimersRef.current).forEach((timerId) => {
                 if (typeof timerId === 'number') {
                     window.clearTimeout(timerId);
                 }
             });
             previewRestartTimersRef.current = {};
+            previewManualStopRef.current = {};
             previewRestartAttemptsRef.current = {};
-            Object.keys(previewSocketsRef.current).forEach((slotId) => cleanupWebRtcPreview(slotId));
+
+            Object.keys(previewSocketsRef.current).forEach((slotId) => cleanupWebRtcPreview(slotId, { manual: true }));
 
             if (appointment?.id && token) {
                 slots.forEach((slot) => {
@@ -859,6 +860,34 @@ export default function DoctorAppointmentDetailPage() {
             });
         };
     }, []);
+
+
+
+    useEffect(() => {
+        if (!appointment?.id || !token) return;
+
+        let cancelled = false;
+        let timerId: number | null = null;
+
+        const loadRecordingEvidence = async () => {
+            try {
+                const response = await getAppointmentRecordingEvidence(token, appointment.id);
+                if (!cancelled) setRecordingEvidence(response);
+            } catch {
+                if (!cancelled) setRecordingEvidence(null);
+            }
+        };
+
+        void loadRecordingEvidence();
+        timerId = window.setInterval(() => {
+            void loadRecordingEvidence();
+        }, 10000);
+
+        return () => {
+            cancelled = true;
+            if (typeof timerId === 'number') window.clearInterval(timerId);
+        };
+    }, [appointment?.id, token]);
 
 
 
@@ -1218,58 +1247,113 @@ export default function DoctorAppointmentDetailPage() {
         }
     }
 
-    function clearPreviewPoller(slotId: string) {
-        const timerId = previewPollersRef.current[slotId];
-        if (typeof timerId === 'number') {
-            window.clearInterval(timerId);
-        }
-        delete previewPollersRef.current[slotId];
-        delete previewInFlightRef.current[slotId];
-    }
-
-    function clearPreviewRestart(slotId: string) {
+    function clearPreviewRestartTimer(slotId: string) {
         const timerId = previewRestartTimersRef.current[slotId];
         if (typeof timerId === 'number') {
             window.clearTimeout(timerId);
         }
         delete previewRestartTimersRef.current[slotId];
-        delete previewRestartAttemptsRef.current[slotId];
     }
 
-    function shouldAutoRecoverPreview(slotId: string) {
+    function clearPreviewStatsMonitor(slotId: string) {
+        const timerId = previewStatsTimersRef.current[slotId];
+        if (typeof timerId === 'number') {
+            window.clearInterval(timerId);
+        }
+        delete previewStatsTimersRef.current[slotId];
+    }
+
+    function normalizePreviewNetworkType(value: unknown): PreviewNetworkType | null {
+        if (value === 'host' || value === 'srflx' || value === 'relay') return value;
+        return null;
+    }
+
+    function getPreviewNetworkLabel(value: PreviewNetworkType | null) {
+        if (value === 'relay') return 'TURN relay';
+        if (value === 'srflx') return 'STUN/NAT';
+        if (value === 'host') return 'Direct';
+        return 'WebRTC preview';
+    }
+
+    async function detectPreviewNetworkType(pc: RTCPeerConnection): Promise<PreviewNetworkType | null> {
+        const stats = await pc.getStats();
+        let selectedPair: RTCStats | null = null;
+
+        stats.forEach((report) => {
+            const item = report as RTCStats & { selectedCandidatePairId?: string; selected?: boolean };
+            if (!selectedPair && item.type === 'transport' && item.selectedCandidatePairId) {
+                selectedPair = stats.get(item.selectedCandidatePairId) || null;
+            }
+            if (!selectedPair && item.type === 'candidate-pair' && item.selected) {
+                selectedPair = item;
+            }
+        });
+
+        const pair = selectedPair as (RTCStats & { localCandidateId?: string; remoteCandidateId?: string }) | null;
+        const localCandidate = pair?.localCandidateId ? stats.get(pair.localCandidateId) : null;
+        const remoteCandidate = pair?.remoteCandidateId ? stats.get(pair.remoteCandidateId) : null;
+        const localType = normalizePreviewNetworkType((localCandidate as RTCStats & { candidateType?: unknown } | null)?.candidateType);
+        const remoteType = normalizePreviewNetworkType((remoteCandidate as RTCStats & { candidateType?: unknown } | null)?.candidateType);
+
+        return localType || remoteType;
+    }
+
+    function startPreviewStatsMonitor(slotId: string, pc: RTCPeerConnection) {
+        clearPreviewStatsMonitor(slotId);
+
+        const updateNetworkType = async () => {
+            if (previewPeerConnectionsRef.current[slotId] !== pc) return;
+            try {
+                const networkType = await detectPreviewNetworkType(pc);
+                if (networkType) {
+                    updateSlot(slotId, { previewNetworkType: networkType });
+                }
+            } catch {
+                // Stats can be temporarily unavailable while ICE is still connecting.
+            }
+        };
+
+        void updateNetworkType();
+        previewStatsTimersRef.current[slotId] = window.setInterval(() => {
+            void updateNetworkType();
+        }, 2000);
+    }
+
+    function shouldKeepPreviewAlive(slotId: string) {
         const slot = slotsRef.current.find((item) => item.id === slotId);
-        if (!slot?.videoDeviceId) return false;
-        return Boolean(slot.showPreview || slot.previewActive || slot.recording || slot.uploading || expandedSlotsRef.current[slotId]);
+        return Boolean(slot?.videoDeviceId && slot.showPreview && expandedSlotsRef.current[slotId]);
     }
 
     function schedulePreviewRestart(slotId: string, reason?: string) {
-        if (!appointment?.id || !token) return;
-        if (!shouldAutoRecoverPreview(slotId)) return;
+        if (previewManualStopRef.current[slotId]) return;
+        if (!shouldKeepPreviewAlive(slotId)) return;
         if (typeof previewRestartTimersRef.current[slotId] === 'number') return;
 
-        const attempt = (previewRestartAttemptsRef.current[slotId] || 0) + 1;
-        previewRestartAttemptsRef.current[slotId] = attempt;
-        const delayMs = Math.min(6000, 900 + attempt * 600);
-        const message = reason && /failed to fetch/i.test(reason)
-            ? 'Backend тимчасово недоступний. Відновлюємо preview…'
-            : 'Відновлюємо preview після reconnect…';
+        const attempts = Math.min(6, Number(previewRestartAttemptsRef.current[slotId] || 0) + 1);
+        previewRestartAttemptsRef.current[slotId] = attempts;
+        const delayMs = Math.min(6000, 700 + attempts * 500);
 
         updateSlot(slotId, {
-            showPreview: true,
-            previewActive: true,
             previewLoading: true,
-            previewError: message,
+            previewError: reason ? `Відновлення preview: ${reason}` : 'Відновлення preview…',
             previewWebRtcActive: false,
+            previewNetworkType: null,
         });
 
         previewRestartTimersRef.current[slotId] = window.setTimeout(() => {
             delete previewRestartTimersRef.current[slotId];
-            if (!shouldAutoRecoverPreview(slotId)) return;
-            void startSlotPreview(slotId, { recover: true });
+            if (!shouldKeepPreviewAlive(slotId)) return;
+            void startSlotPreview(slotId, { restart: true });
         }, delayMs);
     }
 
-    function cleanupWebRtcPreview(slotId: string) {
+    function cleanupWebRtcPreview(slotId: string, options?: { manual?: boolean }) {
+        if (options?.manual) {
+            previewManualStopRef.current[slotId] = true;
+        }
+        clearPreviewRestartTimer(slotId);
+        clearPreviewStatsMonitor(slotId);
+
         const fallbackTimer = previewFallbackTimersRef.current[slotId];
         if (typeof fallbackTimer === 'number') {
             window.clearTimeout(fallbackTimer);
@@ -1328,6 +1412,8 @@ export default function DoctorAppointmentDetailPage() {
     async function startSlotWebRtcPreview(slotId: string): Promise<boolean> {
         if (!appointment?.id || !token || typeof RTCPeerConnection === 'undefined') return false;
 
+        const iceConfig = await getWebRtcIceServers(token).catch(() => null);
+
         return new Promise<boolean>((resolve) => {
             let settled = false;
             const candidateQueue: RTCIceCandidateInit[] = [];
@@ -1344,7 +1430,7 @@ export default function DoctorAppointmentDetailPage() {
             try {
                 cleanupWebRtcPreview(slotId);
                 const socket = new WebSocket(buildPreviewWsUrl(token));
-                const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+                const pc = new RTCPeerConnection(buildRtcConfiguration(iceConfig));
 
                 previewSocketsRef.current[slotId] = socket;
                 previewPeerConnectionsRef.current[slotId] = pc;
@@ -1363,10 +1449,10 @@ export default function DoctorAppointmentDetailPage() {
                     updateSlot(slotId, {
                         previewLoading: false,
                         previewError: null,
-                        previewImageDataUrl: null,
-                previewCapturedAt: new Date().toISOString(),
+                                    previewCapturedAt: new Date().toISOString(),
                         previewWebRtcActive: true,
                     });
+                    startPreviewStatsMonitor(slotId, pc);
                     finish(true);
                 };
 
@@ -1382,16 +1468,33 @@ export default function DoctorAppointmentDetailPage() {
                 };
 
                 pc.onconnectionstatechange = () => {
-                    if (pc.connectionState === 'connected') {
+                    const state = pc.connectionState;
+                    if (state === 'connected') {
                         previewRestartAttemptsRef.current[slotId] = 0;
-                        updateSlot(slotId, { previewError: null, previewLoading: false });
+                        startPreviewStatsMonitor(slotId, pc);
                         return;
                     }
-                    if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-                        if (settled) {
-                            schedulePreviewRestart(slotId, `WebRTC ${pc.connectionState}`);
-                        } else {
-                            finish(false);
+                    if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+                        const wasSettled = settled;
+                        finish(false);
+                        if (wasSettled) {
+                            schedulePreviewRestart(slotId, 'WebRTC зʼєднання втрачено');
+                        }
+                    }
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    if (state === 'connected' || state === 'completed') {
+                        previewRestartAttemptsRef.current[slotId] = 0;
+                        startPreviewStatsMonitor(slotId, pc);
+                        return;
+                    }
+                    if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+                        const wasSettled = settled;
+                        finish(false);
+                        if (wasSettled) {
+                            schedulePreviewRestart(slotId, 'ICE зʼєднання втрачено');
                         }
                     }
                 };
@@ -1463,19 +1566,13 @@ export default function DoctorAppointmentDetailPage() {
                     })();
                 };
 
-                socket.onerror = () => {
-                    if (settled) {
-                        schedulePreviewRestart(slotId, 'Preview signaling socket error');
-                    } else {
-                        finish(false);
-                    }
-                };
+                socket.onerror = () => finish(false);
                 socket.onclose = () => {
-                    if (!settled) {
-                        finish(false);
-                        return;
+                    const wasSettled = settled;
+                    if (!settled) finish(false);
+                    if (wasSettled && !previewManualStopRef.current[slotId]) {
+                        schedulePreviewRestart(slotId, 'сигнальний канал перезапущено');
                     }
-                    schedulePreviewRestart(slotId, 'Preview signaling socket closed');
                 };
 
                 previewFallbackTimersRef.current[slotId] = window.setTimeout(() => finish(false), 7000);
@@ -1485,104 +1582,50 @@ export default function DoctorAppointmentDetailPage() {
         });
     }
 
-    async function startSlotFramePreview(slotId: string) {
+    async function startSlotPreview(slotId: string, options?: { restart?: boolean }) {
         if (!appointment?.id || !token) return;
 
-        try {
-            await startAppointmentAgentPreview(token, appointment.id, {
-                cabinetDeviceId: slotId,
-                fps: 12,
-                width: 960,
-                quality: 0.82,
-            });
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Не вдалося запустити live-preview.';
-            updateSlot(slotId, {
-                showPreview: true,
-                previewActive: true,
-                previewLoading: true,
-                previewError: /failed to fetch/i.test(message)
-                    ? 'Backend тимчасово недоступний. Відновлюємо preview…'
-                    : message,
-                previewWebRtcActive: false,
-            });
-            schedulePreviewRestart(slotId, message);
-            return;
+        previewManualStopRef.current[slotId] = false;
+        clearPreviewRestartTimer(slotId);
+        if (!options?.restart) {
+            previewRestartAttemptsRef.current[slotId] = 0;
         }
-
-        const poll = async () => {
-            if (previewInFlightRef.current[slotId]) {
-                return;
-            }
-
-            previewInFlightRef.current[slotId] = true;
-            try {
-                const frame = await getAppointmentAgentPreviewFrame(token, appointment.id, slotId);
-                if (frame.preview?.imageDataUrl) {
-                    previewRestartAttemptsRef.current[slotId] = 0;
-                    updateSlot(slotId, {
-                        previewLoading: false,
-                        previewError: null,
-                        previewWebRtcActive: false,
-                        previewImageDataUrl: frame.preview.imageDataUrl,
-                        previewCapturedAt: frame.preview.capturedAt,
-                    });
-                }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : 'Не вдалося отримати кадр preview.';
-                updateSlot(slotId, {
-                    previewLoading: true,
-                    previewError: /failed to fetch/i.test(message)
-                        ? 'Backend тимчасово недоступний. Відновлюємо preview…'
-                        : message,
-                });
-                schedulePreviewRestart(slotId, message);
-            } finally {
-                previewInFlightRef.current[slotId] = false;
-            }
-        };
-
-        await poll();
-        previewPollersRef.current[slotId] = window.setInterval(() => {
-            void poll();
-        }, 250);
-    }
-
-    async function startSlotPreview(slotId: string, options?: { recover?: boolean }) {
-        if (!appointment?.id || !token) return;
 
         const slot = slots.find((item) => item.id === slotId);
         if (!slot?.videoDeviceId) {
-            updateSlot(slotId, { previewActive: false, previewLoading: false, previewError: 'Для цього джерела не налаштовано камеру.' });
+            updateSlot(slotId, { previewActive: false, previewLoading: false, previewError: 'Для цього джерела не налаштовано камеру.', previewNetworkType: null });
             return;
         }
 
-        if (!options?.recover) {
-            clearPreviewRestart(slotId);
-        }
-        clearPreviewPoller(slotId);
         cleanupWebRtcPreview(slotId);
         updateSlot(slotId, {
             showPreview: true,
             previewActive: true,
             previewLoading: true,
             previewError: null,
-            previewImageDataUrl: null,
-                previewCapturedAt: null,
+            previewCapturedAt: null,
             previewWebRtcActive: false,
+            previewNetworkType: null,
         });
 
         const webRtcStarted = await startSlotWebRtcPreview(slotId);
         if (webRtcStarted) return;
 
         cleanupWebRtcPreview(slotId);
-        await startSlotFramePreview(slotId);
+        updateSlot(slotId, {
+            previewLoading: true,
+            previewError: 'WebRTC preview недоступний. Повторне підключення…',
+            previewWebRtcActive: false,
+            previewNetworkType: null,
+            previewCapturedAt: null,
+        });
+        schedulePreviewRestart(slotId, 'WebRTC preview недоступний');
     }
 
     async function stopSlotPreview(slotId: string, options?: { clearFrame?: boolean }) {
-        clearPreviewRestart(slotId);
-        clearPreviewPoller(slotId);
-        cleanupWebRtcPreview(slotId);
+        previewManualStopRef.current[slotId] = true;
+        clearPreviewRestartTimer(slotId);
+        cleanupWebRtcPreview(slotId, { manual: true });
 
         if (appointment?.id && token) {
             await stopAppointmentAgentPreview(token, appointment.id, { cabinetDeviceId: slotId }).catch(() => null);
@@ -1594,7 +1637,8 @@ export default function DoctorAppointmentDetailPage() {
             previewError: null,
             showPreview: false,
             previewWebRtcActive: false,
-            ...(options?.clearFrame === false ? {} : { previewImageDataUrl: null, previewCapturedAt: null }),
+            previewNetworkType: null,
+            ...(options?.clearFrame === false ? {} : { previewCapturedAt: null }),
         });
     }
 
@@ -1640,7 +1684,6 @@ export default function DoctorAppointmentDetailPage() {
                 showPreview: true,
                 previewLoading: Boolean(slot.videoDeviceId),
                 previewError: null,
-                previewImageDataUrl: null,
                 previewCapturedAt: null,
                 recordingState: 'start_requested',
                 recordingStateLabel: getRecordingStateLabel('start_requested'),
@@ -1680,7 +1723,6 @@ export default function DoctorAppointmentDetailPage() {
                 showPreview: false,
                 previewActive: false,
                 previewLoading: false,
-                previewImageDataUrl: null,
                 previewCapturedAt: null,
             });
         } catch (err) {
@@ -1980,6 +2022,24 @@ export default function DoctorAppointmentDetailPage() {
                                     </div>
                                 </div>
 
+                                {recordingEvidence ? (
+                                    <div className={`doctor-appointment-detail__evidence-card doctor-appointment-detail__evidence-card--${getEvidenceTone(recordingEvidence.status)}`}>
+                                        <div>
+                                            <strong>{recordingEvidence.statusLabel}</strong>
+                                            <span>
+                                                {recordingEvidence.videoCount > 0
+                                                    ? `${recordingEvidence.validVideoCount}/${recordingEvidence.videoCount} відео з повними доказовими артефактами`
+                                                    : 'Відео ще не завантажено'}
+                                            </span>
+                                        </div>
+                                        <div className="doctor-appointment-detail__evidence-card-meta">
+                                            {recordingEvidence.latestSha256Prefix ? <span>SHA-256: {recordingEvidence.latestSha256Prefix}</span> : null}
+                                            {recordingEvidence.eventCount ? <span>{recordingEvidence.eventCount} подій журналу</span> : null}
+                                            {recordingEvidence.hasUploadedEvent ? <span>Upload підтверджено</span> : null}
+                                        </div>
+                                    </div>
+                                ) : null}
+
                                 <div className="doctor-appointment-detail__video-list">
                                     {slots.length === 0 ? (
                                         <div className="doctor-appointment-detail__state">Немає джерел запису для цього кабінету.</div>
@@ -2038,24 +2098,14 @@ export default function DoctorAppointmentDetailPage() {
                                                                 playsInline
                                                                 style={{ display: slot.previewWebRtcActive ? undefined : 'none' }}
                                                             />
-                                                            {!slot.previewWebRtcActive && slot.previewImageDataUrl ? (
-                                                                <img
-                                                                    ref={(element) => {
-                                                                        previewRefs.current[slot.id] = element;
-                                                                    }}
-                                                                    className="doctor-appointment-detail__preview"
-                                                                    src={slot.previewImageDataUrl}
-                                                                    alt={`Live preview ${slot.name}`}
-                                                                />
-                                                            ) : null}
-                                                            {!slot.previewWebRtcActive && !slot.previewImageDataUrl ? (
+                                                            {!slot.previewWebRtcActive ? (
                                                                 <div className="doctor-appointment-detail__preview-placeholder">
-                                                                    {slot.previewLoading ? 'Завантаження прев’ю…' : slot.previewError || 'Натисніть стрілку, щоб показати прев’ю.'}
+                                                                    {slot.previewLoading ? 'Підключення WebRTC preview…' : slot.previewError || 'Натисніть стрілку, щоб показати прев’ю.'}
                                                                 </div>
                                                             ) : null}
                                                             {slot.previewCapturedAt ? (
                                                                 <span className="doctor-appointment-detail__preview-time">
-                                                                    {slot.previewWebRtcActive ? 'WebRTC preview' : `Кадр: ${formatDateTime(slot.previewCapturedAt)}`}
+                                                                    {getPreviewNetworkLabel(slot.previewNetworkType)}
                                                                 </span>
                                                             ) : null}
                                                         </div>

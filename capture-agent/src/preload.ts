@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('agentApi', {
     ipcRenderer.invoke('agent:discard-recording-upload', payload) as Promise<{ ok: boolean }>,
   flushRecordingQueue: () =>
     ipcRenderer.invoke('agent:flush-recording-queue') as Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>,
+  recoverInterruptedRecordings: () =>
+    ipcRenderer.invoke('agent:recover-interrupted-recordings') as Promise<{ ok: boolean; recoveredCount: number; uploadedCount: number; queuedCount: number; failedCount: number }>,
   onSocketStatus: (callback: (payload: SocketStatusPayload) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: SocketStatusPayload) => callback(payload);
     ipcRenderer.on('agent:socket-status', handler);

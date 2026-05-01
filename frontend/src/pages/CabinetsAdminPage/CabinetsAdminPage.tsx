@@ -22,6 +22,7 @@ import {
 import { getToken, getUserRole } from '../../shared/utils/authStorage';
 import { useI18n } from '../../shared/i18n/I18nProvider';
 import { API_BASE_URL } from '../../shared/api/http';
+import { buildRtcConfiguration, getWebRtcIceServers } from '../../shared/api/captureAgentApi';
 import './CabinetsAdminPage.scss';
 
 type AlertState = {
@@ -102,14 +103,6 @@ type PreviewSignalPayload = {
     description?: RTCSessionDescriptionInit;
     candidate?: RTCIceCandidateInit;
     error?: string;
-};
-
-const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
-    iceServers: [
-        {
-            urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'],
-        },
-    ],
 };
 
 async function parseBinaryPreviewFramePacket(data: Blob | ArrayBuffer) {
@@ -1259,7 +1252,8 @@ const matchingDoctors = useMemo(() => {
         closePreviewPeerConnection();
         previewWebRtcPairKeyRef.current = pairKey;
 
-        const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+        const iceConfig = token ? await getWebRtcIceServers(token).catch(() => null) : null;
+        const pc = new RTCPeerConnection(buildRtcConfiguration(iceConfig));
         previewPeerConnectionRef.current = pc;
 
         pc.ontrack = (event) => {
@@ -1324,8 +1318,9 @@ const matchingDoctors = useMemo(() => {
         closePreviewPeerConnection();
         previewWebRtcPairKeyRef.current = pairKey;
 
+        const iceConfig = await getWebRtcIceServers(token).catch(() => null);
         const socket = new WebSocket(buildDirectPreviewWebSocketUrl(token));
-        const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+        const pc = new RTCPeerConnection(buildRtcConfiguration(iceConfig));
         const candidateQueue: RTCIceCandidateInit[] = [];
         directPreviewSocketRef.current = socket;
         previewPeerConnectionRef.current = pc;

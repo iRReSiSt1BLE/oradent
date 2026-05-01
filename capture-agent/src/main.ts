@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
 import { getConfig, saveConfig } from './services/config-store';
 import { enrollAgent, pingBackend } from './services/http-client';
 import socketClient, { DeviceSyncSnapshot, SocketStatusPayload } from './services/socket-client';
-import { appendRecordingChunk, beginRecordingUpload, discardRecordingUpload, enqueueRecordingUpload, finalizeRecordingUpload, flushRecordingQueue } from './services/recording-upload';
+import { appendRecordingChunk, beginRecordingUpload, discardRecordingUpload, enqueueRecordingUpload, finalizeRecordingUpload, flushRecordingQueue, recoverInterruptedRecordingUploads } from './services/recording-upload';
 import { AgentConfig } from './state/default-config';
 
 let mainWindow: BrowserWindow | null = null;
@@ -139,6 +139,9 @@ void app.whenReady().then(() => {
   });
   ipcMain.handle('agent:flush-recording-queue', async () => {
     return flushRecordingQueue();
+  });
+  ipcMain.handle('agent:recover-interrupted-recordings', async () => {
+    return recoverInterruptedRecordingUploads();
   });
 
   createWindow();

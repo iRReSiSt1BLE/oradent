@@ -164,13 +164,23 @@ export class CaptureAgentRealtimeService {
   }
 
   send(agentId: string, payload: Record<string, unknown>) {
-    const client = this.agentSockets.get(agentId);
+    const normalizedAgentId = String(agentId || '').trim();
+    const client = this.agentSockets.get(normalizedAgentId);
     if (!client || client.readyState !== WebSocket.OPEN) {
+      if (client && client.readyState !== WebSocket.CONNECTING) {
+        this.agentSockets.delete(normalizedAgentId);
+      }
       return false;
     }
 
-    client.send(JSON.stringify(payload));
-    return true;
+    try {
+      client.send(JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      this.logger.warn(`Failed to send realtime payload to agent ${normalizedAgentId}: ${(error as Error)?.message || error}`);
+      this.agentSockets.delete(normalizedAgentId);
+      return false;
+    }
   }
 
   getAgentIdByKey(agentKey: string | null | undefined) {

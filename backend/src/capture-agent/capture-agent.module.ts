@@ -12,6 +12,7 @@ import { CaptureAgentPreviewGateway } from './capture-agent-preview.gateway';
 import { CaptureAgentPreviewSignalingService } from './capture-agent-preview-signaling.service';
 import { CaptureAgentRealtimeService } from './capture-agent-realtime.service';
 import { CaptureAgentService } from './capture-agent.service';
+import { CaptureAgentIceService } from './capture-agent-ice.service';
 import { AppointmentPreviewController } from './appointment-preview.controller';
 import { AppointmentPreviewFrameStore } from './appointment-preview-frame.store';
 import { AppointmentPreviewService } from './appointment-preview.service';
@@ -45,6 +46,7 @@ import { Doctor } from '../doctor/entities/doctor.entity';
   ],
   providers: [
     CaptureAgentService,
+    CaptureAgentIceService,
     CaptureAgentGateway,
     CaptureAgentPreviewGateway,
     CaptureAgentPreviewSignalingService,
@@ -54,6 +56,7 @@ import { Doctor } from '../doctor/entities/doctor.entity';
   ],
   exports: [
     CaptureAgentService,
+    CaptureAgentIceService,
     CaptureAgentRealtimeService,
     CaptureAgentPreviewSignalingService,
     AppointmentPreviewFrameStore,

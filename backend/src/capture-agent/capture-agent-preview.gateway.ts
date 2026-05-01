@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 import { AppointmentPreviewService } from './appointment-preview.service';
 import { CaptureAgentPreviewSignalingService } from './capture-agent-preview-signaling.service';
 import { CaptureAgentRealtimeService } from './capture-agent-realtime.service';
+import { CaptureAgentIceService } from './capture-agent-ice.service';
 
 type JwtPreviewUser = {
   id: string;
@@ -27,6 +28,7 @@ export class CaptureAgentPreviewGateway implements OnGatewayConnection, OnGatewa
     private readonly appointmentPreviewService: AppointmentPreviewService,
     private readonly captureAgentRealtimeService: CaptureAgentRealtimeService,
     private readonly previewSignalingService: CaptureAgentPreviewSignalingService,
+    private readonly captureAgentIceService: CaptureAgentIceService,
   ) {}
 
   private send(client: WebSocket, payload: Record<string, unknown>): void {
@@ -99,6 +101,8 @@ export class CaptureAgentPreviewGateway implements OnGatewayConnection, OnGatewa
     const session = this.previewSignalingService.createSession(client, target.agentId, target.pairKey);
     this.rememberSession(client, session.id, target.agentId, target.pairKey);
 
+    const iceConfig = this.captureAgentIceService.getIceServers();
+
     const sent = this.captureAgentRealtimeService.send(target.agentId, {
       type: 'agent.preview.signal',
       payload: {
@@ -108,6 +112,9 @@ export class CaptureAgentPreviewGateway implements OnGatewayConnection, OnGatewa
         appointmentId: appointmentId || undefined,
         cabinetDeviceId: cabinetDeviceId || undefined,
         cabinetId: cabinetId || undefined,
+        iceServers: iceConfig.iceServers,
+        iceTransportPolicy: iceConfig.iceTransportPolicy,
+        iceCredentialExpiresAt: iceConfig.expiresAt,
       },
     });
 
@@ -121,6 +128,9 @@ export class CaptureAgentPreviewGateway implements OnGatewayConnection, OnGatewa
       payload: {
         previewSessionId: session.id,
         pairKey: target.pairKey,
+        iceServers: iceConfig.iceServers,
+        iceTransportPolicy: iceConfig.iceTransportPolicy,
+        iceCredentialExpiresAt: iceConfig.expiresAt,
       },
     });
   }

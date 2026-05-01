@@ -826,34 +826,6 @@ export async function getConsultationPdfWithPassword(
     return response.blob();
 }
 
-export type AppointmentAgentPreviewFrame = {
-    ok: boolean;
-    preview: {
-        pairKey: string;
-        imageDataUrl: string;
-        mimeType: string;
-        capturedAt: string;
-    } | null;
-};
-
-export async function startAppointmentAgentPreview(
-    token: string,
-    appointmentId: string,
-    payload: { cabinetDeviceId: string; fps?: number; width?: number; quality?: number },
-) {
-    return http<{ ok: boolean; pairKey: string; message?: string }>(`/capture-agent/appointment-preview/start`, {
-        method: 'POST',
-        token,
-        body: JSON.stringify({
-            appointmentId,
-            cabinetDeviceId: payload.cabinetDeviceId,
-            fps: payload.fps,
-            width: payload.width,
-            quality: payload.quality,
-        }),
-    });
-}
-
 export async function stopAppointmentAgentPreview(
     token: string,
     appointmentId: string,
@@ -869,10 +841,3 @@ export async function stopAppointmentAgentPreview(
     });
 }
 
-export async function getAppointmentAgentPreviewFrame(token: string, appointmentId: string, cabinetDeviceId: string) {
-    const query = new URLSearchParams({ appointmentId, cabinetDeviceId }).toString();
-    return http<AppointmentAgentPreviewFrame>(`/capture-agent/appointment-preview/frame?${query}`, {
-        method: 'GET',
-        token,
-    });
-}

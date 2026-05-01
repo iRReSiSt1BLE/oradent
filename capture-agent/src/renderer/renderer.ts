@@ -23,6 +23,7 @@ declare global {
       sendRecordingState(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       discardRecordingUpload(payload: Record<string, unknown>): Promise<{ ok: boolean }>;
       flushRecordingQueue(): Promise<{ ok: boolean; uploadedCount: number; pendingCount: number }>;
+      recoverInterruptedRecordings(): Promise<{ ok: boolean; recoveredCount: number; uploadedCount: number; queuedCount: number; failedCount: number }>;
       onSocketStatus(callback: (payload: SocketStatusPayload) => void): () => void;
       onSocketCommand(callback: (payload: SocketCommandPayload) => void): () => void;
     };
@@ -82,6 +83,9 @@ type PreviewSignalPayload = {
   pairKey?: string;
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  iceServers?: RTCIceServer[];
+  iceTransportPolicy?: RTCIceTransportPolicy;
+  iceCredentialExpiresAt?: string;
 };
 
 type WebRtcPreviewState = {
@@ -112,13 +116,24 @@ type AgentRecordingSession = {
   originalFileName: string;
 };
 
-const PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
+const FALLBACK_PREVIEW_RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [
     {
       urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'],
     },
   ],
 };
+
+function buildPreviewRtcConfiguration(payload: PreviewSignalPayload): RTCConfiguration {
+  const iceServers = Array.isArray(payload.iceServers) && payload.iceServers.length
+    ? payload.iceServers
+    : FALLBACK_PREVIEW_RTC_CONFIGURATION.iceServers;
+
+  return {
+    iceServers,
+    iceTransportPolicy: payload.iceTransportPolicy || 'all',
+  };
+}
 
 const RECORDING_TIMESLICE_MS = 1000;
 const MAX_RECORDING_BYTES = 350 * 1024 * 1024;
@@ -197,6 +212,8 @@ let permissionState = {
 let continuousPreviewState: ContinuousPreviewState | null = null;
 let webRtcPreviewState: WebRtcPreviewState | null = null;
 const activeRecordingSessions = new Map<string, AgentRecordingSession>();
+let recordingQueueFlushInFlight = false;
+let lastRecordingQueueFlushAt = 0;
 let awaitingSnapshotHotkey = false;
 let awaitingSnapshotHotkeyPairKey: string | null = null;
 let snapshotInFlight = false;
@@ -662,6 +679,67 @@ function pickRecordingMimeType(): string {
 
 function notifyRecordingState(payload: Record<string, unknown>): void {
   void window.agentApi.sendRecordingState(payload).catch(() => undefined);
+}
+
+function replayActiveRecordingStates(reason = 'socket_connected'): void {
+  activeRecordingSessions.forEach((session) => {
+    notifyRecordingState({
+      state: 'recording',
+      appointmentId: session.appointmentId,
+      cabinetDeviceId: session.cabinetDeviceId,
+      pairKey: session.pair.pairKey,
+      entryId: session.uploadEntryId,
+      totalBytes: session.totalBytes,
+      startedAt: session.startedAt,
+      mimeType: session.mimeType,
+      originalFileName: session.originalFileName,
+      replayReason: reason,
+    });
+  });
+}
+
+async function flushQueuedRecordingUploads(reason = 'socket_connected'): Promise<void> {
+  const now = Date.now();
+  if (recordingQueueFlushInFlight || now - lastRecordingQueueFlushAt < 15000) {
+    return;
+  }
+
+  recordingQueueFlushInFlight = true;
+  lastRecordingQueueFlushAt = now;
+
+  try {
+    const result = await window.agentApi.flushRecordingQueue();
+    if (result.uploadedCount > 0) {
+      setStatusLine(`Чергу записів синхронізовано: завантажено ${result.uploadedCount}, очікує ${result.pendingCount}.`);
+      toast(`Чергу записів синхронізовано: ${result.uploadedCount} завантажено.`, 'success');
+    } else if (result.pendingCount > 0) {
+      setStatusLine(`У локальній черзі ще ${result.pendingCount} запис(ів). Спроба синхронізації: ${reason}.`);
+    }
+  } catch {
+    // Queue flushing is retryable and must not block live recording.
+  } finally {
+    recordingQueueFlushInFlight = false;
+  }
+}
+
+async function recoverInterruptedRecordingsOnStartup(): Promise<void> {
+  if (activeRecordingSessions.size > 0) {
+    return;
+  }
+
+  try {
+    const result = await window.agentApi.recoverInterruptedRecordings();
+    if (result.recoveredCount > 0) {
+      setStatusLine(
+        `Відновлено незавершені локальні записи: ${result.recoveredCount}, завантажено ${result.uploadedCount}, у черзі ${result.queuedCount}.`,
+      );
+      toast('Незавершені локальні записи відновлено.', 'success');
+    } else if (result.failedCount > 0) {
+      setStatusLine(`Перевірка локальних записів завершена: проблемних файлів ${result.failedCount}.`);
+    }
+  } catch {
+    // Recovery is best-effort. Raw files stay on disk and will be retried later.
+  }
 }
 
 function resolveRecordingPair(payload: Record<string, unknown>): PairView | null {
@@ -1412,7 +1490,7 @@ async function handlePreviewSignal(payload: PreviewSignalPayload): Promise<void>
     });
     const ownsStream = !recordingSession?.stream;
 
-    const pc = new RTCPeerConnection(PREVIEW_RTC_CONFIGURATION);
+    const pc = new RTCPeerConnection(buildPreviewRtcConfiguration(payload));
     const state: WebRtcPreviewState = {
       sessionKey,
       setupSessionId,
@@ -2030,6 +2108,8 @@ async function initialize(): Promise<void> {
   renderTopStatus();
 
   await refreshDeviceInventory().catch(() => undefined);
+  await recoverInterruptedRecordingsOnStartup();
+  await flushQueuedRecordingUploads('startup');
 
   navigator.mediaDevices?.addEventListener?.('devicechange', () => {
     void refreshDeviceInventory()
@@ -2314,6 +2394,8 @@ window.agentApi.onSocketStatus((payload) => {
   if (payload.type === 'connected') {
     updateSocketBadge('Підключено', 'connected');
     setStatusLine(payload.message || 'Агент підключено.');
+    replayActiveRecordingStates('socket_connected');
+    void flushQueuedRecordingUploads('socket_connected');
     toast(payload.message || 'Агент підключено.', 'success');
     return;
   }

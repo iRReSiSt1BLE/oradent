@@ -16,6 +16,7 @@ import { Repository } from 'typeorm';
 import WebSocket from 'ws';
 import { CabinetSetupRealtimeService } from './cabinet-setup-realtime.service';
 import { CaptureAgentRealtimeService } from '../capture-agent/capture-agent-realtime.service';
+import { CaptureAgentIceService } from '../capture-agent/capture-agent-ice.service';
 import { CabinetSetupSession } from './entities/cabinet-setup-session.entity';
 
 @WebSocketGateway({
@@ -34,6 +35,7 @@ export class CabinetSetupGateway
     private readonly captureAgentRealtimeService: CaptureAgentRealtimeService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly captureAgentIceService: CaptureAgentIceService,
   ) {}
 
   private send(client: WebSocket, payload: Record<string, unknown>) {
@@ -141,12 +143,17 @@ export class CabinetSetupGateway
           return;
         }
 
+        const iceConfig = this.captureAgentIceService.getIceServers();
+
         const forwarded = this.captureAgentRealtimeService.send(agentId, {
           type: 'agent.preview.signal',
           payload: {
             ...parsed.payload,
             setupSessionId,
             pairKey,
+            iceServers: iceConfig.iceServers,
+            iceTransportPolicy: iceConfig.iceTransportPolicy,
+            iceCredentialExpiresAt: iceConfig.expiresAt,
           },
         });
 

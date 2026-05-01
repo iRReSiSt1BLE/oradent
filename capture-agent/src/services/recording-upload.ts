@@ -69,6 +69,14 @@ type RawRecordingMeta = {
   totalBytes: number;
 };
 
+export type RecoverInterruptedRecordingUploadsResult = {
+  ok: boolean;
+  recoveredCount: number;
+  uploadedCount: number;
+  queuedCount: number;
+  failedCount: number;
+};
+
 const LEGACY_DEFAULT_TRANSPORT_SECRET = 'oradent-capture-transport';
 const LOCAL_ENV_TRANSPORT_SECRET = process.env.CAPTURE_AGENT_TRANSPORT_KEY || process.env.ORADENT_CAPTURE_TRANSPORT_KEY || '';
 const MAX_RAW_RECORDING_BYTES = 2 * 1024 * 1024 * 1024;
@@ -416,6 +424,61 @@ export async function discardRecordingUpload(entryId: string): Promise<{ ok: boo
   }
 
   return { ok: true };
+}
+
+export async function recoverInterruptedRecordingUploads(maxEntries = 5): Promise<RecoverInterruptedRecordingUploadsResult> {
+  const dir = queueDir();
+  const rawMetaFiles = fs.readdirSync(dir)
+    .filter((fileName) => fileName.endsWith('.raw.json'))
+    .sort()
+    .slice(0, Math.max(1, maxEntries));
+
+  let recoveredCount = 0;
+  let uploadedCount = 0;
+  let queuedCount = 0;
+  let failedCount = 0;
+
+  for (const fileName of rawMetaFiles) {
+    const entryId = fileName.replace(/\.raw\.json$/, '');
+    const paths = entryPaths(entryId);
+
+    try {
+      if (!fs.existsSync(paths.rawPath)) {
+        if (fs.existsSync(paths.rawMetaPath)) fs.unlinkSync(paths.rawMetaPath);
+        failedCount += 1;
+        continue;
+      }
+
+      const rawSize = fs.statSync(paths.rawPath).size;
+      if (rawSize <= 0) {
+        deleteEntry(entryId);
+        failedCount += 1;
+        continue;
+      }
+
+      const finalized = await finalizeRecordingUpload({
+        entryId,
+        endedAt: new Date().toISOString(),
+      });
+
+      recoveredCount += 1;
+      if (finalized.uploaded) {
+        uploadedCount += 1;
+      } else {
+        queuedCount += 1;
+      }
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return {
+    ok: true,
+    recoveredCount,
+    uploadedCount,
+    queuedCount,
+    failedCount,
+  };
 }
 
 export async function enqueueRecordingUpload(input: QueueRecordingUploadInput): Promise<{ ok: boolean; queued: boolean; uploaded: boolean; entryId: string; sha256Hash: string; totalBytes: number }> {

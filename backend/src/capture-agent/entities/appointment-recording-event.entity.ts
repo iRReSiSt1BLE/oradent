@@ -3,6 +3,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 @Entity('appointment_recording_events')
 @Index(['appointmentId', 'cabinetDeviceId'])
 @Index(['appointmentId', 'createdAt'])
+@Index(['eventId'], { unique: true })
 export class AppointmentRecordingEvent {
     @PrimaryGeneratedColumn('uuid')
     id: string;

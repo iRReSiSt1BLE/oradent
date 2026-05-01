@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Ip, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Param, Post, UseGuards } from '@nestjs/common';
 import { EnrollCaptureAgentDto } from './dto/enroll-capture-agent.dto';
 import { CaptureAgentService } from './capture-agent.service';
+import { CaptureAgentIceService } from './capture-agent-ice.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('capture-agent')
 export class CaptureAgentController {
-  constructor(private readonly captureAgentService: CaptureAgentService) {}
+  constructor(
+    private readonly captureAgentService: CaptureAgentService,
+    private readonly captureAgentIceService: CaptureAgentIceService,
+  ) {}
 
   @Get('ping')
   ping() {
@@ -13,6 +18,12 @@ export class CaptureAgentController {
       service: 'capture-agent',
       time: new Date().toISOString(),
     };
+  }
+
+  @Get('webrtc/ice-servers')
+  @UseGuards(JwtAuthGuard)
+  getWebRtcIceServers() {
+    return this.captureAgentIceService.getIceServers();
   }
 
   @Post('enroll')
